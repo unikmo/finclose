@@ -12,7 +12,7 @@ const SERVICES:Record<string,ServiceChoice>={
   'balance-books':{label:'Help me balance my books',stage:'opening_state'},
   payroll:{label:'Help me do payroll',stage:'payroll'},
   'do-bookkeeping':{label:'Do my bookkeeping',stage:'bookkeeping'},
-  'need-bookkeeping':{label:'I need bookkeeping',stage:'bookkeeping'}
+  'bookkeeping-payroll':{label:'Bookkeeping & Payroll',stage:'bookkeeping'}
 };
 
 export default function Lab(){
