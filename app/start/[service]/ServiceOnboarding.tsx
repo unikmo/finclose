@@ -28,6 +28,8 @@ type Profile = {
 };
 
 type Country = { code: string; name: string; currency: string };
+type Company = { company_id: string; legal_name: string; country_code?: string; country_name?: string; service_scope?: string; status?: string };
+type InitRecord = { initialization_id: string; legal_name: string; country_code: string; country_name: string; status: string; ready: boolean; blockers?: { message: string }[]; company_id?: string };
 
 type Deployment = {
   deployment_id: string;
@@ -35,19 +37,45 @@ type Deployment = {
   service_title: string;
   billing_scope: string;
   agents: string[];
-  full_company_initialization_required: boolean;
   country_code?: string | null;
-  configuration?: Record<string, string>;
+  company_id?: string | null;
+  company_name?: string | null;
+  initialization_status?: string | null;
+  history_status?: string | null;
+  history_count?: number;
   selected_connector?: string | null;
   connector_state?: string | null;
   status: string;
 };
 
-const AGENT_LABELS: Record<string, string> = {
-  orchestrator: 'FinClose Orchestrator',
-  reconciliation: 'Close & Reconciliation Agent',
-  bookkeeping: 'Bookkeeping Agent',
-  payroll: 'Payroll Agent'
+const HISTORY_GUIDANCE: Record<string, string[]> = {
+  'balance-books': [
+    'General ledger or accounting-system export',
+    'Trial balance and latest reconciliations',
+    'Bank statements or bank reconciliation files',
+    'Open receivables and payables',
+    'Missing-receipt or unresolved-item lists, if available'
+  ],
+  payroll: [
+    'Previous payroll registers and year-to-date totals',
+    'Employee/payroll master data from the former system',
+    'Tax, social-security or pension submissions',
+    'Outstanding payroll liabilities or adjustments'
+  ],
+  'do-bookkeeping': [
+    'Prior general ledger and trial balance',
+    'Bank statements and reconciliation files',
+    'Open receivables and payables',
+    'Sales and purchase journals or accounting exports',
+    'Chart of accounts and unresolved items'
+  ],
+  'bookkeeping-payroll': [
+    'Prior general ledger, trial balance and bank reconciliations',
+    'Open receivables and payables',
+    'Previous payroll registers and year-to-date totals',
+    'Employee/payroll master data and payroll liabilities',
+    'Any unresolved accounting or payroll items'
+  ]
 };
 
 function supports(countries: string[] | undefined, country: string) {
@@ -58,9 +86,7 @@ function supports(countries: string[] | undefined, country: string) {
 function connectorFits(profile: Profile, connector: Connector, country: string) {
   if (!country) return true;
   if (profile.connectorAccess === 'payroll') return supports(connector.payrollCountries, country);
-  if (profile.connectorAccess === 'accounting-and-payroll') {
-    return supports(connector.accountingCountries, country) && supports(connector.payrollCountries, country);
-  }
+  if (profile.connectorAccess === 'accounting-and-payroll') return supports(connector.accountingCountries, country) && supports(connector.payrollCountries, country);
   return supports(connector.accountingCountries, country);
 }
 
@@ -71,16 +97,25 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [country, setCountry] = useState('GE');
-  const [legalName, setLegalName] = useState('');
-  const [payFrequency, setPayFrequency] = useState('monthly');
   const [deployment, setDeployment] = useState<Deployment | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState('');
+  const [linkedCompanyStage, setLinkedCompanyStage] = useState('');
+  const [initFile, setInitFile] = useState<File | null>(null);
+  const [initRecord, setInitRecord] = useState<InitRecord | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [historyFiles, setHistoryFiles] = useState<File[]>([]);
+  const [historyResults, setHistoryResults] = useState<Array<{ filename: string; status: string; sha256: string }>>([]);
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
-  const [note, setNote] = useState('Enter the Lab access token, then register for this service.');
+  const [note, setNote] = useState('Start with registration and, where needed, company initialization.');
   const [busy, setBusy] = useState(false);
 
   const profile = useMemo(() => profiles.find(p => p.key === serviceKey) || null, [profiles, serviceKey]);
-  const effectiveCountry = String(deployment?.configuration?.country_code || deployment?.country_code || (profile?.countryRequiredAtRegistration ? country : '') || '').toUpperCase();
+  const companyInitializationRequired = serviceKey !== 'balance-books';
+  const initializationComplete = Boolean(deployment && (!companyInitializationRequired || deployment.company_id));
+  const historyComplete = Boolean(deployment && (deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY' || historyResults.length));
+  const effectiveCountry = String(deployment?.country_code || (profile?.countryRequiredAtRegistration ? country : '') || '').toUpperCase();
   const visibleConnectors = useMemo(() => profile ? profile.connectors.filter(c => connectorFits(profile, c, effectiveCountry)) : [], [profile, effectiveCountry]);
 
   useEffect(() => {
@@ -91,7 +126,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
     ]).then(([catalog, countryList]) => {
       setProfiles(catalog);
       setCountries(countryList);
-    }).catch(() => setNote('Could not load the FinClose service catalog.'));
+    }).catch(() => setNote('Could not load FinClose setup information.'));
   }, []);
 
   function saveToken(value: string) {
@@ -101,7 +136,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
 
   async function api(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers || {});
-    headers.set('x-finclose-lab-token', token);
+    if (token) headers.set('x-finclose-lab-token', token);
     const response = await fetch('/api' + path, { ...init, headers });
     const text = await response.text();
     let data: any;
@@ -119,6 +154,15 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
     });
   }
 
+  async function loadCompanies(expectedCountry?: string) {
+    const list: Company[] = await api('/companies');
+    const wanted = String(expectedCountry || country || '').toUpperCase();
+    const filtered = wanted ? list.filter(c => !c.country_code || String(c.country_code).toUpperCase() === wanted) : list;
+    setCompanies(filtered);
+    setSelectedCompanyId(filtered[0]?.company_id || '');
+    return filtered;
+  }
+
   async function register() {
     if (!profile) return;
     setBusy(true);
@@ -126,38 +170,112 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       const result = await api('/service-deployments/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          service: serviceKey,
-          name,
-          email,
-          country_code: profile.countryRequiredAtRegistration ? country : undefined
-        })
+        body: JSON.stringify({ service: serviceKey, name, email, country_code: profile.countryRequiredAtRegistration ? country : undefined })
       });
       setDeployment(result);
-      setNote(profile.configurationFields.length
-        ? 'Registered. Add only the essentials required for this service.'
-        : 'Registered. No company initialization is required — connect the accounting source next.');
+      if (companyInitializationRequired) {
+        const existing = await loadCompanies(result.country_code || country);
+        setNote(existing.length
+          ? 'Registration complete. Choose an already initialized FinClose company — MDA will appear here if it matches the selected country — or initialize another company.'
+          : 'Registration complete. No initialized company was found for this country; use the initialization form below.');
+      } else {
+        setNote('Registration complete. No company initialization is required for this service. Add prior records next so FinClose understands the books before connecting to the live system.');
+      }
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
   }
 
-  async function saveConfiguration() {
-    if (!deployment || !profile) return;
+  async function linkExistingCompany() {
+    if (!deployment || !selectedCompanyId) return;
     setBusy(true);
     try {
-      const payload: Record<string, string> = {};
-      if (profile.configurationFields.includes('legal_name')) payload.legal_name = legalName;
-      if (profile.configurationFields.includes('country_code')) payload.country_code = country;
-      if (profile.configurationFields.includes('pay_frequency')) payload.pay_frequency = payFrequency;
-      const result = await api(`/service-deployments/${deployment.deployment_id}/configuration`, {
+      const result = await api(`/service-deployments/${deployment.deployment_id}/company`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ company_id: selectedCompanyId })
       });
+      setDeployment(result.deployment);
+      setLinkedCompanyStage(String(result.company?.company_stage || '').toUpperCase());
+      setNote(`${result.company?.legal_name || 'Company'} is already initialized. Next, upload prior information so FinClose can understand the starting position.`);
+    } catch (error: any) {
+      setNote(`Error: ${error.message}`);
+    } finally { setBusy(false); }
+  }
+
+  async function requestTemplate() {
+    setBusy(true);
+    try {
+      const result = await api('/initialization/template/request', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ country })
+      });
+      setDownloadUrl(result.download_url);
+      setNote('Initialization form ready. Complete it, then upload it here. The service you selected remains the only deployed/billed service.');
+    } catch (error: any) {
+      setNote(`Error: ${error.message}`);
+    } finally { setBusy(false); }
+  }
+
+  async function validateAndInitialize() {
+    if (!deployment || !initFile) return;
+    setBusy(true);
+    try {
+      const validated = await api('/initialization/upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: initFile.name, content_base64: await base64(initFile) })
+      });
+      const record: InitRecord = validated.records[0];
+      setInitRecord(record);
+      if (!record.ready) {
+        setNote(`Initialization blocked: ${(record.blockers || []).map(b => b.message).join(' · ') || 'check the form'}`);
+        return;
+      }
+      const initialized = await api(`/initialization/${record.initialization_id}/initialize`, { method: 'POST' });
+      const linked = await api(`/service-deployments/${deployment.deployment_id}/company`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ company_id: initialized.company_id })
+      });
+      setDeployment(linked.deployment);
+      setLinkedCompanyStage(String(linked.company?.company_stage || '').toUpperCase());
+      setNote(`${linked.company?.legal_name || record.legal_name} initialized and linked. Next, provide prior information for context.`);
+    } catch (error: any) {
+      setNote(`Error: ${error.message}`);
+    } finally { setBusy(false); }
+  }
+
+  async function uploadHistory() {
+    if (!deployment || !historyFiles.length) return;
+    setBusy(true);
+    try {
+      const received: Array<{ filename: string; status: string; sha256: string }> = [];
+      for (const file of historyFiles) {
+        const result = await api(`/service-deployments/${deployment.deployment_id}/history`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, content_base64: await base64(file) })
+        });
+        received.push({ filename: result.filename, status: result.status, sha256: result.sha256 });
+      }
+      setHistoryResults(received);
+      const refreshed = await api(`/service-deployments/${deployment.deployment_id}`);
+      setDeployment(refreshed);
+      setNote(`${received.length} historical file${received.length === 1 ? '' : 's'} received. FinClose can now use this context before live-system access.`);
+    } catch (error: any) {
+      setNote(`Error: ${error.message}`);
+    } finally { setBusy(false); }
+  }
+
+  async function skipHistoryForNewCompany() {
+    if (!deployment) return;
+    setBusy(true);
+    try {
+      const result = await api(`/service-deployments/${deployment.deployment_id}/history/skip`, { method: 'POST' });
       setDeployment(result);
-      setSelectedConnector(null);
-      setNote('Service essentials saved. Nothing outside this deployment scope was requested.');
+      setNote('No prior history is required because the initialized company is marked NEW. Continue to the system connection.');
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
@@ -174,19 +292,15 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       });
       setDeployment(result.deployment);
       setSelectedConnector(result.connector);
-      if (connector.id === 'manual-upload') {
-        setNote('Secure file upload selected. Upload a source file and FinClose can prepare the selected agent deployment.');
-      } else if (result.connector.configured) {
-        setNote(`${connector.name} provider credentials are present. OAuth/API authorization still needs its secure token callback before live customer use.`);
-      } else {
-        setNote(`${connector.name} is in the connector layer but still needs provider/customer API credentials before live authorization.`);
-      }
+      if (connector.id === 'manual-upload') setNote('Secure file upload selected for current operational data. Historical context remains stored separately.');
+      else if (result.connector.configured) setNote(`${connector.name} is provider-configured; customer authorization still requires the secure OAuth/API callback flow.`);
+      else setNote(`${connector.name} is available in the connector layer but is not live-authorized yet.`);
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
   }
 
-  async function uploadSource() {
+  async function uploadCurrentSource() {
     if (!deployment || !sourceFile) return;
     setBusy(true);
     try {
@@ -195,117 +309,128 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ filename: sourceFile.name, content_base64: await base64(sourceFile) })
       });
-      setDeployment({ ...deployment, status: result.status === 'ALREADY_RECEIVED' ? deployment.status : 'READY_FOR_AGENT' });
-      setNote(`${result.status}: source received for ${profile?.title}. SHA ${String(result.sha256).slice(0, 12)}…`);
+      setNote(`${result.status}: current source received. SHA ${String(result.sha256).slice(0, 12)}…`);
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
   }
 
-  if (!profile) {
-    return <main className="service-start-shell"><div className="service-loading">Loading FinClose service…</div></main>;
-  }
-
-  const configurationRequired = profile.configurationFields.length > 0;
-  const configurationSaved = !configurationRequired || Boolean(deployment?.configuration && Object.keys(deployment.configuration).length);
+  if (!profile) return <main className="service-start-shell"><div className="service-loading">Loading FinClose service…</div></main>;
 
   return (
     <main className="service-start-shell">
       <header className="service-start-nav">
         <Link href="/" className="home-brand" aria-label="FinClose home">
           <span className="home-logo">F</span>
-          <span className="home-brand-copy"><strong>FinClose</strong><small>Deploy only what you need</small></span>
+          <span className="home-brand-copy"><strong>FinClose</strong><small>Start with the minimum required setup</small></span>
         </Link>
         <Link href="/" className="service-back">← Change service</Link>
       </header>
 
-      <section className="service-start-hero">
+      <section className="service-start-hero compact">
         <div className="service-start-copy">
           <span className="service-route-label">{profile.billingScope.replaceAll('_', ' ')}</span>
           <h1>{profile.title}</h1>
-          <p>{profile.description}</p>
-          <div className="deployment-facts">
-            <span>{profile.fullCompanyInitializationRequired ? 'Company initialization: required' : 'Company initialization: not required'}</span>
-            <span>Billing: this service only</span>
-            <span>Access: {profile.connectorAccess.replaceAll('-', ' ')}</span>
+          <p>{initializationComplete ? 'Setup is complete. FinClose now needs the prior information that explains where the books or payroll are starting from.' : companyInitializationRequired ? 'First register, then use an existing FinClose initialization or complete the initialization form. Nothing else is shown until this is done.' : 'This service needs registration only. No company initialization is required.'}</p>
+        </div>
+        <div className="phase-strip" aria-label="FinClose onboarding phases">
+          <span className={!initializationComplete ? 'current' : 'complete'}>1 · Registration / initialization</span>
+          <span className={initializationComplete && !historyComplete ? 'current' : historyComplete ? 'complete' : ''}>2 · Prior information</span>
+          <span className={historyComplete ? 'current' : ''}>3 · System connection</span>
+        </div>
+      </section>
+
+      {!initializationComplete && <section className="focus-panel">
+        <div className="focus-kicker">STEP 1</div>
+        <h2>Registration {companyInitializationRequired ? '& company initialization' : ''}</h2>
+        <p className="focus-lead">{companyInitializationRequired ? 'Register the service first. Then either link an already initialized company such as MDA, or use the existing FinClose initialization form.' : 'Register the person requesting the service. FinClose does not require a company initialization for a balance-books review.'}</p>
+
+        {!deployment ? <div className="setup-block">
+          <h3>Register</h3>
+          <label><span>Lab access token</span><input type="password" value={token} onChange={e => saveToken(e.target.value)} placeholder="FINCLOSE_LAB_TOKEN" /></label>
+          <div className="service-form-row">
+            <label><span>Your name</span><input value={name} onChange={e => setName(e.target.value)} /></label>
+            <label><span>Email</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} /></label>
+          </div>
+          {profile.countryRequiredAtRegistration && <label><span>Company country</span><select value={country} onChange={e => setCountry(e.target.value)}>{countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select></label>}
+          <button className="service-primary" onClick={register} disabled={busy}>Continue</button>
+        </div> : companyInitializationRequired ? <div className="initialization-choice-grid">
+          <div className="setup-block">
+            <span className="choice-label">Already initialized</span>
+            <h3>Use an existing FinClose company</h3>
+            <p>MDA was initialized earlier. If its country matches this registration, it will appear in this list.</p>
+            <button className="service-secondary" onClick={() => loadCompanies(deployment.country_code || country)} disabled={busy}>Refresh initialized companies</button>
+            {companies.length ? <>
+              <label><span>Initialized company</span><select value={selectedCompanyId} onChange={e => setSelectedCompanyId(e.target.value)}>{companies.map(c => <option key={c.company_id} value={c.company_id}>{c.legal_name} · {c.country_name || c.country_code}</option>)}</select></label>
+              <button className="service-primary" onClick={linkExistingCompany} disabled={busy || !selectedCompanyId}>Use this initialization</button>
+            </> : <div className="service-waiting">No matching initialized company loaded yet.</div>}
+          </div>
+
+          <div className="setup-block">
+            <span className="choice-label">New initialization</span>
+            <h3>Initialize another company</h3>
+            <p>Use the country initialization workbook we already created. Company initialization does not expand the service or billing scope you selected.</p>
+            <label><span>Country</span><select value={country} onChange={e => setCountry(e.target.value)}>{countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select></label>
+            <div className="inline-actions">
+              <button className="service-secondary" onClick={requestTemplate} disabled={busy}>Prepare initialization form</button>
+              {downloadUrl && <a className="service-download" href={downloadUrl}>Download XLSX</a>}
+            </div>
+            <label><span>Completed initialization form</span><input className="service-file" type="file" accept=".xlsx" onChange={e => setInitFile(e.target.files?.[0] || null)} /></label>
+            <button className="service-primary" onClick={validateAndInitialize} disabled={busy || !initFile}>Validate & initialize</button>
+            {initRecord && <div className={initRecord.ready ? 'service-complete' : 'service-waiting'}>{initRecord.ready ? `${initRecord.legal_name} validated` : (initRecord.blockers || []).map(b => b.message).join(' · ')}</div>}
+          </div>
+        </div> : null}
+      </section>}
+
+      {initializationComplete && !historyComplete && <section className="focus-panel">
+        <div className="completed-line"><span>✓</span> Step 1 complete{deployment?.company_name ? ` · ${deployment.company_name}` : ' · registration only'}</div>
+        <div className="focus-kicker">STEP 2</div>
+        <h2>Upload prior information</h2>
+        <p className="focus-lead">This is not another initialization. It gives FinClose the historical context needed to understand balances, patterns, open items and prior payroll/accounting decisions before touching the current system.</p>
+
+        <div className="history-layout">
+          <div className="history-guidance">
+            <h3>Useful history for this service</h3>
+            <ul>{(HISTORY_GUIDANCE[serviceKey] || []).map(item => <li key={item}>{item}</li>)}</ul>
+            <p>Upload what you have. Multiple files are allowed.</p>
+          </div>
+          <div className="setup-block history-upload">
+            <label><span>Prior files</span><input className="service-file" type="file" multiple accept=".xlsx,.xls,.csv,.pdf" onChange={e => setHistoryFiles(Array.from(e.target.files || []))} /></label>
+            {historyFiles.length > 0 && <div className="file-count">{historyFiles.length} file{historyFiles.length === 1 ? '' : 's'} selected</div>}
+            <button className="service-primary" onClick={uploadHistory} disabled={busy || !historyFiles.length}>Upload prior information</button>
+            {linkedCompanyStage === 'NEW' && <button className="text-action" onClick={skipHistoryForNewCompany} disabled={busy}>No prior information — this is a new company</button>}
           </div>
         </div>
-        <aside className="agent-deployment-card">
-          <div className="agent-title">Agent deployment</div>
-          {profile.agents.map(agent => <div key={agent} className="agent-row"><span className="agent-dot" />{AGENT_LABELS[agent] || agent}</div>)}
-          <div className="agent-boundary">No unrelated agent is activated.</div>
-        </aside>
-      </section>
+      </section>}
 
-      <section className="service-workflow">
-        <article className={`service-step ${deployment ? 'done' : 'active'}`}>
-          <div className="service-step-number">01</div>
-          <div className="service-step-body">
-            <h2>Register</h2>
-            <p>This creates the service deployment record. It is not a full company initialization.</p>
-            {!deployment ? <>
-              <label><span>Lab access token</span><input type="password" value={token} onChange={e => saveToken(e.target.value)} placeholder="FINCLOSE_LAB_TOKEN" /></label>
-              <div className="service-form-row">
-                <label><span>Your name</span><input value={name} onChange={e => setName(e.target.value)} /></label>
-                <label><span>Email</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} /></label>
-              </div>
-              {profile.countryRequiredAtRegistration && <label><span>Country</span><select value={country} onChange={e => setCountry(e.target.value)}>{countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select></label>}
-              <button className="service-primary" onClick={register} disabled={busy}>Register for this service</button>
-            </> : <div className="service-complete">Registered · deployment {deployment.deployment_id.slice(0, 8)}</div>}
-          </div>
-        </article>
+      {historyComplete && <section className="focus-panel">
+        <div className="completed-line"><span>✓</span> Registration / initialization complete</div>
+        <div className="completed-line"><span>✓</span> Prior information {deployment?.history_status === 'NOT_APPLICABLE_NEW_COMPANY' ? 'not applicable for new company' : 'received'}</div>
+        <div className="focus-kicker">STEP 3</div>
+        <h2>Connect the current system</h2>
+        <p className="focus-lead">Only now does FinClose ask for ongoing/current source access. The connector is restricted to the service selected on the homepage.</p>
 
-        {configurationRequired && <article className={`service-step ${configurationSaved ? 'done' : deployment ? 'active' : ''}`}>
-          <div className="service-step-number">02</div>
-          <div className="service-step-body">
-            <h2>Service essentials</h2>
-            <p>Only fields required by {profile.title} are requested.</p>
-            {deployment && !configurationSaved ? <>
-              {profile.configurationFields.includes('legal_name') && <label><span>Legal company name</span><input value={legalName} onChange={e => setLegalName(e.target.value)} /></label>}
-              {profile.configurationFields.includes('country_code') && <label><span>Country</span><select value={country} onChange={e => setCountry(e.target.value)}>{countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select></label>}
-              {profile.configurationFields.includes('pay_frequency') && <label><span>Pay frequency</span><select value={payFrequency} onChange={e => setPayFrequency(e.target.value)}><option value="monthly">Monthly</option><option value="semimonthly">Semi-monthly</option><option value="biweekly">Biweekly</option><option value="weekly">Weekly</option></select></label>}
-              <button className="service-primary" onClick={saveConfiguration} disabled={busy}>Save essentials</button>
-            </> : configurationSaved && deployment ? <div className="service-complete">Essentials complete</div> : <div className="service-waiting">Complete registration first.</div>}
-          </div>
-        </article>}
+        <div className="connector-grid refined">
+          {visibleConnectors.map(connector => (
+            <button key={connector.id} className={`connector-card ${selectedConnector?.id === connector.id ? 'selected' : ''}`} onClick={() => chooseConnector(connector)} disabled={busy}>
+              <span className="connector-name">{connector.name}</span>
+              <span className="connector-method">{connector.method}</span>
+              <span className={`connector-state ${connector.configured ? 'ready' : ''}`}>{connector.state.replaceAll('_', ' ')}</span>
+            </button>
+          ))}
+        </div>
+        {selectedConnector && <div className="connector-note">{selectedConnector.note}</div>}
 
-        <article className={`service-step ${selectedConnector ? 'done' : deployment && configurationSaved ? 'active' : ''}`}>
-          <div className="service-step-number">{configurationRequired ? '03' : '02'}</div>
-          <div className="service-step-body">
-            <h2>Connect your system</h2>
-            <p>The connector layer is shared across agents, but each service receives only the access it needs.{effectiveCountry ? ` Connectors shown below are valid for ${effectiveCountry}.` : ''}</p>
-            {deployment && configurationSaved ? <div className="connector-grid">
-              {visibleConnectors.map(connector => (
-                <button key={connector.id} className={`connector-card ${selectedConnector?.id === connector.id ? 'selected' : ''}`} onClick={() => chooseConnector(connector)} disabled={busy}>
-                  <span className="connector-name">{connector.name}</span>
-                  <span className="connector-method">{connector.method}</span>
-                  <span className={`connector-state ${connector.configured ? 'ready' : ''}`}>{connector.state.replaceAll('_', ' ')}</span>
-                </button>
-              ))}
-            </div> : <div className="service-waiting">Complete the earlier step first.</div>}
-            {deployment && configurationSaved && !visibleConnectors.length && <div className="service-waiting">No direct provider connector is enabled for this country/service combination yet. Use secure file upload when available.</div>}
-            {selectedConnector && <div className="connector-note">{selectedConnector.note}</div>}
-          </div>
-        </article>
-
-        <article className={`service-step ${deployment?.status === 'READY_FOR_AGENT' ? 'done' : selectedConnector ? 'active' : ''}`}>
-          <div className="service-step-number">{configurationRequired ? '04' : '03'}</div>
-          <div className="service-step-body">
-            <h2>Provide source access</h2>
-            {selectedConnector?.id === 'manual-upload' ? <>
-              <p>Upload a synthetic source file. This path works without creating a FinClose company first.</p>
-              <input className="service-file" type="file" onChange={e => setSourceFile(e.target.files?.[0] || null)} />
-              <button className="service-primary" onClick={uploadSource} disabled={busy || !sourceFile}>Send source to selected agent</button>
-            </> : selectedConnector ? <>
-              <p>FinClose has selected the {selectedConnector.name} adapter. Provider authorization is intentionally blocked until its credentials, callback and secure token-vault controls are complete.</p>
-              <div className="service-waiting">Connector state: {deployment?.connector_state?.replaceAll('_', ' ')}</div>
-            </> : <div className="service-waiting">Choose a connector first.</div>}
-          </div>
-        </article>
-      </section>
+        {selectedConnector?.id === 'manual-upload' && <div className="setup-block current-source">
+          <h3>Current operating source</h3>
+          <p>This is separate from the historical files above.</p>
+          <input className="service-file" type="file" onChange={e => setSourceFile(e.target.files?.[0] || null)} />
+          <button className="service-primary" onClick={uploadCurrentSource} disabled={busy || !sourceFile}>Send current source</button>
+        </div>}
+      </section>}
 
       <div className="service-status-note">{note}</div>
-      <footer className="home-footer"><span>Service-specific deployment</span><span>Least-privilege connector access</span><span>No bundled features</span></footer>
+      <footer className="home-footer"><span>Setup first</span><span>History second</span><span>Current system third</span></footer>
     </main>
   );
 }
