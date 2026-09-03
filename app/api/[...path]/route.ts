@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { COUNTRIES, assertLabToken, buildTemplate, getCountry, initializeCompany, listCompanies, saveDataChunk, saveInitialization, statusFor } from '@/lib/finclose-backend';
+import { COUNTRIES, assertLabToken, buildTemplate, getCountry, initializeCompany, listCompanies, saveDataChunk, saveInitialization, statusFor } from '../../../lib/finclose-backend';
 
 function segments(params: { path?: string[] }) { return params.path || []; }
 
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       const country = getCountry(p[2]);
       if (!country) return NextResponse.json({ detail: 'unsupported country' }, { status: 404 });
       const buffer = buildTemplate(country);
-      return new NextResponse(buffer, { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="FinCloseAgent_Initialization_${country.code}.xlsx"` } });
+      return new NextResponse(new Uint8Array(buffer), { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="FinCloseAgent_Initialization_${country.code}.xlsx"` } });
     }
     if (p.length === 1 && p[0] === 'companies') { assertLabToken(req); return NextResponse.json(await listCompanies()); }
     return NextResponse.json({ detail: 'not found' }, { status: 404 });
