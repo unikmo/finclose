@@ -4,6 +4,9 @@ import { getServiceDeployment, publicServiceCatalog, saveServiceConfiguration, s
 import { linkDeploymentCompany, saveHistoricalContext, skipHistoricalContext } from '../../../lib/onboarding-history';
 
 function segments(params: { path?: string[] }) { return params.path || []; }
+function historyReady(deployment: Record<string, any>) {
+  return deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY';
+}
 
 export async function GET(req: NextRequest, { params }: { params: { path?: string[] } }) {
   try {
@@ -81,12 +84,13 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     }
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'connector') {
       const deployment = await getServiceDeployment(p[1]) as Record<string, any>;
-      const historyReady = deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY';
-      if (!historyReady) return NextResponse.json({ detail: 'complete historical-context step before selecting a current-system connector' }, { status: 409 });
+      if (!historyReady(deployment)) return NextResponse.json({ detail: 'complete historical-context step before selecting a current-system connector' }, { status: 409 });
       const body = await req.json();
       return NextResponse.json(await selectServiceConnector(p[1], String(body.connector || '')));
     }
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'source') {
+      const deployment = await getServiceDeployment(p[1]) as Record<string, any>;
+      if (!historyReady(deployment)) return NextResponse.json({ detail: 'complete historical-context step before sending current source data' }, { status: 409 });
       const body = await req.json();
       if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
       return NextResponse.json(await saveServiceSource(p[1], String(body.filename), Buffer.from(String(body.content_base64), 'base64')));
