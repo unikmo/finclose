@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { COUNTRIES, assertLabToken, buildTemplate, getCountry, initializeCompany, listCompanies, realtimeDatabase, saveDataChunk, saveInitialization, statusFor, storageBucket } from '../../../lib/finclose-backend';
+import { getServiceDeployment, publicServiceCatalog, saveServiceConfiguration, saveServiceSource, selectServiceConnector, startServiceDeployment } from '../../../lib/service-deployments';
 
 function segments(params: { path?: string[] }) { return params.path || []; }
 
@@ -9,7 +10,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 1 && p[0] === 'health') {
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.24.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
+      if (!deep || !configured) return NextResponse.json({ version: '0.25.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
       const reachable = { database: false, storage: false };
       const errors: string[] = [];
       try {
@@ -20,7 +21,12 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
         await storageBucket().getMetadata();
         reachable.storage = true;
       } catch (e) { errors.push(`storage: ${(e as Error).message}`); }
-      return NextResponse.json({ version: '0.24.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, ok: reachable.database && reachable.storage, errors });
+      return NextResponse.json({ version: '0.25.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, ok: reachable.database && reachable.storage, errors });
+    }
+    if (p.join('/') === 'service-deployments/catalog') return NextResponse.json(publicServiceCatalog());
+    if (p.length === 2 && p[0] === 'service-deployments') {
+      assertLabToken(req);
+      return NextResponse.json(await getServiceDeployment(p[1]));
     }
     if (p.join('/') === 'initialization/countries') return NextResponse.json(COUNTRIES.map(({code,name,currency})=>({code,name,currency})));
     if (p.length === 3 && p[0] === 'initialization' && p[1] === 'template') {
@@ -43,7 +49,32 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
       if (!country) return NextResponse.json({ detail: 'unsupported country' }, { status: 400 });
       return NextResponse.json({ download_url: `/api/initialization/template/${country.code}`, note: `Template ready for ${country.name}. Email delivery is not enabled in this Lab build.` });
     }
+
     assertLabToken(req);
+
+    if (p.join('/') === 'service-deployments/start') {
+      const body = await req.json();
+      return NextResponse.json(await startServiceDeployment({
+        service: String(body.service || ''),
+        name: String(body.name || ''),
+        email: String(body.email || ''),
+        country_code: body.country_code ? String(body.country_code) : undefined
+      }));
+    }
+    if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'configuration') {
+      const body = await req.json();
+      return NextResponse.json(await saveServiceConfiguration(p[1], body));
+    }
+    if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'connector') {
+      const body = await req.json();
+      return NextResponse.json(await selectServiceConnector(p[1], String(body.connector || '')));
+    }
+    if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'source') {
+      const body = await req.json();
+      if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
+      return NextResponse.json(await saveServiceSource(p[1], String(body.filename), Buffer.from(String(body.content_base64), 'base64')));
+    }
+
     if (p.join('/') === 'initialization/upload') {
       const body = await req.json();
       if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
