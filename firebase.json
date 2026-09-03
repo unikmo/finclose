@@ -1,13 +1,8 @@
 {
-  "$schema": "https://raw.githubusercontent.com/firebase/firebase-tools/master/schema/firebase-config.json",
-  "hosting": {
-    "public": "out",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "cleanUrls": true,
-    "trailingSlash": false
+  "firestore": {
+    "rules": "firestore.rules"
   },
-  "emulators": {
-    "hosting": {"port": 5000},
-    "ui": {"enabled": true}
+  "storage": {
+    "rules": "storage.rules"
   }
 }
