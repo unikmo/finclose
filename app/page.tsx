@@ -37,16 +37,27 @@ export default function Home() {
       <header className="home-nav">
         <Link href="/" className="home-brand" aria-label="FinClose home">
           <span className="home-logo">F</span>
-          <span>FinClose</span>
+          <span className="home-brand-copy">
+            <strong>FinClose</strong>
+            <small>Bookkeeping · Payroll · Close</small>
+          </span>
         </Link>
         <Link href="/lab" className="home-lab-link">Open test lab</Link>
       </header>
 
       <section className="help-hero">
         <div className="help-intro">
-          <span className="help-kicker">FINANCIAL OPERATIONS</span>
-          <h1>How Can We Help?</h1>
-          <p>Choose what you need help with. FinClose will take you straight to the right workflow.</p>
+          <h1>
+            How Can We
+            <span>Help?</span>
+          </h1>
+          <p>Choose the help you need. FinClose takes you straight to the right workflow.</p>
+          <div className="help-trust-row" aria-label="FinClose capabilities">
+            <span>Bookkeeping</span>
+            <span>Payroll</span>
+            <span>Monthly close</span>
+            <span>Year-end close</span>
+          </div>
         </div>
 
         <div className="help-grid" aria-label="FinClose services">
@@ -67,10 +78,9 @@ export default function Home() {
       </section>
 
       <footer className="home-footer">
-        <span>Bookkeeping</span>
-        <span>Payroll</span>
-        <span>Monthly close</span>
-        <span>Year-end close</span>
+        <span>Clear workflows</span>
+        <span>Country-aware setup</span>
+        <span>Persistent company data</span>
       </footer>
     </main>
   );
