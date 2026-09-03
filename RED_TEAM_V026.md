@@ -24,6 +24,9 @@ A service deployment can link to an existing `finclose_companies` record. This a
 ### PASS — history separated from current source
 Historical files use a dedicated `finclose_service_history` record and `historical-context` Storage path. Current operational source continues through the connector/source path.
 
+### PASS — workflow order is backend-enforced
+The API rejects connector selection until historical context is `RECEIVED` or explicitly `NOT_APPLICABLE_NEW_COMPANY`. The step order is therefore not only a visual UI convention.
+
 ### PASS — country mismatch protection
 Linking an initialized company fails if its country conflicts with the service registration country.
 
