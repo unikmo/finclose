@@ -23,6 +23,8 @@ type Connector = {
   name: string;
   method: 'oauth2' | 'partner-api' | 'api-key' | 'file';
   capabilities: Array<'accounting-read' | 'accounting-write' | 'payroll-read' | 'payroll-write'>;
+  accountingCountries?: string[];
+  payrollCountries?: string[];
   note: string;
 };
 
@@ -48,7 +50,7 @@ export const SERVICE_PROFILES: Record<ServiceKey, ServiceProfile> = {
     countryRequiredAtRegistration: true,
     configurationFields: ['legal_name', 'country_code', 'pay_frequency'],
     connectorAccess: 'payroll',
-    allowedConnectors: ['xero', 'quickbooks-online', 'datev', 'smartaccounts', 'manual-upload'],
+    allowedConnectors: ['xero', 'datev', 'smartaccounts', 'manual-upload'],
     billingScope: 'PAYROLL_ONLY'
   },
   'do-bookkeeping': {
@@ -72,7 +74,7 @@ export const SERVICE_PROFILES: Record<ServiceKey, ServiceProfile> = {
     countryRequiredAtRegistration: true,
     configurationFields: ['legal_name', 'country_code', 'pay_frequency'],
     connectorAccess: 'accounting-and-payroll',
-    allowedConnectors: ['xero', 'quickbooks-online', 'datev', 'smartaccounts', 'manual-upload'],
+    allowedConnectors: ['xero', 'datev', 'smartaccounts', 'manual-upload'],
     billingScope: 'BOOKKEEPING_AND_PAYROLL'
   }
 };
@@ -83,34 +85,44 @@ export const CONNECTORS: Record<ConnectorKey, Connector> = {
     name: 'Xero',
     method: 'oauth2',
     capabilities: ['accounting-read', 'accounting-write', 'payroll-read', 'payroll-write'],
-    note: 'OAuth 2.0 connector. Live authorization is enabled only after FinClose provider credentials and exact scopes are configured.'
+    accountingCountries: ['*'],
+    payrollCountries: ['GB'],
+    note: 'OAuth 2.0 accounting connector. Payroll access is only offered where the selected Xero payroll API and country are supported; FinClose currently routes payroll through Xero only for the UK profile.'
   },
   'quickbooks-online': {
     id: 'quickbooks-online',
     name: 'QuickBooks Online',
     method: 'oauth2',
     capabilities: ['accounting-read', 'accounting-write'],
-    note: 'OAuth 2.0 connector. Live authorization is enabled only after FinClose provider credentials are configured.'
+    accountingCountries: ['*'],
+    payrollCountries: [],
+    note: 'OAuth 2.0 accounting connector. FinClose does not advertise this adapter as a payroll connector.'
   },
   datev: {
     id: 'datev',
     name: 'DATEV',
     method: 'partner-api',
     capabilities: ['accounting-read', 'accounting-write', 'payroll-read', 'payroll-write'],
-    note: 'DATEV connector slot. Live access requires a registered DATEV app and the relevant API product permissions.'
+    accountingCountries: ['DE'],
+    payrollCountries: ['DE'],
+    note: 'Germany-specific DATEV connector slot. Live access requires a registered DATEV app and the relevant Rechnungswesen or payroll API product permissions.'
   },
   smartaccounts: {
     id: 'smartaccounts',
     name: 'SmartAccounts',
     method: 'api-key',
-    capabilities: ['accounting-read', 'accounting-write'],
-    note: 'SmartAccounts connector slot. The customer enables its API service and supplies company-specific API credentials through a secure secret flow.'
+    capabilities: ['accounting-read', 'accounting-write', 'payroll-read'],
+    accountingCountries: ['EE'],
+    payrollCountries: ['EE'],
+    note: 'Estonia-specific SmartAccounts API connector slot. Customer API credentials must be handled through a secure secret flow before live use.'
   },
   'manual-upload': {
     id: 'manual-upload',
     name: 'Secure file upload',
     method: 'file',
     capabilities: ['accounting-read', 'payroll-read'],
+    accountingCountries: ['*'],
+    payrollCountries: ['*'],
     note: 'Available now for synthetic Lab testing. Upload accounting or payroll source files without initializing a full company.'
   }
 };
@@ -130,6 +142,20 @@ function connectorState(id: ConnectorKey) {
     return { state: configured ? 'PROVIDER_CONFIGURED' : 'PARTNER_APP_REQUIRED', configured };
   }
   return { state: 'CUSTOMER_API_CREDENTIALS_REQUIRED', configured: false };
+}
+
+function supportsCountry(countries: string[] | undefined, country: string) {
+  if (!countries || !country) return true;
+  return countries.includes('*') || countries.includes(country);
+}
+
+function connectorSupportsProfile(profile: ServiceProfile, connector: Connector, country: string) {
+  if (!country) return true;
+  if (profile.connectorAccess === 'payroll') return supportsCountry(connector.payrollCountries, country);
+  if (profile.connectorAccess === 'accounting-and-payroll') {
+    return supportsCountry(connector.accountingCountries, country) && supportsCountry(connector.payrollCountries, country);
+  }
+  return supportsCountry(connector.accountingCountries, country);
 }
 
 export function publicServiceCatalog() {
@@ -265,6 +291,12 @@ export async function selectServiceConnector(id: string, connectorId: string) {
     (error as Error & { status?: number }).status = 400;
     throw error;
   }
+  const country = String(deployment.configuration?.country_code || deployment.country_code || '').toUpperCase();
+  if (!connectorSupportsProfile(profile, connector, country)) {
+    const error = new Error(`${connector.name} is not enabled for ${profile.title} in ${country}`);
+    (error as Error & { status?: number }).status = 409;
+    throw error;
+  }
   const state = connectorState(connector.id);
   const needsConfiguration = profile.configurationFields.length > 0 && !deployment.configuration?.country_code;
   const status = needsConfiguration
@@ -282,7 +314,7 @@ export async function selectServiceConnector(id: string, connectorId: string) {
     [`finclose_service_deployments/${id}/connector_state`]: state.state,
     [`finclose_service_deployments/${id}/status`]: status,
     [`finclose_service_deployments/${id}/updated_at`]: now,
-    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_CONNECTOR_SELECTED', deployment_id: id, service: profile.key, connector: connector.id, connector_state: state.state, created_at: now }
+    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_CONNECTOR_SELECTED', deployment_id: id, service: profile.key, connector: connector.id, connector_state: state.state, country_code: country || null, created_at: now }
   });
   return { deployment: await getServiceDeployment(id), connector: { ...connector, ...state } };
 }
