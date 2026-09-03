@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { COUNTRIES, assertLabToken, buildTemplate, getCountry, initializeCompany, listCompanies, saveDataChunk, saveInitialization, statusFor } from '@/lib/finclose-backend';
+
+function segments(params: { path?: string[] }) { return params.path || []; }
+
+export async function GET(req: NextRequest, { params }: { params: { path?: string[] } }) {
+  try {
+    const p = segments(params);
+    if (p.length === 1 && p[0] === 'health') {
+      const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
+      return NextResponse.json({ version: '0.23.0', hosting: 'vercel', database: 'firebase-firestore', storage: 'firebase-storage', configured });
+    }
+    if (p.join('/') === 'initialization/countries') return NextResponse.json(COUNTRIES.map(({code,name,currency})=>({code,name,currency})));
+    if (p.length === 3 && p[0] === 'initialization' && p[1] === 'template') {
+      const country = getCountry(p[2]);
+      if (!country) return NextResponse.json({ detail: 'unsupported country' }, { status: 404 });
+      const buffer = buildTemplate(country);
+      return new NextResponse(buffer, { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="FinCloseAgent_Initialization_${country.code}.xlsx"` } });
+    }
+    if (p.length === 1 && p[0] === 'companies') { assertLabToken(req); return NextResponse.json(await listCompanies()); }
+    return NextResponse.json({ detail: 'not found' }, { status: 404 });
+  } catch (e) { return NextResponse.json({ detail: (e as Error).message }, { status: statusFor(e) }); }
+}
+
+export async function POST(req: NextRequest, { params }: { params: { path?: string[] } }) {
+  try {
+    const p = segments(params);
+    if (p.join('/') === 'initialization/template/request') {
+      const body = await req.json();
+      const country = getCountry(String(body.country || ''));
+      if (!country) return NextResponse.json({ detail: 'unsupported country' }, { status: 400 });
+      return NextResponse.json({ download_url: `/api/initialization/template/${country.code}`, note: `Template ready for ${country.name}. Email delivery is not enabled in this Lab build.` });
+    }
+    assertLabToken(req);
+    if (p.join('/') === 'initialization/upload') {
+      const body = await req.json();
+      if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
+      const record = await saveInitialization(String(body.filename), Buffer.from(String(body.content_base64), 'base64'));
+      return NextResponse.json({ records: [record] });
+    }
+    if (p.length === 3 && p[0] === 'initialization' && p[2] === 'initialize') return NextResponse.json(await initializeCompany(p[1]));
+    if (p.join('/') === 'initialization/initialize-ready') {
+      const body = await req.json();
+      const ids: string[] = Array.isArray(body.initialization_ids) ? body.initialization_ids : [];
+      const initialized = []; const blocked = [];
+      for (const id of ids) {
+        try { initialized.push(await initializeCompany(String(id))); }
+        catch (e) { blocked.push({ initialization_id: id, detail: (e as Error).message }); }
+      }
+      return NextResponse.json({ initialized, blocked });
+    }
+    if (p.length === 3 && p[0] === 'companies' && p[2] === 'data-chunks') {
+      const body = await req.json();
+      if (!body.stage || !body.filename || !body.content_base64) return NextResponse.json({ detail: 'stage, filename and content_base64 are required' }, { status: 400 });
+      return NextResponse.json(await saveDataChunk(p[1], String(body.stage), String(body.filename), Buffer.from(String(body.content_base64), 'base64')));
+    }
+    return NextResponse.json({ detail: 'not found' }, { status: 404 });
+  } catch (e) { return NextResponse.json({ detail: (e as Error).message }, { status: statusFor(e) }); }
+}
