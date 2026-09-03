@@ -226,7 +226,8 @@ export async function saveServiceConfiguration(id: string, input: Record<string,
   const configuration: Record<string, string> = {};
 
   for (const field of profile.configurationFields) {
-    const value = String(input[field] || deployment.country_code || '').trim();
+    const raw = input[field] ?? (field === 'country_code' ? deployment.country_code : '');
+    const value = String(raw || '').trim();
     if (!value) {
       const error = new Error(`${field} is required for ${profile.title}`);
       (error as Error & { status?: number }).status = 400;
