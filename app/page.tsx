@@ -39,7 +39,7 @@ export default function Home() {
           <span className="home-logo">F</span>
           <span>FinClose</span>
         </Link>
-        <Link href="/lab" className="home-lab-link">Open FinClose</Link>
+        <Link href="/lab" className="home-lab-link">Open test lab</Link>
       </header>
 
       <section className="help-hero">
