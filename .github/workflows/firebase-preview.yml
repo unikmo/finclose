@@ -1,0 +1,32 @@
+name: FinClose Firebase Preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy_preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build FinClose static app
+        run: npm run build
+      - name: Verify Firebase output
+        run: test -f out/index.html
+      - name: Deploy FinClose to Firebase preview channel
+        id: firebase_preview
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_THEANTIBALCONY }}
+          projectId: theantibalcony
+          channelId: finclose-lab
+          expires: 7d
+      - name: Show preview URL
+        run: echo "${{ steps.firebase_preview.outputs.urls }}"
