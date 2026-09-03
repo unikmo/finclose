@@ -80,6 +80,9 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
       return NextResponse.json(await skipHistoricalContext(p[1]));
     }
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'connector') {
+      const deployment = await getServiceDeployment(p[1]) as Record<string, any>;
+      const historyReady = deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY';
+      if (!historyReady) return NextResponse.json({ detail: 'complete historical-context step before selecting a current-system connector' }, { status: 409 });
       const body = await req.json();
       return NextResponse.json(await selectServiceConnector(p[1], String(body.connector || '')));
     }
