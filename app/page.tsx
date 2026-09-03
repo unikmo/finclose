@@ -24,10 +24,10 @@ const choices = [
   },
   {
     number: '04',
-    title: 'I need bookkeeping',
-    description: 'Start a bookkeeping setup for a new or existing company.',
-    href: '/lab?service=need-bookkeeping',
-    tag: 'Bookkeeping setup'
+    title: 'Bookkeeping & Payroll',
+    description: 'Run bookkeeping and payroll together in one FinClose workflow.',
+    href: '/lab?service=bookkeeping-payroll',
+    tag: 'Combined service'
   }
 ];
 
