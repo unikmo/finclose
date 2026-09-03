@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { COUNTRIES, assertLabToken, buildTemplate, firestore, getCountry, initializeCompany, listCompanies, saveDataChunk, saveInitialization, statusFor, storageBucket } from '../../../lib/finclose-backend';
+import { COUNTRIES, assertLabToken, buildTemplate, getCountry, initializeCompany, listCompanies, realtimeDatabase, saveDataChunk, saveInitialization, statusFor, storageBucket } from '../../../lib/finclose-backend';
 
 function segments(params: { path?: string[] }) { return params.path || []; }
 
@@ -9,18 +9,18 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 1 && p[0] === 'health') {
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.23.1', hosting: 'vercel', database: 'firebase-firestore', storage: 'firebase-storage', configured });
-      const result = { firestore: false, storage: false };
+      if (!deep || !configured) return NextResponse.json({ version: '0.24.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
+      const reachable = { database: false, storage: false };
       const errors: string[] = [];
       try {
-        await firestore().collection('finclose_health').limit(1).get();
-        result.firestore = true;
-      } catch (e) { errors.push(`firestore: ${(e as Error).message}`); }
+        await realtimeDatabase().ref('finclose_health').limitToFirst(1).once('value');
+        reachable.database = true;
+      } catch (e) { errors.push(`database: ${(e as Error).message}`); }
       try {
         await storageBucket().getMetadata();
-        result.storage = true;
+        reachable.storage = true;
       } catch (e) { errors.push(`storage: ${(e as Error).message}`); }
-      return NextResponse.json({ version: '0.23.1', hosting: 'vercel', database: 'firebase-firestore', storage: 'firebase-storage', configured, reachable: result, ok: result.firestore && result.storage, errors });
+      return NextResponse.json({ version: '0.24.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, ok: reachable.database && reachable.storage, errors });
     }
     if (p.join('/') === 'initialization/countries') return NextResponse.json(COUNTRIES.map(({code,name,currency})=>({code,name,currency})));
     if (p.length === 3 && p[0] === 'initialization' && p[1] === 'template') {
