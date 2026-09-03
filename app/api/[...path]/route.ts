@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { COUNTRIES, assertLabToken, buildTemplate, getCountry, initializeCompany, listCompanies, realtimeDatabase, saveDataChunk, saveInitialization, statusFor, storageBucket } from '../../../lib/finclose-backend';
 import { getServiceDeployment, publicServiceCatalog, saveServiceConfiguration, saveServiceSource, selectServiceConnector, startServiceDeployment } from '../../../lib/service-deployments';
+import { linkDeploymentCompany, saveHistoricalContext, skipHistoricalContext } from '../../../lib/onboarding-history';
 
 function segments(params: { path?: string[] }) { return params.path || []; }
+function historyReady(deployment: Record<string, any>) {
+  return deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY';
+}
 
 export async function GET(req: NextRequest, { params }: { params: { path?: string[] } }) {
   try {
@@ -10,7 +14,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 1 && p[0] === 'health') {
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.25.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
+      if (!deep || !configured) return NextResponse.json({ version: '0.26.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
       const reachable = { database: false, storage: false };
       const errors: string[] = [];
       try {
@@ -21,7 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
         await storageBucket().getMetadata();
         reachable.storage = true;
       } catch (e) { errors.push(`storage: ${(e as Error).message}`); }
-      return NextResponse.json({ version: '0.25.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, ok: reachable.database && reachable.storage, errors });
+      return NextResponse.json({ version: '0.26.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, ok: reachable.database && reachable.storage, errors });
     }
     if (p.join('/') === 'service-deployments/catalog') return NextResponse.json(publicServiceCatalog());
     if (p.length === 2 && p[0] === 'service-deployments') {
@@ -65,11 +69,28 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
       const body = await req.json();
       return NextResponse.json(await saveServiceConfiguration(p[1], body));
     }
+    if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'company') {
+      const body = await req.json();
+      if (!body.company_id) return NextResponse.json({ detail: 'company_id is required' }, { status: 400 });
+      return NextResponse.json(await linkDeploymentCompany(p[1], String(body.company_id)));
+    }
+    if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'history') {
+      const body = await req.json();
+      if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
+      return NextResponse.json(await saveHistoricalContext(p[1], String(body.filename), Buffer.from(String(body.content_base64), 'base64')));
+    }
+    if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'history' && p[3] === 'skip') {
+      return NextResponse.json(await skipHistoricalContext(p[1]));
+    }
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'connector') {
+      const deployment = await getServiceDeployment(p[1]) as Record<string, any>;
+      if (!historyReady(deployment)) return NextResponse.json({ detail: 'complete historical-context step before selecting a current-system connector' }, { status: 409 });
       const body = await req.json();
       return NextResponse.json(await selectServiceConnector(p[1], String(body.connector || '')));
     }
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'source') {
+      const deployment = await getServiceDeployment(p[1]) as Record<string, any>;
+      if (!historyReady(deployment)) return NextResponse.json({ detail: 'complete historical-context step before sending current source data' }, { status: 409 });
       const body = await req.json();
       if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
       return NextResponse.json(await saveServiceSource(p[1], String(body.filename), Buffer.from(String(body.content_base64), 'base64')));
