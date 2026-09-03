@@ -10,6 +10,8 @@ type Connector = {
   note: string;
   state: string;
   configured: boolean;
+  accountingCountries?: string[];
+  payrollCountries?: string[];
 };
 
 type Profile = {
@@ -48,6 +50,20 @@ const AGENT_LABELS: Record<string, string> = {
   payroll: 'Payroll Agent'
 };
 
+function supports(countries: string[] | undefined, country: string) {
+  if (!countries || !country) return true;
+  return countries.includes('*') || countries.includes(country);
+}
+
+function connectorFits(profile: Profile, connector: Connector, country: string) {
+  if (!country) return true;
+  if (profile.connectorAccess === 'payroll') return supports(connector.payrollCountries, country);
+  if (profile.connectorAccess === 'accounting-and-payroll') {
+    return supports(connector.accountingCountries, country) && supports(connector.payrollCountries, country);
+  }
+  return supports(connector.accountingCountries, country);
+}
+
 export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }) {
   const [token, setToken] = useState('');
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -64,6 +80,8 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   const [busy, setBusy] = useState(false);
 
   const profile = useMemo(() => profiles.find(p => p.key === serviceKey) || null, [profiles, serviceKey]);
+  const effectiveCountry = String(deployment?.configuration?.country_code || deployment?.country_code || (profile?.countryRequiredAtRegistration ? country : '') || '').toUpperCase();
+  const visibleConnectors = useMemo(() => profile ? profile.connectors.filter(c => connectorFits(profile, c, effectiveCountry)) : [], [profile, effectiveCountry]);
 
   useEffect(() => {
     setToken(sessionStorage.getItem('fincloseLabToken') || '');
@@ -138,6 +156,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         body: JSON.stringify(payload)
       });
       setDeployment(result);
+      setSelectedConnector(null);
       setNote('Service essentials saved. Nothing outside this deployment scope was requested.');
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
@@ -254,9 +273,9 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
           <div className="service-step-number">{configurationRequired ? '03' : '02'}</div>
           <div className="service-step-body">
             <h2>Connect your system</h2>
-            <p>The connector layer is shared across agents, but each service receives only the access it needs.</p>
+            <p>The connector layer is shared across agents, but each service receives only the access it needs.{effectiveCountry ? ` Connectors shown below are valid for ${effectiveCountry}.` : ''}</p>
             {deployment && configurationSaved ? <div className="connector-grid">
-              {profile.connectors.map(connector => (
+              {visibleConnectors.map(connector => (
                 <button key={connector.id} className={`connector-card ${selectedConnector?.id === connector.id ? 'selected' : ''}`} onClick={() => chooseConnector(connector)} disabled={busy}>
                   <span className="connector-name">{connector.name}</span>
                   <span className="connector-method">{connector.method}</span>
@@ -264,6 +283,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
                 </button>
               ))}
             </div> : <div className="service-waiting">Complete the earlier step first.</div>}
+            {deployment && configurationSaved && !visibleConnectors.length && <div className="service-waiting">No direct provider connector is enabled for this country/service combination yet. Use secure file upload when available.</div>}
             {selectedConnector && <div className="connector-note">{selectedConnector.note}</div>}
           </div>
         </article>
