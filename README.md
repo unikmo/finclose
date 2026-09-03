@@ -1,29 +1,43 @@
 # FinClose
 
-FinClose is the **canonical GitHub repository** for the FinClose financial-operations product and Lab test client.
+Canonical repository for the FinClose financial-operations product and Lab.
 
-## Current architecture
+## Canonical architecture — v0.23 test branch
 
-- **Web/test deployment:** Firebase Hosting (project `theantibalcony`, preview channel `finclose-lab`)
-- **Persistence/API:** Supabase project currently used for FinClose Lab
-- **Frontend:** Next.js static export
-- **Current client version:** v0.22.0
+- **Source:** `unikmo/finclose`
+- **Hosting/runtime:** Vercel
+- **Database:** Firebase Cloud Firestore for Lab persistence
+- **File storage:** Firebase Cloud Storage
+- **Firebase project:** `theantibalcony`
+- **Frontend/API:** Next.js
+- **Supabase:** not used by v0.23
 
-## Safety boundary
+## Security boundary
 
-Use synthetic/test financial data until user authentication and authorization are implemented and verified end-to-end.
+The browser never talks directly to Firestore or Storage. Vercel server routes use Firebase Admin credentials. Repository rules deny all direct client reads/writes. Lab API operations require `FINCLOSE_LAB_TOKEN`.
 
-## Migration status
+Use synthetic/test financial data only until user authentication, tenant authorization, production database architecture and full security QA are complete.
 
-The active v0.22 Firebase client and its CI/deployment configuration have moved here from the temporary FinClose branches inside `unikmo/Unikmo`.
+## Required Vercel environment variables
 
-Legacy v0.20 runtime payloads remain in the old repository pending a separate integrity-checked migration. The currently running Supabase Edge Function backend is live, but its source has not yet been copied here because the connected Supabase account does not currently permit reading Edge Function source.
+- `FIREBASE_SERVICE_ACCOUNT_JSON`
+- `FIREBASE_STORAGE_BUCKET`
+- `FINCLOSE_LAB_TOKEN`
 
-## Build
+Do not expose Firebase Admin credentials with `NEXT_PUBLIC_` variables.
 
-```bash
-npm install
-npm run build
-```
+## Test acceptance path
 
-The static Firebase Hosting artifact is generated in `out/`.
+1. Vercel `/api/health` reports configured.
+2. Enter the Lab token in the UI.
+3. Request/download a Georgia initialization template or upload the existing synthetic MDA template.
+4. Validate and initialize MDA.
+5. Reload the site and confirm MDA still exists.
+6. Upload a bookkeeping XLSX under MDA.
+7. Confirm Georgia/GEL context is retained.
+8. Upload the same file again and confirm `ALREADY_RECEIVED`.
+9. Confirm an unknown company ID returns 404.
+
+## Production database gate
+
+Firestore is being used for the current deployment test because it is native to Firebase and quick to validate with Vercel. It is **not yet approved as the final ledger database**. Before real accounting journals/ledger logic are introduced, FinClose must run a relational-storage decision gate. Firebase SQL Connect / PostgreSQL remains the preferred production candidate for ledger-grade relational data.
