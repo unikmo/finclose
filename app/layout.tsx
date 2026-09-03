@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'FinClose Lab',
-  description: 'Synthetic-data financial operations test environment.'
+  title: 'FinClose — Bookkeeping, Payroll & Close Support',
+  description: 'Choose the financial operations help you need: bookkeeping, payroll, account reconciliation, monthly close or year-end close.'
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
