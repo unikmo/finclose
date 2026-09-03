@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import * as XLSX from 'xlsx';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { getDatabase } from 'firebase-admin/database';
 import { getStorage } from 'firebase-admin/storage';
 import { NextRequest } from 'next/server';
 
@@ -22,6 +22,8 @@ export const COUNTRIES: Country[] = [
   { code: 'CM', name: 'Cameroon', currency: 'XAF', timezone: 'Africa/Douala', countryRequirements: [['niu','NIU','YES','Taxpayer identifier'],['cnps_employer_number','CNPS employer number','CONDITIONAL','Required when payroll enabled']] }
 ];
 
+const DEFAULT_DATABASE_URL = 'https://theantibalcony-default-rtdb.europe-west1.firebasedatabase.app/';
+
 export function getCountry(code: string) {
   return COUNTRIES.find(c => c.code === code.toUpperCase());
 }
@@ -39,11 +41,12 @@ export function firebaseApp() {
   const account = serviceAccount();
   return initializeApp({
     credential: cert({ projectId: account.project_id, clientEmail: account.client_email, privateKey: account.private_key }),
+    databaseURL: process.env.FIREBASE_DATABASE_URL || DEFAULT_DATABASE_URL,
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET || undefined
   });
 }
 
-export function firestore() { return getFirestore(firebaseApp()); }
+export function realtimeDatabase() { return getDatabase(firebaseApp()); }
 export function storageBucket() {
   if (!process.env.FIREBASE_STORAGE_BUCKET) throw new Error('FIREBASE_STORAGE_BUCKET is not configured');
   return getStorage(firebaseApp()).bucket(process.env.FIREBASE_STORAGE_BUCKET);
@@ -157,43 +160,73 @@ function plainInit(data: Record<string, unknown>): InitRecord {
 }
 
 export async function saveInitialization(filename: string, buffer: Buffer) {
-  const parsed = parseInitialization(buffer); const id = crypto.randomUUID(); const ready = parsed.blockers.length === 0;
-  const record = { initialization_id:id, filename, legal_name:parsed.company.legal_name||'', country_code:parsed.country?.code||parsed.company.template_country||'', country_name:parsed.country?.name||'', base_currency:parsed.company.base_currency||parsed.country?.currency||'', timezone:parsed.company.timezone||parsed.country?.timezone||'', service_scope:parsed.company.service_scope||'', company_stage:parsed.company.company_stage||'', cutover_date:parsed.company.cutover_date||'', source_as_of_date:parsed.company.source_as_of_date||'', registration_number:parsed.company.registration_number||'', finance_admin_email:parsed.company.finance_admin_email||'', status:ready?'READY':'BLOCKED', ready, blockers:parsed.blockers, warnings:parsed.warnings, created_at:FieldValue.serverTimestamp() };
-  await firestore().collection('finclose_initializations').doc(id).set(record);
-  await firestore().collection('finclose_audit_events').add({ event:'INITIALIZATION_VALIDATED', initialization_id:id, status:record.status, created_at:FieldValue.serverTimestamp() });
+  const parsed = parseInitialization(buffer);
+  const id = crypto.randomUUID();
+  const ready = parsed.blockers.length === 0;
+  const now = Date.now();
+  const record = { initialization_id:id, filename, legal_name:parsed.company.legal_name||'', country_code:parsed.country?.code||parsed.company.template_country||'', country_name:parsed.country?.name||'', base_currency:parsed.company.base_currency||parsed.country?.currency||'', timezone:parsed.company.timezone||parsed.country?.timezone||'', service_scope:parsed.company.service_scope||'', company_stage:parsed.company.company_stage||'', cutover_date:parsed.company.cutover_date||'', source_as_of_date:parsed.company.source_as_of_date||'', registration_number:parsed.company.registration_number||'', finance_admin_email:parsed.company.finance_admin_email||'', status:ready?'READY':'BLOCKED', ready, blockers:parsed.blockers, warnings:parsed.warnings, created_at:now };
+  const db = realtimeDatabase();
+  const auditKey = db.ref('finclose_audit_events').push().key!;
+  await db.ref().update({
+    [`finclose_initializations/${id}`]: record,
+    [`finclose_audit_events/${auditKey}`]: { event:'INITIALIZATION_VALIDATED', initialization_id:id, status:record.status, created_at:now }
+  });
   return plainInit(record);
 }
 
 export async function initializeCompany(initializationId: string) {
-  const db = firestore(); const ref = db.collection('finclose_initializations').doc(initializationId);
-  return db.runTransaction(async tx => {
-    const snap = await tx.get(ref);
-    if (!snap.exists) { const e=new Error('initialization not found'); (e as any).status=404; throw e; }
-    const init=snap.data()!;
-    if (!init.ready) { const e=new Error('initialization has blockers'); (e as any).status=409; throw e; }
-    if (init.company_id) return plainInit(init);
-    const companyId=crypto.randomUUID(); const companyRef=db.collection('finclose_companies').doc(companyId);
-    tx.set(companyRef,{ company_id:companyId, legal_name:init.legal_name, country_code:init.country_code, country_name:init.country_name, base_currency:init.base_currency, timezone:init.timezone, service_scope:init.service_scope, company_stage:init.company_stage, cutover_date:init.cutover_date, source_as_of_date:init.source_as_of_date, registration_number:init.registration_number, status:'INITIALIZED', initialization_id:initializationId, created_at:FieldValue.serverTimestamp() });
-    tx.update(ref,{ company_id:companyId, status:'INITIALIZED', initialized_at:FieldValue.serverTimestamp() });
-    tx.set(db.collection('finclose_audit_events').doc(),{ event:'COMPANY_INITIALIZED', initialization_id:initializationId, company_id:companyId, created_at:FieldValue.serverTimestamp() });
-    return plainInit({ ...init, company_id:companyId, status:'INITIALIZED' });
+  const db = realtimeDatabase();
+  const snap = await db.ref(`finclose_initializations/${initializationId}`).once('value');
+  if (!snap.exists()) { const e=new Error('initialization not found'); (e as Error & {status?:number}).status=404; throw e; }
+  const init = snap.val() as Record<string, unknown>;
+  if (!init.ready) { const e=new Error('initialization has blockers'); (e as Error & {status?:number}).status=409; throw e; }
+  if (init.company_id) return plainInit(init);
+
+  const companyId = initializationId;
+  const now = Date.now();
+  const company = { company_id:companyId, legal_name:init.legal_name, country_code:init.country_code, country_name:init.country_name, base_currency:init.base_currency, timezone:init.timezone, service_scope:init.service_scope, company_stage:init.company_stage, cutover_date:init.cutover_date, source_as_of_date:init.source_as_of_date, registration_number:init.registration_number, status:'INITIALIZED', initialization_id:initializationId, created_at:now };
+  const auditKey = db.ref('finclose_audit_events').push().key!;
+  await db.ref().update({
+    [`finclose_companies/${companyId}`]: company,
+    [`finclose_initializations/${initializationId}/company_id`]: companyId,
+    [`finclose_initializations/${initializationId}/status`]: 'INITIALIZED',
+    [`finclose_initializations/${initializationId}/initialized_at`]: now,
+    [`finclose_audit_events/${auditKey}`]: { event:'COMPANY_INITIALIZED', initialization_id:initializationId, company_id:companyId, created_at:now }
   });
+  return plainInit({ ...init, company_id:companyId, status:'INITIALIZED' });
 }
 
 export async function listCompanies() {
-  const snap=await firestore().collection('finclose_companies').orderBy('created_at','desc').limit(100).get();
-  return snap.docs.map(doc=>{const d=doc.data();return {company_id:d.company_id,legal_name:d.legal_name,country_code:d.country_code,country_name:d.country_name,base_currency:d.base_currency,service_scope:d.service_scope,status:d.status};});
+  const snap = await realtimeDatabase().ref('finclose_companies').once('value');
+  const values = (snap.val() || {}) as Record<string, Record<string, unknown>>;
+  return Object.values(values)
+    .sort((a,b)=>Number(b.created_at||0)-Number(a.created_at||0))
+    .slice(0,100)
+    .map(d=>({company_id:d.company_id,legal_name:d.legal_name,country_code:d.country_code,country_name:d.country_name,base_currency:d.base_currency,service_scope:d.service_scope,status:d.status}));
 }
+
 function safeFilename(name:string){return name.replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,180)||'upload.bin';}
 function contentType(name:string){if(/\.xlsx$/i.test(name))return'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';if(/\.csv$/i.test(name))return'text/csv';if(/\.pdf$/i.test(name))return'application/pdf';return'application/octet-stream';}
 
 export async function saveDataChunk(companyId:string,stage:string,filename:string,buffer:Buffer){
-  const db=firestore(); const companySnap=await db.collection('finclose_companies').doc(companyId).get();
-  if(!companySnap.exists){const e=new Error('company not found');(e as any).status=404;throw e;} const company=companySnap.data()!;
-  const sha256=crypto.createHash('sha256').update(buffer).digest('hex'); const importId=`${companyId}__${sha256}`; const importRef=db.collection('finclose_data_imports').doc(importId); const existing=await importRef.get();
-  if(existing.exists)return{...existing.data(),status:'ALREADY_RECEIVED'};
-  const path=`finclose/${companyId}/${stage}/${crypto.randomUUID()}/${safeFilename(filename)}`;
+  const db = realtimeDatabase();
+  const companySnap = await db.ref(`finclose_companies/${companyId}`).once('value');
+  if(!companySnap.exists()){const e=new Error('company not found');(e as Error & {status?:number}).status=404;throw e;}
+  const company = companySnap.val() as Record<string, unknown>;
+  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+  const importId = `${companyId}__${sha256}`;
+  const importRef = db.ref(`finclose_data_imports/${importId}`);
+  const existing = await importRef.once('value');
+  if(existing.exists()) return {...existing.val(),status:'ALREADY_RECEIVED'};
+
+  const path = `finclose/${companyId}/${stage}/${crypto.randomUUID()}/${safeFilename(filename)}`;
   await storageBucket().file(path).save(buffer,{resumable:false,metadata:{contentType:contentType(filename),metadata:{companyId,stage,sha256}}});
-  const record={import_id:importId,company_id:companyId,country_code:company.country_code,country_name:company.country_name,base_currency:company.base_currency,stage,filename,bytes:buffer.length,sha256,storage_path:path,metadata:workbookMetadata(buffer,filename),status:'RECEIVED',created_at:FieldValue.serverTimestamp()};
-  await importRef.set(record); await db.collection('finclose_audit_events').add({event:'DATA_CHUNK_RECEIVED',company_id:companyId,import_id:importId,stage,sha256,created_at:FieldValue.serverTimestamp()}); return record;
+  const now = Date.now();
+  const record = {import_id:importId,company_id:companyId,country_code:company.country_code,country_name:company.country_name,base_currency:company.base_currency,stage,filename,bytes:buffer.length,sha256,storage_path:path,metadata:workbookMetadata(buffer,filename),status:'RECEIVED',created_at:now};
+  const auditKey = db.ref('finclose_audit_events').push().key!;
+  await db.ref().update({
+    [`finclose_data_imports/${importId}`]: record,
+    [`finclose_audit_events/${auditKey}`]: {event:'DATA_CHUNK_RECEIVED',company_id:companyId,import_id:importId,stage,sha256,created_at:now}
+  });
+  return record;
 }
