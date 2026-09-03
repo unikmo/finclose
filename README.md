@@ -2,7 +2,7 @@
 
 Canonical repository for the FinClose financial-operations product and Lab.
 
-## Canonical architecture — v0.25 test build
+## Canonical architecture — v0.26 test build
 
 - **Source:** `unikmo/finclose`
 - **Hosting/runtime:** Vercel
@@ -13,32 +13,48 @@ Canonical repository for the FinClose financial-operations product and Lab.
 
 ## Product deployment rule
 
-FinClose does not initialize or bill a customer for capabilities the customer did not choose.
+FinClose deploys and bills only the service selected on the homepage. Company initialization is company/master-data setup; it does not automatically activate or bill unrelated agents.
 
-| Customer choice | Agents activated | Minimum onboarding |
-|---|---|---|
-| Help me balance my books | Orchestrator + Close & Reconciliation | Registration + accounting source connection. No full company initialization. |
-| Help me do payroll | Orchestrator + Payroll | Registration + payroll/company essentials + relevant connector. |
-| Do my bookkeeping | Orchestrator + Bookkeeping | Registration + bookkeeping/company essentials + accounting connector. |
-| Bookkeeping & Payroll | Orchestrator + Bookkeeping + Payroll | Registration + combined essentials + relevant connectors; full company initialization only where required. |
+## Onboarding order
 
-Homepage cards route to `/start/<service>` instead of the generic Lab workflow.
+Every customer-facing service route now follows a progressive sequence:
+
+1. **Registration / initialization first** — no connector grid or later workflow is shown yet.
+2. **Prior information second** — upload former accounting/payroll records so FinClose understands the starting position.
+3. **Current system connection third** — only after setup/history does FinClose offer the service-appropriate connector.
+
+### Service-specific first step
+
+| Customer choice | Registration / initialization |
+|---|---|
+| Help me balance my books | Registration only. No company initialization. |
+| Help me do payroll | Registration + link an existing initialized company or complete a FinClose initialization form. |
+| Do my bookkeeping | Registration + link an existing initialized company or complete a FinClose initialization form. |
+| Bookkeeping & Payroll | Registration + link an existing initialized company or complete a FinClose initialization form. |
+
+An existing initialized company can be reused for a new service deployment. It must not be initialized again. The previously initialized MDA company therefore remains reusable in the Lab.
+
+## Historical context
+
+Historical uploads are stored separately from current/operational source files under the service deployment. Examples include general ledgers, trial balances, bank reconciliations/statements, open AR/AP, payroll registers, YTD payroll and unresolved-item lists.
+
+- Balance-books requires historical context.
+- A company initialized as `NEW` may explicitly mark history as not applicable.
+- Historical files use SHA-256 duplicate detection.
 
 ## Connector layer
 
-The connector layer is shared by the specialist agents and enforces the service deployment boundary.
+The connector layer remains shared by the specialist agents and is only shown after registration/initialization and historical context are complete.
 
 Current connector catalog:
 
 - Xero — OAuth 2.0 adapter slot
-- QuickBooks Online — OAuth 2.0 adapter slot
-- DATEV — partner/API adapter slot
-- SmartAccounts — company API-key adapter slot
+- QuickBooks Online — OAuth 2.0 accounting adapter slot
+- DATEV — Germany partner/API adapter slot
+- SmartAccounts — Estonia API-key adapter slot
 - Secure file upload — functional synthetic-Lab connector
 
 External provider authorization is **not yet production-enabled**. Provider credentials, secure OAuth callback/token-vault handling, tenant authorization and provider-specific QA remain mandatory before real customer data may flow through Xero, QuickBooks, DATEV or SmartAccounts.
-
-The secure file-upload connector is functional in the synthetic Lab and can attach source files directly to a service deployment without first creating a full FinClose company.
 
 ## Security boundary
 
@@ -54,15 +70,16 @@ Use synthetic/test financial data only until user authentication, tenant authori
 
 Optional connector provider variables are documented in `.env.example`.
 
-## v0.25 service-deployment acceptance path
+## v0.26 acceptance path
 
 1. `/api/health?deep=1` reports Realtime Database and Storage reachable.
-2. `/api/service-deployments/catalog` exposes four service profiles and connector availability.
-3. Start `balance-books` with registration only; no company record or company initialization is required.
-4. Select `manual-upload` and upload a synthetic accounting source file.
-5. Confirm the service deployment reaches `READY_FOR_AGENT` and the source is stored in Firebase Storage.
-6. Upload the same source again and confirm `ALREADY_RECEIVED`.
-7. Start payroll/bookkeeping/combined deployments and confirm each requests only its declared service essentials.
+2. Open a homepage service route and confirm only registration/initialization is exposed initially.
+3. For balance-books, register and confirm no company initialization is requested.
+4. For payroll/bookkeeping/combined, register and link an existing initialized company or initialize a new one with the existing country workbook.
+5. Confirm historical upload is the next visible stage and accepts multiple synthetic files.
+6. Confirm an existing-company deployment cannot skip history; a `NEW` initialized company can.
+7. Confirm connectors appear only after historical context is received or marked not applicable for a new company.
+8. Confirm historical files and current source files use separate Firebase Storage paths.
 
 ## Production database gate
 
