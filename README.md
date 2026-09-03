@@ -1,6 +1,6 @@
 # FinClose
 
-FinClose is the canonical repository for the FinClose financial-operations product and Lab test client.
+FinClose is the **canonical GitHub repository** for the FinClose financial-operations product and Lab test client.
 
 ## Current architecture
 
@@ -15,7 +15,9 @@ Use synthetic/test financial data until user authentication and authorization ar
 
 ## Migration status
 
-This repository supersedes the temporary FinClose code that was previously carried inside `unikmo/Unikmo` on FinClose-specific branches. The active v0.22 Firebase client and its CI/deployment configuration are being migrated here first. Legacy v0.20 runtime payloads remain in the old repository until separately verified and migrated.
+The active v0.22 Firebase client and its CI/deployment configuration have moved here from the temporary FinClose branches inside `unikmo/Unikmo`.
+
+Legacy v0.20 runtime payloads remain in the old repository pending a separate integrity-checked migration. The currently running Supabase Edge Function backend is live, but its source has not yet been copied here because the connected Supabase account does not currently permit reading Edge Function source.
 
 ## Build
 
