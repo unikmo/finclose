@@ -9,6 +9,22 @@ function historyReady(deployment: Record<string, any>) {
   return deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY';
 }
 
+function forbidden(message = 'this service session belongs to another account') {
+  const error = new Error(message);
+  (error as Error & { status?: number }).status = 403;
+  return error;
+}
+
+async function authorizedDeployment(req: NextRequest, id: string) {
+  const auth = assertCustomerOrLab(req);
+  const deployment = await getServiceDeployment(id) as Record<string, any>;
+  if (auth.kind === 'customer') {
+    const ownerEmail = String(deployment.registrant?.email || '').trim().toLowerCase();
+    if (!ownerEmail || ownerEmail !== auth.user.email.trim().toLowerCase()) throw forbidden();
+  }
+  return { auth, deployment };
+}
+
 export async function GET(req: NextRequest, { params }: { params: { path?: string[] } }) {
   try {
     const p = segments(params);
@@ -39,8 +55,8 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.join('/') === 'initialization/countries') return NextResponse.json(COUNTRIES.map(({ code, name, currency }) => ({ code, name, currency })));
 
     if (p.length === 2 && p[0] === 'service-deployments') {
-      assertCustomerOrLab(req);
-      return NextResponse.json(await getServiceDeployment(p[1]));
+      const { deployment } = await authorizedDeployment(req, p[1]);
+      return NextResponse.json(deployment);
     }
 
     if (p.length === 3 && p[0] === 'initialization' && p[1] === 'template') {
@@ -100,6 +116,8 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
         country_code: body.country_code ? String(body.country_code) : undefined
       }));
     }
+
+    if (p.length >= 2 && p[0] === 'service-deployments') await authorizedDeployment(req, p[1]);
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'configuration') {
       return NextResponse.json(await saveServiceConfiguration(p[1], await req.json()));
