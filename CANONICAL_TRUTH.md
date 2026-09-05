@@ -1,6 +1,6 @@
 # FinClose Canonical Truth Registry
 
-Version: 8
+Version: 9
 Effective date: 2026-09-05
 
 | Field | Canonical value | Authority | Status | Supersedes |
@@ -8,7 +8,7 @@ Effective date: 2026-09-05
 | Product | FinClose / FinClose Lab | User decision | ACTIVE | — |
 | Canonical repository | `unikmo/finclose` | Verified GitHub repository | ACTIVE | FinClose branches inside `unikmo/Unikmo` |
 | Hosting/runtime | Vercel | User decision | ACTIVE | Firebase Hosting candidate |
-| Main homepage | `How Can We Help?` service-selection layer | User decision | ACTIVE | Technical Lab as homepage |
+| Main homepage | `How Can We Help?` service-selection layer; no technical Lab entry is exposed to customers | User decision + UX correction | ACTIVE | Homepage `Open test lab` link |
 | Homepage choices | Help me balance my books; Help me do payroll; Do my bookkeeping; Bookkeeping & Payroll | User wording | ACTIVE | Previous #4 `I need bookkeeping` |
 | Deployment principle | Deploy and bill only the agent capabilities required by the selected service | User decision | ACTIVE | Generic full-company onboarding for every customer |
 | Core internal agents | Orchestrator; Close & Reconciliation; Bookkeeping; Payroll | User/product architecture | ACTIVE | Ad hoc task-specific agents |
@@ -29,7 +29,7 @@ Effective date: 2026-09-05
 | Connector catalog | Xero; QuickBooks Online; DATEV; SmartAccounts; secure file upload | Implementation + official provider evidence | ACTIVE | — |
 | Live external connector status | Provider slots implemented; external OAuth/API authorization not production-enabled until provider credentials, callback/token-vault controls and QA are complete | Security gate | ACTIVE | — |
 | Secure file upload connector | Functional for synthetic Lab service-deployment tests | Verified implementation target | ACTIVE | Company-only file upload path |
-| Legacy technical workflow | `/lab` retained for initialization/testing only | Implementation | ACTIVE | `/` |
+| Legacy technical workflow | `/lab` is retained as a direct/internal initialization/testing route but is not linked from the customer homepage | Implementation + UX boundary | ACTIVE | Public homepage Lab entry |
 | Test database | Firebase Realtime Database | User-provided active Firebase database + implementation | ACTIVE | Firebase Cloud Firestore test candidate |
 | Realtime Database URL | `https://theantibalcony-default-rtdb.europe-west1.firebasedatabase.app/` | User-provided Firebase endpoint | ACTIVE | — |
 | File storage | Firebase Cloud Storage | User decision + verified connectivity | ACTIVE | Supabase Storage |
