@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import './service-start.css';
+import './account-first.css';
 
 export const metadata: Metadata = {
   title: 'FinClose — Bookkeeping, Payroll & Close Support',
