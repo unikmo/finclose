@@ -42,7 +42,6 @@ export default function Home() {
             <small>Bookkeeping · Payroll · Close</small>
           </span>
         </Link>
-        <Link href="/lab" className="home-lab-link">Open test lab</Link>
       </header>
 
       <section className="help-hero">
