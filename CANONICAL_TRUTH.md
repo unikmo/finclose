@@ -1,7 +1,7 @@
 # FinClose Canonical Truth Registry
 
-Version: 7
-Effective date: 2026-09-03
+Version: 8
+Effective date: 2026-09-05
 
 | Field | Canonical value | Authority | Status | Supersedes |
 |---|---|---|---|---|
@@ -12,13 +12,17 @@ Effective date: 2026-09-03
 | Homepage choices | Help me balance my books; Help me do payroll; Do my bookkeeping; Bookkeeping & Payroll | User wording | ACTIVE | Previous #4 `I need bookkeeping` |
 | Deployment principle | Deploy and bill only the agent capabilities required by the selected service | User decision | ACTIVE | Generic full-company onboarding for every customer |
 | Core internal agents | Orchestrator; Close & Reconciliation; Bookkeeping; Payroll | User/product architecture | ACTIVE | Ad hoc task-specific agents |
-| Service onboarding order | 1) registration / required company initialization; 2) upload prior information for context; 3) connect the current accounting/payroll system | User decision | ACTIVE | Showing connectors and agent details before setup/history |
-| First-view rule | After a homepage service choice, show only registration / initialization content until that stage is complete | User decision | ACTIVE | Multi-step workflow exposed all at once |
+| Customer entry rule | After choosing a service, the first customer action is `Sign in` or `Create account`; technical Lab credentials must never be requested in the customer flow | User decision | ACTIVE | Customer-facing Lab token field |
+| Customer onboarding order | 1) sign in / register; 2) ingest or link company if the selected service requires it; 3) upload prior information for context; 4) connect the current accounting/payroll system | User decision | ACTIVE | Registration/company setup combined as the first visible step |
+| First-view rule | A service route initially exposes only account access. Company setup, historical upload and connectors remain hidden until their preceding gate is complete | User decision | ACTIVE | Registration / initialization shown before account access |
+| Lab access token | `FINCLOSE_LAB_TOKEN` is an internal server/test secret only. It remains available for `/lab` and backend test access but is not part of customer onboarding | User decision + implementation | ACTIVE | Customer enters Lab token |
+| Lab account authentication | v0.27 uses a temporary server-side Lab account bridge: scrypt-hashed password records in Firebase RTDB plus signed HTTP-only session cookie. This is for synthetic Lab testing only and is not the production identity architecture | Implementation + security gate | ACTIVE | Customer-facing shared Lab token |
+| Production authentication | Proper managed customer authentication/tenant authorization remains required before real customer use; Firebase Auth is the preferred current candidate but is not yet verified/configured for FinClose | Security architecture gate | OPEN | — |
 | Existing initialized companies | An already initialized FinClose company can be linked to a new service deployment instead of initialized again; MDA remains an existing initialized company from prior Lab work | User decision + existing Lab state | ACTIVE | Re-initializing every service deployment |
-| Balance-books onboarding | Registration only; no company initialization; historical accounting information follows before current-system connection | User decision | ACTIVE | Registration + immediate connector |
-| Payroll onboarding | Registration + initialized company; prior payroll information follows; then relevant current-system connector | User decision | ACTIVE | Reduced essentials + immediate connector |
-| Bookkeeping onboarding | Registration + initialized company; prior bookkeeping information follows; then relevant current-system connector | User decision | ACTIVE | Reduced essentials + immediate connector |
-| Bookkeeping + Payroll onboarding | Registration + initialized company; prior bookkeeping/payroll information follows; then relevant current-system connectors | User decision | ACTIVE | Generic all-at-once onboarding |
+| Balance-books onboarding | Account → historical accounting information → current-system connection; no company initialization required | User decision | ACTIVE | Registration only before history |
+| Payroll onboarding | Account → initialized company → prior payroll information → relevant current-system connector | User decision | ACTIVE | Registration + initialized company |
+| Bookkeeping onboarding | Account → initialized company → prior bookkeeping information → accounting connector | User decision | ACTIVE | Registration + initialized company |
+| Bookkeeping + Payroll onboarding | Account → initialized company → prior bookkeeping/payroll information → relevant current-system connectors | User decision | ACTIVE | Registration + initialized company |
 | Historical-context storage | Historical files are stored separately from current/operational source data under the service deployment and are used to understand the starting position | User decision + implementation | ACTIVE | Treating all uploads as current source data |
 | Historical-context skip | Only a company initialized as `NEW` may skip prior-history upload; balance-books cannot skip historical context | Product safeguard | ACTIVE | Unrestricted skip |
 | Connector architecture | Shared connector layer with service-specific least-privilege access | Product architecture | ACTIVE | Connectors embedded separately in each agent |
