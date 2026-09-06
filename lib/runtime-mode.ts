@@ -5,10 +5,10 @@ export type RuntimeReadiness = {
   real_data_mode: boolean;
   firebase_auth_server_ready: boolean;
   firebase_auth_client_ready: boolean;
-  postgres_ledger_ready: boolean;
+  firestore_ledger_configured: boolean;
   storage_ready: boolean;
   tenant_isolation_required: boolean;
-  real_data_allowed: boolean;
+  real_data_allowed_by_config: boolean;
   blockers: string[];
 };
 
@@ -52,14 +52,14 @@ export function runtimeReadiness(): RuntimeReadiness {
   const firebaseAuthServerReady = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
   const client = firebaseClientConfig();
   const firebaseAuthClientReady = Boolean(client.apiKey && client.authDomain && client.projectId);
-  const postgresLedgerReady = Boolean(process.env.FINCLOSE_DATABASE_URL);
+  const firestoreLedgerConfigured = firebaseAuthServerReady;
   const storageReady = Boolean(process.env.FIREBASE_STORAGE_BUCKET);
   const blockers: string[] = [];
 
   if (realDataMode) {
     if (!firebaseAuthServerReady) blockers.push('FIREBASE_AUTH_SERVER_NOT_CONFIGURED');
     if (!firebaseAuthClientReady) blockers.push('FIREBASE_AUTH_CLIENT_NOT_CONFIGURED');
-    if (!postgresLedgerReady) blockers.push('POSTGRES_LEDGER_NOT_CONFIGURED');
+    if (!firestoreLedgerConfigured) blockers.push('FIRESTORE_LEDGER_NOT_CONFIGURED');
     if (!storageReady) blockers.push('FIREBASE_STORAGE_NOT_CONFIGURED');
   }
 
@@ -68,10 +68,10 @@ export function runtimeReadiness(): RuntimeReadiness {
     real_data_mode: realDataMode,
     firebase_auth_server_ready: firebaseAuthServerReady,
     firebase_auth_client_ready: firebaseAuthClientReady,
-    postgres_ledger_ready: postgresLedgerReady,
+    firestore_ledger_configured: firestoreLedgerConfigured,
     storage_ready: storageReady,
     tenant_isolation_required: realDataMode,
-    real_data_allowed: realDataMode && blockers.length === 0,
+    real_data_allowed_by_config: realDataMode && blockers.length === 0,
     blockers
   };
 }
@@ -79,7 +79,7 @@ export function runtimeReadiness(): RuntimeReadiness {
 export function assertRealDataRuntimeReady() {
   const readiness = runtimeReadiness();
   if (!readiness.real_data_mode) return readiness;
-  if (!readiness.real_data_allowed) {
+  if (!readiness.real_data_allowed_by_config) {
     const error = new Error(`real-data runtime is blocked: ${readiness.blockers.join(', ')}`);
     (error as Error & { status?: number }).status = 503;
     throw error;
@@ -92,10 +92,10 @@ export function publicRuntimeProfile() {
   return {
     mode: readiness.mode,
     real_data_mode: readiness.real_data_mode,
-    real_data_allowed: readiness.real_data_allowed,
+    real_data_allowed_by_config: readiness.real_data_allowed_by_config,
     blockers: readiness.blockers,
     auth_mode: readiness.real_data_mode ? 'FIREBASE_AUTH_SESSION' : 'LAB_ACCOUNT_SESSION',
     firebase_client_config: readiness.firebase_auth_client_ready ? firebaseClientConfig() : null,
-    ledger: readiness.postgres_ledger_ready ? 'POSTGRES_CONFIGURED' : 'POSTGRES_REQUIRED'
+    ledger: readiness.firestore_ledger_configured ? 'FIREBASE_FIRESTORE_CONFIGURED' : 'FIREBASE_FIRESTORE_REQUIRED'
   };
 }
