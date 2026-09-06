@@ -75,6 +75,7 @@ export default function PayrollOnboarding() {
   const [password, setPassword] = useState('');
 
   const [country, setCountry] = useState('GE');
+  const [payFrequency, setPayFrequency] = useState('monthly');
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState('');
@@ -223,6 +224,18 @@ export default function PayrollOnboarding() {
     }
   }
 
+  async function savePayrollConfiguration(deploymentId: string, legalName: string, countryCode: string) {
+    return api(`/service-deployments/${deploymentId}/configuration`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        legal_name: legalName,
+        country_code: countryCode,
+        pay_frequency: payFrequency
+      })
+    });
+  }
+
   async function linkExistingCompany() {
     if (!deployment || !selectedCompanyId) return;
     setBusy(true);
@@ -233,7 +246,12 @@ export default function PayrollOnboarding() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ company_id: selectedCompanyId })
       });
-      setDeployment(result.deployment);
+      await savePayrollConfiguration(
+        deployment.deployment_id,
+        String(result.company?.legal_name || ''),
+        String(result.company?.country_code || effectiveCountry)
+      );
+      setDeployment(await api(`/service-deployments/${deployment.deployment_id}`));
       setLinkedCompanyStage(String(result.company?.company_stage || '').toUpperCase());
     } catch (error) {
       setError(error);
@@ -281,7 +299,12 @@ export default function PayrollOnboarding() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ company_id: initialized.company_id })
       });
-      setDeployment(linked.deployment);
+      await savePayrollConfiguration(
+        deployment.deployment_id,
+        String(linked.company?.legal_name || record.legal_name),
+        String(linked.company?.country_code || effectiveCountry)
+      );
+      setDeployment(await api(`/service-deployments/${deployment.deployment_id}`));
       setLinkedCompanyStage(String(linked.company?.company_stage || '').toUpperCase());
     } catch (error) {
       setError(error);
@@ -433,10 +456,13 @@ export default function PayrollOnboarding() {
 
           {!deployment ? (
             <div className="payroll-card payroll-country-card">
-              <span className="payroll-card-label">COMPANY COUNTRY</span>
+              <span className="payroll-card-label">PAYROLL BASICS</span>
               <h3>Where is the company registered?</h3>
-              <p>FinClose uses this to apply the correct company and payroll setup.</p>
-              <label><span>Country</span><select value={country} onChange={event => setCountry(event.target.value)}>{countries.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+              <p>Country and pay schedule determine the payroll context before FinClose loads the company.</p>
+              <div className="payroll-two-fields">
+                <label><span>Company country</span><select value={country} onChange={event => setCountry(event.target.value)}>{countries.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+                <label><span>Pay schedule</span><select value={payFrequency} onChange={event => setPayFrequency(event.target.value)}><option value="monthly">Monthly</option><option value="semimonthly">Twice a month</option><option value="biweekly">Every two weeks</option><option value="weekly">Weekly</option></select></label>
+              </div>
               <button className="payroll-primary" onClick={startCompanyStep} disabled={busy}>{busy ? 'Loading…' : 'Continue'}</button>
             </div>
           ) : (
