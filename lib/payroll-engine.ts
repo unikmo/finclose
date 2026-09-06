@@ -94,6 +94,7 @@ export const PAYROLL_RULE_PACKS = {
       'Basic regular cash salary only.',
       'The caller must explicitly state whether each employee participates in the funded pension scheme; FinClose does not infer pension eligibility from age or historic opt-out status.',
       'Special income-tax exemptions, non-cash benefits, expense reimbursements, foreign/diplomatic cases, garnishments and voluntary deductions are not calculated by this rule pack.',
+      'Year-to-date taxable salary is caller-supplied until historical payroll ingestion is normalized into the payroll engine.',
       'This engine prepares payroll and accounting outputs only. It does not submit tax or pension declarations and does not initiate payments.'
     ]
   },
@@ -305,17 +306,15 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
 
   const now = Date.now();
   const record = {
+    ...result,
     payroll_run_id: runId,
     deployment_id: deploymentId,
     company_id: deployment.company_id,
     company_name: deployment.company_name || null,
     service: deployment.service,
-    country_code: 'GE',
-    currency: 'GEL',
     input_fingerprint: fingerprint,
     approval_status: 'PREPARED_NOT_APPROVED',
     execution_status: 'NO_PAYMENT_NO_FILING',
-    ...result,
     created_at: now,
     updated_at: now
   };
@@ -360,11 +359,13 @@ export function payrollEngineSelfTest() {
     pay_date: '2026-08-31',
     employees: [
       { employee_id: 'E001', gross_pay: 5000, pension_participant: true, ytd_taxable_salary_before: 23000 },
-      { employee_id: 'E002', gross_pay: 3000, pension_participant: false, ytd_taxable_salary_before: 21000 }
+      { employee_id: 'E002', gross_pay: 3000, pension_participant: false, ytd_taxable_salary_before: 21000 },
+      { employee_id: 'E003', gross_pay: 3000, pension_participant: true, ytd_taxable_salary_before: 59000 }
     ]
   });
   const first = sample.employees[0];
   const second = sample.employees[1];
+  const third = sample.employees[2];
   return {
     ok:
       first.income_tax === 1000 &&
@@ -374,6 +375,9 @@ export function payrollEngineSelfTest() {
       first.net_pay === 3900 &&
       second.income_tax === 600 &&
       second.net_pay === 2400 &&
+      third.state_pension === 10 &&
+      third.employee_pension === 60 &&
+      third.net_pay === 2340 &&
       sample.controls.journal_balanced,
     sample
   };
