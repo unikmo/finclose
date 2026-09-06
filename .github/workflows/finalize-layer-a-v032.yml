@@ -1,0 +1,22 @@
+name: Finalize Layer A v0.32
+on:
+  push:
+    branches:
+      - feature/layer-a-close-governance-v032
+permissions:
+  contents: write
+jobs:
+  run:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/layer-a-close-governance-v032
+      - run: python scripts/finalize-layer-a-v032.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/close-governance-engine.ts
+          git commit -m 'Freeze Layer A approval evidence and scope controls'
+          git push origin HEAD:feature/layer-a-close-governance-v032
