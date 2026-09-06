@@ -1,0 +1,46 @@
+name: Build temporary Vercel source bundle
+
+on:
+  push:
+    branches:
+      - manual-vercel-bundle
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build compressed source map
+        run: |
+          python - <<'PY'
+          import base64, gzip, json, pathlib, subprocess
+          files = {}
+          tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          for path in tracked:
+              if path.startswith('.github/') or path.startswith('deployment/'):
+                  continue
+              p = pathlib.Path(path)
+              try:
+                  files[path] = p.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+          raw = json.dumps(files, separators=(',', ':')).encode('utf-8')
+          bundle = base64.b64encode(gzip.compress(raw, compresslevel=9)).decode('ascii')
+          out = pathlib.Path('deployment')
+          out.mkdir(exist_ok=True)
+          (out / 'source.b64').write_text(bundle, encoding='ascii')
+          print(f'Bundled {len(files)} text files; {len(bundle)} base64 characters')
+          PY
+      - name: Commit bundle to temporary branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deployment/source.b64
+          git commit -m "Generate temporary Vercel source bundle"
+          git push
