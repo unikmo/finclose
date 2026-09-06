@@ -1,0 +1,33 @@
+name: Apply v0.34 pilot hardening
+
+on:
+  push:
+    branches: [feature/firebase-pilot-activation-v034]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[v034-pilot-hardening-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/firebase-pilot-activation-v034
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply pilot hardening patch
+        run: python scripts/apply-v034-pilot-hardening.py
+      - name: Build
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Commit patched sources
+        run: |
+          git config user.name "unikmo"
+          git config user.email "mbanwie@googlemail.com"
+          git add lib/managed-auth.ts app/start/'[service]'/ServiceOnboarding.tsx app/api/'[...path]'/route.ts package.json package-lock.json
+          git commit -m "Apply v0.34 pilot activation hardening [v034-pilot-hardening-applied]" || exit 0
+          git push origin HEAD:feature/firebase-pilot-activation-v034
