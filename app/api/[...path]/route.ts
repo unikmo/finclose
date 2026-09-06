@@ -3,10 +3,10 @@ import { COUNTRIES, buildTemplate, getCountry, initializeCompany, listCompanies,
 import { getServiceDeployment, publicServiceCatalog, saveServiceConfiguration, saveServiceSource, selectServiceConnector, startServiceDeployment } from '../../../lib/service-deployments';
 import { linkDeploymentCompany, saveHistoricalContext, skipHistoricalContext } from '../../../lib/onboarding-history';
 import { accountResponse, loginLabAccount, registerLabAccount } from '../../../lib/lab-auth';
-import { authenticateRequest, createFirebaseSessionResponse, currentManagedUser, logoutManagedResponse, type RequestIdentity } from '../../../lib/managed-auth';
+import { authenticateRequest, createFirebaseSessionResponse, currentManagedUser, loginManagedAccount, logoutManagedResponse, registerManagedAccount, type RequestIdentity } from '../../../lib/managed-auth';
 import { ensurePersonalOrganization, deploymentAuthorization, listOrganizationCompanies, requireCompanyAccess, type OrganizationRole } from '../../../lib/tenancy';
 import { isRealDataMode, publicRuntimeProfile, runtimeReadiness } from '../../../lib/runtime-mode';
-import { ledgerHealth } from '../../../lib/production-ledger';
+import { ledgerHealth, persistBookkeepingBatch } from '../../../lib/production-ledger';
 import { FINANCIAL_UPLOAD_SECURITY } from '../../../lib/file-security';
 import { getPayrollRun, PAYROLL_RULE_PACKS, payrollEngineSelfTest, preparePayrollRun } from '../../../lib/payroll-engine';
 import { BOOKKEEPING_CORE_CAPABILITIES, bookkeepingEngineSelfTest, getBookkeepingBatch, prepareBookkeepingBatch } from '../../../lib/bookkeeping-engine';
@@ -201,12 +201,12 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
       return createFirebaseSessionResponse(String(body.id_token || ''));
     }
     if (p.join('/') === 'account/register') {
-      if (isRealDataMode()) return NextResponse.json({ detail: 'use Firebase Authentication for PILOT/PRODUCTION accounts' }, { status: 409 });
+      if (isRealDataMode()) return registerManagedAccount(await req.json());
       const user = await registerLabAccount(await req.json());
       return accountResponse(user);
     }
     if (p.join('/') === 'account/login') {
-      if (isRealDataMode()) return NextResponse.json({ detail: 'use Firebase Authentication for PILOT/PRODUCTION accounts' }, { status: 409 });
+      if (isRealDataMode()) return loginManagedAccount(await req.json());
       const user = await loginLabAccount(await req.json());
       return accountResponse(user);
     }
@@ -243,13 +243,32 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'bookkeeping' && p[3] === 'batches') {
-      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
-      return NextResponse.json(await prepareBookkeepingBatch(p[1], await req.json()));
+      const scoped = await authorizedDeployment(req, p[1], 'ACCOUNTANT');
+      const batch = await prepareBookkeepingBatch(p[1], await req.json()) as Record<string, any>;
+      if (isRealDataMode() && scoped.auth.kind === 'customer') {
+        await persistBookkeepingBatch({
+          organization_id: String(scoped.deployment.organization_id),
+          company_id: String(scoped.deployment.company_id),
+          actor_user_id: scoped.auth.user.user_id,
+          batch
+        });
+      }
+      return NextResponse.json(batch);
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'finance-cycles') {
-      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
-      return NextResponse.json(await prepareFinanceCycle(p[1], await req.json()));
+      const scoped = await authorizedDeployment(req, p[1], 'ACCOUNTANT');
+      const cycle = await prepareFinanceCycle(p[1], await req.json()) as Record<string, any>;
+      if (isRealDataMode() && scoped.auth.kind === 'customer' && cycle.bookkeeping_batch_id) {
+        const batch = await getBookkeepingBatch(p[1], String(cycle.bookkeeping_batch_id)) as Record<string, any>;
+        await persistBookkeepingBatch({
+          organization_id: String(scoped.deployment.organization_id),
+          company_id: String(scoped.deployment.company_id),
+          actor_user_id: scoped.auth.user.user_id,
+          batch
+        });
+      }
+      return NextResponse.json(cycle);
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'close-controls' && p[3] === 'source-requirements') {
