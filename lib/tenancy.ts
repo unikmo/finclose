@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
 import type { ManagedUser } from './managed-auth';
+import { registerProductionOrganization } from './production-ledger';
+import { isRealDataMode } from './runtime-mode';
 
 export type OrganizationRole = 'OWNER' | 'ADMIN' | 'ACCOUNTANT' | 'APPROVER' | 'VIEWER';
 
@@ -34,12 +36,13 @@ export async function ensurePersonalOrganization(user: ManagedUser) {
   const orgRef = db.ref(`finclose_organizations/${orgId}`);
   const now = Date.now();
   const existing = await orgRef.once('value');
+  const organizationName = user.name ? `${user.name}'s organization` : 'FinClose organization';
   if (!existing.exists()) {
     const auditKey = db.ref('finclose_audit_events').push().key!;
     await db.ref().update({
       [`finclose_organizations/${orgId}`]: {
         organization_id: orgId,
-        name: user.name ? `${user.name}'s organization` : 'FinClose organization',
+        name: organizationName,
         status: 'ACTIVE',
         created_by_user_id: user.user_id,
         created_at: now,
@@ -91,6 +94,9 @@ export async function ensurePersonalOrganization(user: ManagedUser) {
       [`finclose_users/${user.user_id}/primary_organization_id`]: orgId,
       [`finclose_users/${user.user_id}/updated_at`]: now
     });
+  }
+  if (isRealDataMode()) {
+    await registerProductionOrganization({ organization_id: orgId, name: organizationName, actor_user_id: user.user_id });
   }
   return { organization_id: orgId, role: 'OWNER' as OrganizationRole };
 }
