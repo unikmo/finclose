@@ -1,9 +1,13 @@
+import crypto from 'node:crypto';
+import { ServerValue } from 'firebase-admin/database';
 import { realtimeDatabase, storageBucket } from './finclose-backend';
 import { getServiceDeployment } from './service-deployments';
 import { assertRealDataRuntimeReady, isRealDataMode, uploadQuarantineMode } from './runtime-mode';
 
 export type UploadReviewDecision = 'CLEAN' | 'REJECTED';
 export type UploadArtifactKind = 'history' | 'source';
+
+const REVIEW_LEASE_MS = 2 * 60 * 1000;
 
 function httpError(message: string, status: number) {
   const error = new Error(message);
@@ -15,6 +19,10 @@ function target(kind: UploadArtifactKind, artifactId: string) {
   return kind === 'history'
     ? { path: `finclose_service_history/${artifactId}`, idField: 'history_id' }
     : { path: `finclose_service_sources/${artifactId}`, idField: 'source_id' };
+}
+
+function reviewClaimId(deploymentId: string, kind: UploadArtifactKind, artifactId: string) {
+  return crypto.createHash('sha256').update(`${deploymentId}:${kind}:${artifactId}`).digest('hex');
 }
 
 async function loadArtifact(deploymentId: string, kind: UploadArtifactKind, artifactId: string) {
@@ -102,16 +110,68 @@ export async function reviewServiceUpload(input: {
   const db = realtimeDatabase();
   const now = Date.now();
   const note = String(input.note || '').trim().slice(0, 500) || null;
+  const requestId = crypto.randomUUID();
+  const claimId = reviewClaimId(input.deployment_id, input.kind, input.artifact_id);
+  const claimRef = db.ref(`finclose_upload_review_claims/${claimId}`);
+
+  const claimResult = await claimRef.transaction(current => {
+    const claim = (current || null) as Record<string, any> | null;
+    if (!claim) {
+      return {
+        deployment_id: input.deployment_id,
+        artifact_kind: input.kind,
+        artifact_id: input.artifact_id,
+        decision: input.decision,
+        actor_user_id: input.actor_user_id,
+        note,
+        effects_status: 'PENDING',
+        effect_lease_id: requestId,
+        effect_leased_at: now,
+        claimed_at: now
+      };
+    }
+
+    if (String(claim.decision || '') !== input.decision) return;
+    if (String(claim.effects_status || '') === 'APPLIED') return claim;
+
+    const leaseId = String(claim.effect_lease_id || '');
+    const leasedAt = Number(claim.effect_leased_at || 0);
+    const leaseExpired = !leasedAt || now - leasedAt >= REVIEW_LEASE_MS;
+    if (leaseId && leaseId !== requestId && !leaseExpired) return;
+
+    return {
+      ...claim,
+      effect_lease_id: requestId,
+      effect_leased_at: now
+    };
+  });
+
+  const claim = (claimResult.snapshot.val() || {}) as Record<string, any>;
+  if (String(claim.decision || '') !== input.decision) {
+    throw httpError('a conflicting immutable security-review decision already exists for this artifact', 409);
+  }
+  if (String(claim.effects_status || '') === 'APPLIED') {
+    const reviewed = await db.ref(pointer.path).once('value');
+    return { ...reviewed.val(), duplicate: true };
+  }
+  if (!claimResult.committed || String(claim.effect_lease_id || '') !== requestId) {
+    throw httpError('security review is already being applied; retry after the in-flight review completes', 409);
+  }
+
   const clean = input.decision === 'CLEAN';
   const status = clean ? 'RECEIVED' : 'REJECTED';
   const securityReviewStatus = clean ? 'CLEAN' : 'REJECTED';
-  const auditKey = db.ref('finclose_audit_events').push().key!;
+  const auditKey = `upload_review_${claimId}`;
   const updates: Record<string, unknown> = {
     [`${pointer.path}/status`]: status,
     [`${pointer.path}/security_review_status`]: securityReviewStatus,
     [`${pointer.path}/security_reviewed_by`]: input.actor_user_id,
     [`${pointer.path}/security_reviewed_at`]: now,
     [`${pointer.path}/security_review_note`]: note,
+    [`finclose_upload_review_claims/${claimId}/effects_status`]: 'APPLIED',
+    [`finclose_upload_review_claims/${claimId}/effect_lease_id`]: null,
+    [`finclose_upload_review_claims/${claimId}/effect_leased_at`]: null,
+    [`finclose_upload_review_claims/${claimId}/applied_at`]: now,
     [`finclose_audit_events/${auditKey}`]: {
       event: clean ? 'FINANCIAL_UPLOAD_CLEARED' : 'FINANCIAL_UPLOAD_REJECTED',
       organization_id: deployment.organization_id || null,
@@ -127,27 +187,30 @@ export async function reviewServiceUpload(input: {
 
   if (input.kind === 'history') {
     if (clean) {
-      const approvedCount = Number(deployment.history_count || 0) + 1;
       updates[`finclose_service_deployments/${input.deployment_id}/history_status`] = 'RECEIVED';
-      updates[`finclose_service_deployments/${input.deployment_id}/history_count`] = approvedCount;
+      updates[`finclose_service_deployments/${input.deployment_id}/history_count`] = ServerValue.increment(1);
       updates[`finclose_service_deployments/${input.deployment_id}/latest_history_id`] = input.artifact_id;
       updates[`finclose_service_deployments/${input.deployment_id}/status`] = 'HISTORY_RECEIVED_CONNECTOR_READY';
-    } else if (String(deployment.history_status || '') !== 'RECEIVED') {
-      updates[`finclose_service_deployments/${input.deployment_id}/history_status`] = 'REVIEW_REJECTED_HISTORY_REQUIRED';
-      updates[`finclose_service_deployments/${input.deployment_id}/status`] = 'HISTORY_REQUIRED';
     }
-  } else {
-    if (clean) {
-      updates[`finclose_service_deployments/${input.deployment_id}/latest_source_id`] = input.artifact_id;
-      updates[`finclose_service_deployments/${input.deployment_id}/status`] = 'READY_FOR_AGENT';
-    } else if (String(deployment.latest_source_id || '') === input.artifact_id) {
-      updates[`finclose_service_deployments/${input.deployment_id}/latest_source_id`] = null;
-      updates[`finclose_service_deployments/${input.deployment_id}/status`] = 'READY_FOR_SOURCE';
-    }
+  } else if (clean) {
+    updates[`finclose_service_deployments/${input.deployment_id}/latest_source_id`] = input.artifact_id;
+    updates[`finclose_service_deployments/${input.deployment_id}/status`] = 'READY_FOR_AGENT';
   }
   updates[`finclose_service_deployments/${input.deployment_id}/updated_at`] = now;
 
-  await db.ref().update(updates);
+  try {
+    await db.ref().update(updates);
+  } catch (error) {
+    await claimRef.transaction(current => {
+      const currentClaim = (current || {}) as Record<string, any>;
+      if (String(currentClaim.effects_status || '') === 'PENDING' && String(currentClaim.effect_lease_id || '') === requestId) {
+        return { ...currentClaim, effect_lease_id: null, effect_leased_at: null };
+      }
+      return current;
+    }).catch(() => undefined);
+    throw error;
+  }
+
   try {
     await storageBucket().file(String(artifact.storage_path)).setMetadata({
       metadata: {
