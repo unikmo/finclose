@@ -393,7 +393,7 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
     bookkeepingBatch,
     settlementTotals: settlements.totals,
     bankControl: input.bank_control,
-    periodScopeComplete: input.period_scope_complete
+    periodScopeComplete: input.period_scope_complete === true
   });
 
   const now = Date.now();
