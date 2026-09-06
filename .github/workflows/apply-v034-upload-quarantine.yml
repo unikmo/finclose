@@ -1,0 +1,33 @@
+name: Apply v0.34 upload quarantine
+
+on:
+  push:
+    branches: [feature/firebase-pilot-activation-v034]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[v034-quarantine-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/firebase-pilot-activation-v034
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply quarantine patch
+        run: python scripts/apply-v034-upload-quarantine.py
+      - name: Build
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Commit patched sources
+        run: |
+          git config user.name "unikmo"
+          git config user.email "mbanwie@googlemail.com"
+          git add lib/service-deployments.ts lib/onboarding-history.ts
+          git commit -m "Apply v0.34 real-data upload quarantine [v034-quarantine-applied]" || exit 0
+          git push origin HEAD:feature/firebase-pilot-activation-v034
