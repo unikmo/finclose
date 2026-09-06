@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { COUNTRIES, buildTemplate, getCountry, initializeCompany, listCompanies, realtimeDatabase, saveDataChunk, saveInitialization, statusFor, storageBucket } from '../../../lib/finclose-backend';
 import { getServiceDeployment, publicServiceCatalog, saveServiceConfiguration, saveServiceSource, selectServiceConnector, startServiceDeployment } from '../../../lib/service-deployments';
 import { linkDeploymentCompany, saveHistoricalContext, skipHistoricalContext } from '../../../lib/onboarding-history';
-import { accountResponse, assertCustomerOrLab, currentUser, loginLabAccount, logoutResponse, registerLabAccount } from '../../../lib/lab-auth';
+import { accountResponse, loginLabAccount, registerLabAccount } from '../../../lib/lab-auth';
+import { authenticateRequest, createFirebaseSessionResponse, currentManagedUser, logoutManagedResponse, type RequestIdentity } from '../../../lib/managed-auth';
+import { ensurePersonalOrganization, deploymentAuthorization, listOrganizationCompanies, requireCompanyAccess, type OrganizationRole } from '../../../lib/tenancy';
+import { isRealDataMode, publicRuntimeProfile, runtimeReadiness } from '../../../lib/runtime-mode';
+import { ledgerHealth } from '../../../lib/production-ledger';
+import { FINANCIAL_UPLOAD_SECURITY } from '../../../lib/file-security';
 import { getPayrollRun, PAYROLL_RULE_PACKS, payrollEngineSelfTest, preparePayrollRun } from '../../../lib/payroll-engine';
 import { BOOKKEEPING_CORE_CAPABILITIES, bookkeepingEngineSelfTest, getBookkeepingBatch, prepareBookkeepingBatch } from '../../../lib/bookkeeping-engine';
 import { FINANCE_CYCLE_CAPABILITIES, financeCycleSelfTest, getFinanceCycle, getMonthlyClose, prepareFinanceCycle } from '../../../lib/finance-cycle-engine';
@@ -13,25 +18,44 @@ function historyReady(deployment: Record<string, any>) {
   return deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY';
 }
 
-function actorFromAuth(auth: ReturnType<typeof assertCustomerOrLab>) {
+function actorFromAuth(auth: RequestIdentity) {
   if (auth.kind === 'customer') return { kind: 'customer' as const, user_id: auth.user.user_id, name: auth.user.name, email: auth.user.email };
   return { kind: 'lab' as const };
 }
 
-function forbidden(message = 'this service session belongs to another account') {
-  const error = new Error(message);
-  (error as Error & { status?: number }).status = 403;
-  return error;
-}
-
-async function authorizedDeployment(req: NextRequest, id: string) {
-  const auth = assertCustomerOrLab(req);
+async function authorizedDeployment(req: NextRequest, id: string, minimumRole: OrganizationRole = 'VIEWER') {
+  const auth = await authenticateRequest(req);
   const deployment = await getServiceDeployment(id) as Record<string, any>;
-  if (auth.kind === 'customer') {
+  if (auth.kind === 'customer' && isRealDataMode()) {
+    await deploymentAuthorization(deployment, auth.user, minimumRole);
+  } else if (auth.kind === 'customer') {
     const ownerEmail = String(deployment.registrant?.email || '').trim().toLowerCase();
-    if (!ownerEmail || ownerEmail !== auth.user.email.trim().toLowerCase()) throw forbidden();
+    if (ownerEmail && ownerEmail !== auth.user.email.trim().toLowerCase()) {
+      const error = new Error('this service session belongs to another account');
+      (error as Error & { status?: number }).status = 403;
+      throw error;
+    }
   }
   return { auth, deployment };
+}
+
+async function authorizedInitialization(req: NextRequest, initializationId: string) {
+  const auth = await authenticateRequest(req);
+  if (auth.kind === 'lab' || !isRealDataMode()) return auth;
+  const snap = await realtimeDatabase().ref(`finclose_initializations/${initializationId}`).once('value');
+  if (!snap.exists()) {
+    const error = new Error('initialization not found');
+    (error as Error & { status?: number }).status = 404;
+    throw error;
+  }
+  const initialization = snap.val() as Record<string, unknown>;
+  const org = await ensurePersonalOrganization(auth.user);
+  if (String(initialization.organization_id || '') !== org.organization_id) {
+    const error = new Error('initialization belongs to another organization');
+    (error as Error & { status?: number }).status = 403;
+    throw error;
+  }
+  return auth;
 }
 
 export async function GET(req: NextRequest, { params }: { params: { path?: string[] } }) {
@@ -39,10 +63,11 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     const p = segments(params);
 
     if (p.length === 1 && p[0] === 'health') {
-      const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
+      const readiness = runtimeReadiness();
+      const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.32.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
-      const reachable = { database: false, storage: false };
+      if (!deep || !configured) return NextResponse.json({ version: '0.33.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', runtime: readiness, configured });
+      const reachable = { database: false, storage: false, postgres: false };
       const errors: string[] = [];
       try {
         await realtimeDatabase().ref('finclose_health').limitToFirst(1).once('value');
@@ -52,6 +77,9 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
         await storageBucket().getMetadata();
         reachable.storage = true;
       } catch (e) { errors.push(`storage: ${(e as Error).message}`); }
+      const postgres = await ledgerHealth();
+      reachable.postgres = postgres.ready;
+      if (readiness.real_data_mode && !postgres.ready) errors.push(`postgres-ledger: ${postgres.error || 'schema not ready'}`);
       const payroll = payrollEngineSelfTest();
       const bookkeeping = bookkeepingEngineSelfTest();
       const financeCycle = financeCycleSelfTest();
@@ -60,13 +88,19 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       if (!bookkeeping.ok) errors.push('bookkeeping-engine: deterministic regression check failed');
       if (!financeCycle.ok) errors.push('finance-cycle: deterministic regression check failed');
       if (!closeGovernance.ok) errors.push('close-governance: deterministic regression check failed');
+      const engineOk = payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok;
+      const infrastructureOk = reachable.database && reachable.storage && (!readiness.real_data_mode || postgres.ready);
       return NextResponse.json({
-        version: '0.32.0',
+        version: '0.33.0',
         hosting: 'vercel',
-        database: 'firebase-realtime-database',
+        database: 'firebase-realtime-database-control-plane',
+        authoritative_ledger: 'postgresql',
         storage: 'firebase-storage',
+        runtime: readiness,
         configured,
         reachable,
+        postgres,
+        upload_security: FINANCIAL_UPLOAD_SECURITY,
         engines: {
           payroll_ge_basic: payroll.ok,
           bookkeeping_core: bookkeeping.ok,
@@ -76,14 +110,17 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
           balance_sheet_reconciliation: closeGovernance.ok,
           close_approval_and_period_lock: closeGovernance.ok
         },
-        ok: reachable.database && reachable.storage && payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok,
+        ok: infrastructureOk && engineOk && errors.length === 0,
         errors
       });
     }
 
+    if (p.join('/') === 'runtime') return NextResponse.json(publicRuntimeProfile());
+
     if (p.join('/') === 'account/session') {
-      const user = currentUser(req);
-      return NextResponse.json({ authenticated: Boolean(user), user });
+      const user = await currentManagedUser(req);
+      if (user && isRealDataMode()) await ensurePersonalOrganization(user);
+      return NextResponse.json({ authenticated: Boolean(user), user, auth_mode: user?.auth_mode || (isRealDataMode() ? 'FIREBASE_AUTH_SESSION' : 'LAB_ACCOUNT_SESSION') });
     }
 
     if (p.join('/') === 'service-deployments/catalog') return NextResponse.json(publicServiceCatalog());
@@ -130,7 +167,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     }
 
     if (p.length === 3 && p[0] === 'initialization' && p[1] === 'template') {
-      assertCustomerOrLab(req);
+      await authenticateRequest(req);
       const country = getCountry(p[2]);
       if (!country) return NextResponse.json({ detail: 'unsupported country' }, { status: 404 });
       const buffer = buildTemplate(country);
@@ -143,8 +180,10 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     }
 
     if (p.length === 1 && p[0] === 'companies') {
-      assertCustomerOrLab(req);
-      return NextResponse.json(await listCompanies());
+      const auth = await authenticateRequest(req);
+      if (auth.kind === 'lab' || !isRealDataMode()) return NextResponse.json(await listCompanies());
+      const org = await ensurePersonalOrganization(auth.user);
+      return NextResponse.json(await listOrganizationCompanies(org.organization_id));
     }
 
     return NextResponse.json({ detail: 'not found' }, { status: 404 });
@@ -157,17 +196,24 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
   try {
     const p = segments(params);
 
+    if (p.join('/') === 'account/firebase-session') {
+      const body = await req.json();
+      return createFirebaseSessionResponse(String(body.id_token || ''));
+    }
     if (p.join('/') === 'account/register') {
+      if (isRealDataMode()) return NextResponse.json({ detail: 'use Firebase Authentication for PILOT/PRODUCTION accounts' }, { status: 409 });
       const user = await registerLabAccount(await req.json());
       return accountResponse(user);
     }
     if (p.join('/') === 'account/login') {
+      if (isRealDataMode()) return NextResponse.json({ detail: 'use Firebase Authentication for PILOT/PRODUCTION accounts' }, { status: 409 });
       const user = await loginLabAccount(await req.json());
       return accountResponse(user);
     }
-    if (p.join('/') === 'account/logout') return logoutResponse();
+    if (p.join('/') === 'account/logout') return logoutManagedResponse(req);
 
-    const auth = assertCustomerOrLab(req);
+    const auth = await authenticateRequest(req);
+    const organization = auth.kind === 'customer' && isRealDataMode() ? await ensurePersonalOrganization(auth.user) : null;
 
     if (p.join('/') === 'initialization/template/request') {
       const body = await req.json();
@@ -183,80 +229,99 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
         service: String(body.service || ''),
         name: user?.name || String(body.name || ''),
         email: user?.email || String(body.email || ''),
-        country_code: body.country_code ? String(body.country_code) : undefined
+        country_code: body.country_code ? String(body.country_code) : undefined,
+        organization_id: organization?.organization_id,
+        owner_user_id: user?.user_id
       }));
     }
 
-    if (p.length >= 2 && p[0] === 'service-deployments') await authorizedDeployment(req, p[1]);
+    if (p.length >= 2 && p[0] === 'service-deployments') await authorizedDeployment(req, p[1], 'VIEWER');
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'runs') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await preparePayrollRun(p[1], await req.json()));
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'bookkeeping' && p[3] === 'batches') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await prepareBookkeepingBatch(p[1], await req.json()));
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'finance-cycles') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await prepareFinanceCycle(p[1], await req.json()));
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'close-controls' && p[3] === 'source-requirements') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await configureSourceRequirements(p[1], await req.json()));
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'close-controls' && p[3] === 'source-evidence') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await recordPeriodSourceEvidence(p[1], await req.json()));
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'close-controls' && p[3] === 'balance-sheet-scope') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await configureBalanceSheetScope(p[1], await req.json()));
     }
 
     if (p.length === 6 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'source-completeness' && p[5] === 'evaluate') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await evaluateSourceCompleteness(p[1], p[3]));
     }
 
     if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'balance-sheet-reconciliation') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await prepareBalanceSheetReconciliation(p[1], p[3], await req.json()));
     }
 
     if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'approve') {
+      await authorizedDeployment(req, p[1], 'APPROVER');
       const body = await req.json().catch(() => ({}));
       return NextResponse.json(await approveMonthlyClose(p[1], p[3], actorFromAuth(auth), body.note));
     }
 
     if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'lock') {
+      await authorizedDeployment(req, p[1], 'APPROVER');
       const body = await req.json().catch(() => ({}));
       return NextResponse.json(await lockMonthlyClose(p[1], p[3], actorFromAuth(auth), body.note));
     }
 
     if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'reopen') {
+      await authorizedDeployment(req, p[1], 'ADMIN');
       const body = await req.json();
       return NextResponse.json(await reopenMonthlyClose(p[1], p[3], actorFromAuth(auth), String(body.reason || '')));
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'configuration') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await saveServiceConfiguration(p[1], await req.json()));
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'company') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       const body = await req.json();
       if (!body.company_id) return NextResponse.json({ detail: 'company_id is required' }, { status: 400 });
+      if (auth.kind === 'customer' && isRealDataMode()) await requireCompanyAccess(String(body.company_id), auth.user, 'ACCOUNTANT');
       return NextResponse.json(await linkDeploymentCompany(p[1], String(body.company_id)));
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'history') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       const body = await req.json();
       if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
       return NextResponse.json(await saveHistoricalContext(p[1], String(body.filename), Buffer.from(String(body.content_base64), 'base64')));
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'history' && p[3] === 'skip') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       return NextResponse.json(await skipHistoricalContext(p[1]));
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'connector') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       const deployment = await getServiceDeployment(p[1]) as Record<string, any>;
       if (!historyReady(deployment)) return NextResponse.json({ detail: 'complete historical-context step before selecting a current-system connector' }, { status: 409 });
       const body = await req.json();
@@ -264,6 +329,7 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'source') {
+      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       const deployment = await getServiceDeployment(p[1]) as Record<string, any>;
       if (!historyReady(deployment)) return NextResponse.json({ detail: 'complete historical-context step before sending current source data' }, { status: 409 });
       const body = await req.json();
@@ -274,10 +340,14 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     if (p.join('/') === 'initialization/upload') {
       const body = await req.json();
       if (!body.filename || !body.content_base64) return NextResponse.json({ detail: 'filename and content_base64 are required' }, { status: 400 });
-      return NextResponse.json({ records: [await saveInitialization(String(body.filename), Buffer.from(String(body.content_base64), 'base64'))] });
+      const ownership = auth.kind === 'customer' && isRealDataMode()
+        ? { organization_id: organization?.organization_id, owner_user_id: auth.user.user_id }
+        : undefined;
+      return NextResponse.json({ records: [await saveInitialization(String(body.filename), Buffer.from(String(body.content_base64), 'base64'), ownership)] });
     }
 
     if (p.length === 3 && p[0] === 'initialization' && p[2] === 'initialize') {
+      await authorizedInitialization(req, p[1]);
       return NextResponse.json(await initializeCompany(p[1]));
     }
 
@@ -287,8 +357,10 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
       const initialized = [];
       const blocked = [];
       for (const id of ids) {
-        try { initialized.push(await initializeCompany(String(id))); }
-        catch (e) { blocked.push({ initialization_id: id, detail: (e as Error).message }); }
+        try {
+          await authorizedInitialization(req, String(id));
+          initialized.push(await initializeCompany(String(id)));
+        } catch (e) { blocked.push({ initialization_id: id, detail: (e as Error).message }); }
       }
       return NextResponse.json({ initialized, blocked });
     }
@@ -296,6 +368,7 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     if (p.length === 3 && p[0] === 'companies' && p[2] === 'data-chunks') {
       const body = await req.json();
       if (!body.stage || !body.filename || !body.content_base64) return NextResponse.json({ detail: 'stage, filename and content_base64 are required' }, { status: 400 });
+      if (auth.kind === 'customer' && isRealDataMode()) await requireCompanyAccess(p[1], auth.user, 'ACCOUNTANT');
       return NextResponse.json(await saveDataChunk(p[1], String(body.stage), String(body.filename), Buffer.from(String(body.content_base64), 'base64')));
     }
 
