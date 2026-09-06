@@ -6,10 +6,16 @@ import { accountResponse, assertCustomerOrLab, currentUser, loginLabAccount, log
 import { getPayrollRun, PAYROLL_RULE_PACKS, payrollEngineSelfTest, preparePayrollRun } from '../../../lib/payroll-engine';
 import { BOOKKEEPING_CORE_CAPABILITIES, bookkeepingEngineSelfTest, getBookkeepingBatch, prepareBookkeepingBatch } from '../../../lib/bookkeeping-engine';
 import { FINANCE_CYCLE_CAPABILITIES, financeCycleSelfTest, getFinanceCycle, getMonthlyClose, prepareFinanceCycle } from '../../../lib/finance-cycle-engine';
+import { CLOSE_GOVERNANCE_CAPABILITIES, approveMonthlyClose, closeGovernanceSelfTest, configureBalanceSheetScope, configureSourceRequirements, evaluateSourceCompleteness, getCloseGovernance, lockMonthlyClose, prepareBalanceSheetReconciliation, recordPeriodSourceEvidence, reopenMonthlyClose } from '../../../lib/close-governance-engine';
 
 function segments(params: { path?: string[] }) { return params.path || []; }
 function historyReady(deployment: Record<string, any>) {
   return deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY';
+}
+
+function actorFromAuth(auth: ReturnType<typeof assertCustomerOrLab>) {
+  if (auth.kind === 'customer') return { kind: 'customer' as const, user_id: auth.user.user_id, name: auth.user.name, email: auth.user.email };
+  return { kind: 'lab' as const };
 }
 
 function forbidden(message = 'this service session belongs to another account') {
@@ -35,7 +41,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 1 && p[0] === 'health') {
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.31.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
+      if (!deep || !configured) return NextResponse.json({ version: '0.32.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
       const reachable = { database: false, storage: false };
       const errors: string[] = [];
       try {
@@ -49,11 +55,13 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       const payroll = payrollEngineSelfTest();
       const bookkeeping = bookkeepingEngineSelfTest();
       const financeCycle = financeCycleSelfTest();
+      const closeGovernance = closeGovernanceSelfTest();
       if (!payroll.ok) errors.push('payroll-engine: deterministic regression check failed');
       if (!bookkeeping.ok) errors.push('bookkeeping-engine: deterministic regression check failed');
       if (!financeCycle.ok) errors.push('finance-cycle: deterministic regression check failed');
+      if (!closeGovernance.ok) errors.push('close-governance: deterministic regression check failed');
       return NextResponse.json({
-        version: '0.31.0',
+        version: '0.32.0',
         hosting: 'vercel',
         database: 'firebase-realtime-database',
         storage: 'firebase-storage',
@@ -63,9 +71,12 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
           payroll_ge_basic: payroll.ok,
           bookkeeping_core: bookkeeping.ok,
           finance_cycle: financeCycle.ok,
-          monthly_close_controls: financeCycle.ok
+          monthly_close_controls: financeCycle.ok,
+          source_completeness: closeGovernance.ok,
+          balance_sheet_reconciliation: closeGovernance.ok,
+          close_approval_and_period_lock: closeGovernance.ok
         },
-        ok: reachable.database && reachable.storage && payroll.ok && bookkeeping.ok && financeCycle.ok,
+        ok: reachable.database && reachable.storage && payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok,
         errors
       });
     }
@@ -79,6 +90,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.join('/') === 'initialization/countries') return NextResponse.json(COUNTRIES.map(({ code, name, currency }) => ({ code, name, currency })));
     if (p.join('/') === 'bookkeeping/capabilities') return NextResponse.json(BOOKKEEPING_CORE_CAPABILITIES);
     if (p.join('/') === 'finance-cycle/capabilities') return NextResponse.json(FINANCE_CYCLE_CAPABILITIES);
+    if (p.join('/') === 'close-governance/capabilities') return NextResponse.json(CLOSE_GOVERNANCE_CAPABILITIES);
 
     if (p.length === 3 && p[0] === 'payroll' && p[1] === 'rules') {
       const country = String(p[2] || '').toUpperCase() as keyof typeof PAYROLL_RULE_PACKS;
@@ -110,6 +122,11 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'monthly-closes') {
       await authorizedDeployment(req, p[1]);
       return NextResponse.json(await getMonthlyClose(p[1], p[3]));
+    }
+
+    if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'governance') {
+      await authorizedDeployment(req, p[1]);
+      return NextResponse.json(await getCloseGovernance(p[1], p[3]));
     }
 
     if (p.length === 3 && p[0] === 'initialization' && p[1] === 'template') {
@@ -182,6 +199,41 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'finance-cycles') {
       return NextResponse.json(await prepareFinanceCycle(p[1], await req.json()));
+    }
+
+    if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'close-controls' && p[3] === 'source-requirements') {
+      return NextResponse.json(await configureSourceRequirements(p[1], await req.json()));
+    }
+
+    if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'close-controls' && p[3] === 'source-evidence') {
+      return NextResponse.json(await recordPeriodSourceEvidence(p[1], await req.json()));
+    }
+
+    if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'close-controls' && p[3] === 'balance-sheet-scope') {
+      return NextResponse.json(await configureBalanceSheetScope(p[1], await req.json()));
+    }
+
+    if (p.length === 6 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'source-completeness' && p[5] === 'evaluate') {
+      return NextResponse.json(await evaluateSourceCompleteness(p[1], p[3]));
+    }
+
+    if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'balance-sheet-reconciliation') {
+      return NextResponse.json(await prepareBalanceSheetReconciliation(p[1], p[3], await req.json()));
+    }
+
+    if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'approve') {
+      const body = await req.json().catch(() => ({}));
+      return NextResponse.json(await approveMonthlyClose(p[1], p[3], actorFromAuth(auth), body.note));
+    }
+
+    if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'lock') {
+      const body = await req.json().catch(() => ({}));
+      return NextResponse.json(await lockMonthlyClose(p[1], p[3], actorFromAuth(auth), body.note));
+    }
+
+    if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'monthly-closes' && p[4] === 'reopen') {
+      const body = await req.json();
+      return NextResponse.json(await reopenMonthlyClose(p[1], p[3], actorFromAuth(auth), String(body.reason || '')));
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'configuration') {

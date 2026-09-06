@@ -5,6 +5,7 @@ import type { BankTransactionInput, JournalEntryInput, JournalLineInput, LedgerC
 import { getPayrollRun, preparePayrollRun } from './payroll-engine';
 import type { PayrollJournalLine, PayrollRunInput } from './payroll-engine';
 import { getServiceDeployment } from './service-deployments';
+import { assertDateRangeOpenForCompany } from './close-governance-engine';
 
 export type AccountRef = {
   account_code: string;
@@ -42,12 +43,12 @@ export type FinanceCycleInput = {
   additional_journals?: JournalEntryInput[];
   additional_ledger_cash_items?: LedgerCashItemInput[];
   bank_control?: BankBalanceControlInput;
-  period_scope_complete: boolean;
+  period_scope_complete?: boolean;
 };
 
 export const FINANCE_CYCLE_CAPABILITIES = {
   version: 'FINANCE-CYCLE-V1',
-  monthly_close_version: 'MONTHLY-CLOSE-CONTROL-V1',
+  monthly_close_version: 'MONTHLY-CLOSE-CONTROL-V2',
   implemented: [
     'prepare or reuse a payroll run under the combined bookkeeping-and-payroll service',
     'translate payroll journal account roles into explicit customer/company account codes',
@@ -60,13 +61,13 @@ export const FINANCE_CYCLE_CAPABILITIES = {
   ],
   safeguards: [
     'FinClose never guesses chart-of-accounts codes; account-role mapping is mandatory.',
-    'A monthly close can pass controls only when period_scope_complete is explicitly true.',
+    'Final monthly-close approval requires Layer A source completeness and material balance-sheet reconciliation.',
     'A monthly close can pass controls only when a bank closing-balance control is supplied and balances agree.',
     'Ambiguous or unmatched bank reconciliation items remain close blockers.',
     'Prepared monthly close does not lock the period, post externally, submit payroll filings or initiate payments.',
     'Payroll recognition journals are dated at pay_period_end in V1; alternative recognition-date policies are not yet configurable.'
   ],
-  execution_boundary: 'PREPARED_NOT_CLOSED'
+  execution_boundary: 'PREPARED_PENDING_LAYER_A'
 } as const;
 
 function httpError(message: string, status: number) {
@@ -249,7 +250,6 @@ export function evaluateMonthlyClose(input: {
   if (Number(reconciliation?.controls?.ambiguous_count || 0) > 0) exceptions.push('BANK_RECONCILIATION_AMBIGUOUS_ITEMS');
   if (Number(reconciliation?.controls?.unmatched_bank_count || 0) > 0) exceptions.push('BANK_RECONCILIATION_UNMATCHED_BANK_ITEMS');
   if (Number(reconciliation?.controls?.unmatched_ledger_count || 0) > 0) exceptions.push('BANK_RECONCILIATION_UNMATCHED_LEDGER_ITEMS');
-  if (!input.periodScopeComplete) exceptions.push('PERIOD_SCOPE_NOT_CONFIRMED_COMPLETE');
 
   let bankBalanceDifference: number | null = null;
   if (!input.bankControl) {
@@ -274,10 +274,10 @@ export function evaluateMonthlyClose(input: {
   const controlStatus = exceptions.length ? 'EXCEPTIONS_OPEN' : 'PASS';
   return {
     close_engine_version: FINANCE_CYCLE_CAPABILITIES.monthly_close_version,
-    status: controlStatus === 'PASS' ? 'CONTROLS_PASS_APPROVAL_REQUIRED' : 'EXCEPTIONS_OPEN',
+    status: controlStatus === 'PASS' ? 'CORE_CONTROLS_PASS_LAYER_A_REQUIRED' : 'EXCEPTIONS_OPEN',
     control_status: controlStatus,
-    close_status: FINANCE_CYCLE_CAPABILITIES.execution_boundary,
-    approval_status: 'APPROVAL_REQUIRED',
+    close_status: 'PREPARED_NOT_CLOSED',
+    approval_status: 'BLOCKED_PENDING_LAYER_A',
     controls: {
       payroll_journal_balanced: Boolean(payrollRun?.controls?.journal_balanced),
       bookkeeping_journals_balanced: Boolean(controls.all_journals_balanced),
@@ -286,7 +286,7 @@ export function evaluateMonthlyClose(input: {
       bank_reconciliation_unmatched_bank_count: Number(reconciliation?.controls?.unmatched_bank_count || 0),
       bank_reconciliation_unmatched_ledger_count: Number(reconciliation?.controls?.unmatched_ledger_count || 0),
       bank_closing_balance_difference: bankBalanceDifference,
-      period_scope_complete: input.periodScopeComplete
+      legacy_period_scope_attestation: input.periodScopeComplete === true
     },
     payroll_liabilities: {
       expected,
@@ -296,10 +296,10 @@ export function evaluateMonthlyClose(input: {
     },
     exceptions,
     limitations: [
-      'This close package is a control result, not a posted or locked accounting period.',
-      'Only bank closing-balance control is evaluated; broader balance-sheet reconciliations are not yet automated.',
-      'No external accounting-system posting, filing, payment or period lock is performed.',
-      'period_scope_complete is a caller attestation until connector ingestion can independently prove source completeness.'
+      'This core close package requires Layer A source-completeness and balance-sheet controls before approval.',
+      'Internal FinClose approval and period locking are handled by CLOSE-GOVERNANCE-LAYER-A-V1.',
+      'No external accounting-system posting, external-provider period lock, filing or payment is performed.',
+      'period_scope_complete is retained only as a deprecated compatibility attestation and is not an approval control.'
     ]
   };
 }
@@ -327,7 +327,7 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
   const periodStart = isoDate(input.period_start, 'period_start');
   const periodEnd = isoDate(input.period_end, 'period_end');
   if (periodStart > periodEnd) throw httpError('period_start must not be after period_end', 400);
-  if (typeof input.period_scope_complete !== 'boolean') throw httpError('period_scope_complete must be true or false', 400);
+  await assertDateRangeOpenForCompany(String(deployment.company_id), periodStart, periodEnd, 'finance cycle');
 
   const mapping = normalizedMapping(input.account_mapping);
   const payrollRun = await resolvePayrollRun(deploymentId, input);
@@ -363,7 +363,7 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
     additional_journals: input.additional_journals || [],
     additional_ledger_cash_items: input.additional_ledger_cash_items || [],
     bank_control: input.bank_control || null,
-    period_scope_complete: input.period_scope_complete
+    period_scope_complete: input.period_scope_complete ?? null
   });
   const cycleId = `${deploymentId}__${periodEnd}__${fingerprint.slice(0, 16)}`;
   const closeId = `${deploymentId}__close__${periodEnd}__${fingerprint.slice(0, 16)}`;
@@ -543,9 +543,10 @@ export function financeCycleSelfTest() {
       bookkeeping.reconciliation.matches[0].bank_transaction_id === 'BANK-NET' &&
       closePass.control_status === 'PASS' &&
       closePass.close_status === 'PREPARED_NOT_CLOSED' &&
+      closePass.status === 'CORE_CONTROLS_PASS_LAYER_A_REQUIRED' &&
       closePass.payroll_liabilities.outstanding_at_period_end.INCOME_TAX === 200 &&
       closeBlocked.control_status === 'EXCEPTIONS_OPEN' &&
-      closeBlocked.exceptions.includes('PERIOD_SCOPE_NOT_CONFIRMED_COMPLETE') &&
+      !closeBlocked.exceptions.includes('PERIOD_SCOPE_NOT_CONFIRMED_COMPLETE') &&
       closeBlocked.exceptions.includes('BANK_CLOSING_BALANCE_CONTROL_NOT_PROVIDED'),
     sample: {
       payroll_journal: payrollJournal,
