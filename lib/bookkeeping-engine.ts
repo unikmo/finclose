@@ -63,6 +63,7 @@ export const BOOKKEEPING_CORE_CAPABILITIES = {
   implemented: [
     'balanced journal validation',
     'duplicate external journal-id detection inside a batch',
+    'linked-company base-currency enforcement',
     'deterministic bank-to-ledger cash reconciliation',
     'ambiguous-match isolation',
     'prepared bookkeeping batch persistence with SHA-256 fingerprinting',
@@ -77,45 +78,38 @@ export const BOOKKEEPING_CORE_CAPABILITIES = {
     'accounts-receivable or accounts-payable subledger automation',
     'country-specific bookkeeping/tax rule packs'
   ],
+  reconciliation_sign_convention: 'Bank and ledger cash items must use the same signed cash-flow convention for matching.',
   execution_boundary: 'PREPARED_NOT_POSTED'
 } as const;
 
+function httpError(message: string, status: number) {
+  const error = new Error(message);
+  (error as Error & { status?: number }).status = status;
+  return error;
+}
+
 function money(value: unknown, field: string) {
   const number = Number(value ?? 0);
-  if (!Number.isFinite(number) || number < 0) {
-    const error = new Error(`${field} must be a non-negative number`);
-    (error as Error & { status?: number }).status = 400;
-    throw error;
-  }
+  if (!Number.isFinite(number) || number < 0) throw httpError(`${field} must be a non-negative number`, 400);
   return Math.round((number + Number.EPSILON) * 100) / 100;
 }
 
 function signedMoney(value: unknown, field: string) {
   const number = Number(value);
-  if (!Number.isFinite(number)) {
-    const error = new Error(`${field} must be a number`);
-    (error as Error & { status?: number }).status = 400;
-    throw error;
-  }
+  if (!Number.isFinite(number)) throw httpError(`${field} must be a number`, 400);
   return Math.round((number + Math.sign(number) * Number.EPSILON) * 100) / 100;
 }
 
 function isoDate(value: string, field: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
-    const error = new Error(`${field} must be YYYY-MM-DD`);
-    (error as Error & { status?: number }).status = 400;
-    throw error;
+    throw httpError(`${field} must be YYYY-MM-DD`, 400);
   }
   return value;
 }
 
 function currency(value: string) {
   const normalized = String(value || '').trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(normalized)) {
-    const error = new Error('currency must be a three-letter code');
-    (error as Error & { status?: number }).status = 400;
-    throw error;
-  }
+  if (!/^[A-Z]{3}$/.test(normalized)) throw httpError('currency must be a three-letter code', 400);
   return normalized;
 }
 
@@ -134,37 +128,21 @@ function daysApart(a: string, b: string) {
 export function validateJournalEntry(entry: JournalEntryInput): ValidatedJournal {
   const externalId = String(entry.external_id || '').trim();
   const description = String(entry.description || '').trim();
-  if (!externalId) {
-    const error = new Error('journal external_id is required');
-    (error as Error & { status?: number }).status = 400;
-    throw error;
-  }
-  if (!description) {
-    const error = new Error(`journal description is required for ${externalId}`);
-    (error as Error & { status?: number }).status = 400;
-    throw error;
-  }
+  if (!externalId) throw httpError('journal external_id is required', 400);
+  if (!description) throw httpError(`journal description is required for ${externalId}`, 400);
   const date = isoDate(String(entry.date || ''), `journal date for ${externalId}`);
   const journalCurrency = currency(entry.currency);
   if (!Array.isArray(entry.lines) || entry.lines.length < 2) {
-    const error = new Error(`journal ${externalId} must contain at least two lines`);
-    (error as Error & { status?: number }).status = 400;
-    throw error;
+    throw httpError(`journal ${externalId} must contain at least two lines`, 400);
   }
 
   const lines = entry.lines.map((line, index) => {
     const accountCode = String(line.account_code || '').trim();
-    if (!accountCode) {
-      const error = new Error(`account_code is required on journal ${externalId} line ${index + 1}`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
-    }
+    if (!accountCode) throw httpError(`account_code is required on journal ${externalId} line ${index + 1}`, 400);
     const debit = money(line.debit, `debit on journal ${externalId} line ${index + 1}`);
     const credit = money(line.credit, `credit on journal ${externalId} line ${index + 1}`);
     if ((debit > 0 && credit > 0) || (debit === 0 && credit === 0)) {
-      const error = new Error(`journal ${externalId} line ${index + 1} must have either debit or credit, not both/neither`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
+      throw httpError(`journal ${externalId} line ${index + 1} must have either debit or credit, not both/neither`, 400);
     }
     return {
       account_code: accountCode,
@@ -177,9 +155,7 @@ export function validateJournalEntry(entry: JournalEntryInput): ValidatedJournal
   const debitTotal = sum(lines.map(line => line.debit));
   const creditTotal = sum(lines.map(line => line.credit));
   if (debitTotal !== creditTotal) {
-    const error = new Error(`journal ${externalId} is not balanced: debits ${debitTotal} != credits ${creditTotal}`);
-    (error as Error & { status?: number }).status = 409;
-    throw error;
+    throw httpError(`journal ${externalId} is not balanced: debits ${debitTotal} != credits ${creditTotal}`, 409);
   }
 
   return {
@@ -198,11 +174,7 @@ function normalizeBankTransactions(items: BankTransactionInput[]) {
   const seen = new Set<string>();
   return items.map(item => {
     const id = String(item.transaction_id || '').trim();
-    if (!id || seen.has(id)) {
-      const error = new Error(!id ? 'bank transaction_id is required' : `duplicate bank transaction_id: ${id}`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
-    }
+    if (!id || seen.has(id)) throw httpError(!id ? 'bank transaction_id is required' : `duplicate bank transaction_id: ${id}`, 400);
     seen.add(id);
     return {
       transaction_id: id,
@@ -218,11 +190,7 @@ function normalizeLedgerItems(items: LedgerCashItemInput[]) {
   const seen = new Set<string>();
   return items.map(item => {
     const id = String(item.ledger_item_id || '').trim();
-    if (!id || seen.has(id)) {
-      const error = new Error(!id ? 'ledger_item_id is required' : `duplicate ledger_item_id: ${id}`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
-    }
+    if (!id || seen.has(id)) throw httpError(!id ? 'ledger_item_id is required' : `duplicate ledger_item_id: ${id}`, 400);
     seen.add(id);
     return {
       ledger_item_id: id,
@@ -289,18 +257,20 @@ export function reconcileBankToLedger(bankInput: BankTransactionInput[], ledgerI
 
   const matchedBank = new Set(matches.map(match => match.bank_transaction_id));
   const matchedLedger = new Set(matches.map(match => match.ledger_item_id));
+  const unmatchedBank = bank.filter(item => !matchedBank.has(item.transaction_id)).map(item => item.transaction_id);
+  const unmatchedLedger = ledger.filter(item => !matchedLedger.has(item.ledger_item_id)).map(item => item.ledger_item_id);
   return {
     matches,
     ambiguous,
-    unmatched_bank: bank.filter(item => !matchedBank.has(item.transaction_id)).map(item => item.transaction_id),
-    unmatched_ledger: ledger.filter(item => !matchedLedger.has(item.ledger_item_id)).map(item => item.ledger_item_id),
+    unmatched_bank: unmatchedBank,
+    unmatched_ledger: unmatchedLedger,
     controls: {
       bank_count: bank.length,
       ledger_count: ledger.length,
       matched_count: matches.length,
       ambiguous_count: ambiguous.length,
-      unmatched_bank_count: bank.length - matches.length,
-      unmatched_ledger_count: ledger.length - matches.length
+      unmatched_bank_count: unmatchedBank.length,
+      unmatched_ledger_count: unmatchedLedger.length
     }
   };
 }
@@ -319,31 +289,19 @@ function stableBatchInput(input: BookkeepingBatchInput) {
 export function calculateBookkeepingBatch(input: BookkeepingBatchInput) {
   const periodStart = isoDate(String(input.period_start || ''), 'period_start');
   const periodEnd = isoDate(String(input.period_end || ''), 'period_end');
-  if (periodStart > periodEnd) {
-    const error = new Error('period_start must not be after period_end');
-    (error as Error & { status?: number }).status = 400;
-    throw error;
-  }
+  if (periodStart > periodEnd) throw httpError('period_start must not be after period_end', 400);
   const batchCurrency = currency(input.currency);
   const journalsInput = Array.isArray(input.journals) ? input.journals : [];
   const seenJournalIds = new Set<string>();
   const journals = journalsInput.map(journal => {
     const validated = validateJournalEntry(journal);
-    if (seenJournalIds.has(validated.external_id)) {
-      const error = new Error(`duplicate journal external_id: ${validated.external_id}`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
-    }
+    if (seenJournalIds.has(validated.external_id)) throw httpError(`duplicate journal external_id: ${validated.external_id}`, 400);
     seenJournalIds.add(validated.external_id);
     if (validated.currency !== batchCurrency) {
-      const error = new Error(`journal ${validated.external_id} currency ${validated.currency} does not match batch currency ${batchCurrency}`);
-      (error as Error & { status?: number }).status = 409;
-      throw error;
+      throw httpError(`journal ${validated.external_id} currency ${validated.currency} does not match batch currency ${batchCurrency}`, 409);
     }
     if (validated.date < periodStart || validated.date > periodEnd) {
-      const error = new Error(`journal ${validated.external_id} date is outside the batch period`);
-      (error as Error & { status?: number }).status = 409;
-      throw error;
+      throw httpError(`journal ${validated.external_id} date is outside the batch period`, 409);
     }
     return validated;
   });
@@ -376,32 +334,27 @@ export function calculateBookkeepingBatch(input: BookkeepingBatchInput) {
 export async function prepareBookkeepingBatch(deploymentId: string, input: BookkeepingBatchInput) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   if (!['do-bookkeeping', 'bookkeeping-payroll'].includes(String(deployment.service))) {
-    const error = new Error('bookkeeping engine is not enabled for this service');
-    (error as Error & { status?: number }).status = 409;
-    throw error;
+    throw httpError('bookkeeping engine is not enabled for this service', 409);
   }
-  if (!deployment.company_id) {
-    const error = new Error('link or initialize the company before preparing bookkeeping');
-    (error as Error & { status?: number }).status = 409;
-    throw error;
-  }
+  if (!deployment.company_id) throw httpError('link or initialize the company before preparing bookkeeping', 409);
   if (!['RECEIVED', 'NOT_APPLICABLE_NEW_COMPANY'].includes(String(deployment.history_status || ''))) {
-    const error = new Error('complete bookkeeping history before preparing bookkeeping');
-    (error as Error & { status?: number }).status = 409;
-    throw error;
+    throw httpError('complete bookkeeping history before preparing bookkeeping', 409);
   }
 
+  const db = realtimeDatabase();
+  const companySnap = await db.ref(`finclose_companies/${deployment.company_id}`).once('value');
+  if (!companySnap.exists()) throw httpError('linked company not found', 404);
+  const company = companySnap.val() as Record<string, any>;
+  const companyCurrency = String(company.base_currency || '').trim().toUpperCase();
+  if (!companyCurrency) throw httpError('linked company base currency is missing', 409);
+
   const result = calculateBookkeepingBatch(input);
-  const companyCurrency = String(deployment.company_base_currency || deployment.base_currency || deployment.configuration?.base_currency || '').toUpperCase();
-  if (companyCurrency && companyCurrency !== result.currency) {
-    const error = new Error(`batch currency ${result.currency} does not match company base currency ${companyCurrency}`);
-    (error as Error & { status?: number }).status = 409;
-    throw error;
+  if (companyCurrency !== result.currency) {
+    throw httpError(`batch currency ${result.currency} does not match company base currency ${companyCurrency}`, 409);
   }
 
   const fingerprint = crypto.createHash('sha256').update(stableBatchInput(input)).digest('hex');
   const batchId = `${deploymentId}__${input.period_end}__${fingerprint.slice(0, 16)}`;
-  const db = realtimeDatabase();
   const existing = await db.ref(`finclose_bookkeeping_batches/${batchId}`).once('value');
   if (existing.exists()) return { ...existing.val(), duplicate: true };
 
@@ -411,7 +364,7 @@ export async function prepareBookkeepingBatch(deploymentId: string, input: Bookk
     bookkeeping_batch_id: batchId,
     deployment_id: deploymentId,
     company_id: deployment.company_id,
-    company_name: deployment.company_name || null,
+    company_name: deployment.company_name || company.legal_name || null,
     service: deployment.service,
     input_fingerprint: fingerprint,
     approval_status: 'PREPARED_NOT_APPROVED',
@@ -437,16 +390,10 @@ export async function prepareBookkeepingBatch(deploymentId: string, input: Bookk
 export async function getBookkeepingBatch(deploymentId: string, batchId: string) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   const snap = await realtimeDatabase().ref(`finclose_bookkeeping_batches/${batchId}`).once('value');
-  if (!snap.exists()) {
-    const error = new Error('bookkeeping batch not found');
-    (error as Error & { status?: number }).status = 404;
-    throw error;
-  }
+  if (!snap.exists()) throw httpError('bookkeeping batch not found', 404);
   const batch = snap.val() as Record<string, any>;
   if (String(batch.deployment_id) !== deploymentId || String(batch.company_id) !== String(deployment.company_id)) {
-    const error = new Error('bookkeeping batch does not belong to this service deployment');
-    (error as Error & { status?: number }).status = 403;
-    throw error;
+    throw httpError('bookkeeping batch does not belong to this service deployment', 403);
   }
   return batch;
 }
@@ -500,6 +447,9 @@ export function bookkeepingEngineSelfTest() {
       valid.reconciliation.matches[0].bank_transaction_id === 'B001' &&
       valid.reconciliation.ambiguous.length === 1 &&
       valid.reconciliation.ambiguous[0].bank_transaction_id === 'B002' &&
+      valid.reconciliation.unmatched_bank.includes('B002') &&
+      valid.reconciliation.unmatched_ledger.includes('L002') &&
+      valid.reconciliation.unmatched_ledger.includes('L003') &&
       unbalancedRejected &&
       valid.execution_status === 'PREPARED_NOT_POSTED',
     sample: valid
