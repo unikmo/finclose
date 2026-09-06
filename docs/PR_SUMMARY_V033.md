@@ -1,0 +1,1 @@
+v0.33 converts the proposed production foundation to a Firebase-only architecture: Firebase Auth, RTDB control plane, Firestore authoritative ledger, and Firebase Storage. Supabase/PostgreSQL is removed. Source is merge-ready after PR CI; PILOT activation remains gated on live Firebase configuration and security QA.
