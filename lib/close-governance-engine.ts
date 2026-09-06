@@ -184,6 +184,16 @@ function accountKey(accountCode: string) {
   return crypto.createHash('sha256').update(accountCode).digest('hex').slice(0, 24);
 }
 
+function balanceScopeFingerprint(scope: Record<string, any>[]) {
+  return fingerprint(scope.map(item => ({
+    account_code: String(item.account_code || ''),
+    account_name: item.account_name || null,
+    category: String(item.category || ''),
+    material: item.material !== false,
+    tolerance: Number(item.tolerance || 0)
+  })));
+}
+
 function actorRecord(actor: CloseActor) {
   if (actor.kind === 'customer') {
     if (!actor.user_id || !actor.email) throw httpError('authenticated customer identity is required', 403);
@@ -273,7 +283,7 @@ export async function configureSourceRequirements(deploymentId: string, input: {
 }
 
 export async function recordPeriodSourceEvidence(deploymentId: string, input: PeriodSourceEvidenceInput) {
-  await getServiceDeployment(deploymentId);
+  const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   const evidenceId = cleanId(input.evidence_id, 'evidence_id');
   const requirementId = cleanId(input.requirement_id, 'requirement_id');
   const periodStart = isoDate(input.period_start, 'period_start');
@@ -281,6 +291,7 @@ export async function recordPeriodSourceEvidence(deploymentId: string, input: Pe
   const coverageStart = isoDate(input.coverage_start, 'coverage_start');
   const coverageEnd = isoDate(input.coverage_end, 'coverage_end');
   if (periodStart > periodEnd) throw httpError('period_start must not be after period_end', 400);
+  if (deployment.company_id) await assertDateRangeOpenForCompany(String(deployment.company_id), periodStart, periodEnd, 'source evidence');
   if (coverageStart > coverageEnd) throw httpError('coverage_start must not be after coverage_end', 400);
   if (typeof input.sequence_complete !== 'boolean') throw httpError('sequence_complete must be true or false', 400);
 
@@ -432,6 +443,8 @@ async function deriveSourceCompleteness(deploymentId: string, close: Record<stri
 
 export async function evaluateSourceCompleteness(deploymentId: string, closeId: string) {
   const { close } = await requireClose(deploymentId, closeId);
+  if (String(close.close_status || '') === 'LOCKED') throw httpError('locked close source evidence is immutable; reopen the period first', 409);
+  if (String(close.close_status || '') === 'REOPENED') throw httpError('reopened close requires a new close version before source evaluation', 409);
   const result = await deriveSourceCompleteness(deploymentId, close);
   const now = Date.now();
   const record = {
@@ -481,9 +494,13 @@ export async function configureBalanceSheetScope(deploymentId: string, input: { 
   });
   if (!normalized.some(item => item.material)) throw httpError('at least one material balance-sheet account is required', 400);
   const now = Date.now();
+  const scopeFingerprint = balanceScopeFingerprint(normalized);
   const records = Object.fromEntries(normalized.map(item => [accountKey(item.account_code), { ...item, deployment_id: deploymentId, updated_at: now }]));
   const db = realtimeDatabase();
-  await db.ref(`finclose_balance_sheet_scope/${deploymentId}`).set(records);
+  await db.ref().update({
+    [`finclose_balance_sheet_scope/${deploymentId}`]: records,
+    [`finclose_balance_sheet_scope_meta/${deploymentId}`]: { deployment_id: deploymentId, scope_fingerprint: scopeFingerprint, account_count: normalized.length, material_account_count: normalized.filter(item => item.material).length, updated_at: now }
+  });
   const auditKey = db.ref('finclose_audit_events').push().key!;
   await db.ref(`finclose_audit_events/${auditKey}`).set({
     event: 'BALANCE_SHEET_SCOPE_CONFIGURED',
@@ -492,7 +509,7 @@ export async function configureBalanceSheetScope(deploymentId: string, input: { 
     total_account_count: normalized.length,
     created_at: now
   });
-  return { deployment_id: deploymentId, accounts: normalized, updated_at: now };
+  return { deployment_id: deploymentId, scope_fingerprint: scopeFingerprint, accounts: normalized, updated_at: now };
 }
 
 type CalculableReconciliation = BalanceSheetReconciliationInput & { evidence_live?: boolean };
@@ -574,6 +591,8 @@ export function calculateBalanceSheetReconciliation(scope: Record<string, any>[]
 
 export async function prepareBalanceSheetReconciliation(deploymentId: string, closeId: string, input: { reconciliations: BalanceSheetReconciliationInput[] }) {
   const { close } = await requireClose(deploymentId, closeId);
+  if (String(close.close_status || '') === 'LOCKED') throw httpError('locked close reconciliation is immutable; reopen the period first', 409);
+  if (String(close.close_status || '') === 'REOPENED') throw httpError('reopened close requires a new close version before reconciliation', 409);
   const scopeSnap = await realtimeDatabase().ref(`finclose_balance_sheet_scope/${deploymentId}`).once('value');
   if (!scopeSnap.exists()) throw httpError('configure the balance-sheet account scope before reconciling the close', 409);
   const scope = Object.values(scopeSnap.val() as Record<string, any>) as Record<string, any>[];
@@ -592,11 +611,13 @@ export async function prepareBalanceSheetReconciliation(deploymentId: string, cl
       evidence_live: true
     });
   }
+  const scopeFingerprint = balanceScopeFingerprint(scope);
   const result = calculateBalanceSheetReconciliation(scope, entries);
   const now = Date.now();
   const record = {
     ...result,
     balance_sheet_reconciliation_id: `${closeId}__balance-sheet`,
+    scope_fingerprint: scopeFingerprint,
     deployment_id: deploymentId,
     company_id: close.company_id,
     monthly_close_id: closeId,
@@ -628,15 +649,23 @@ async function loadBalanceSheetReconciliation(closeId: string) {
 
 export async function refreshCloseGovernance(deploymentId: string, closeId: string) {
   const { close } = await requireClose(deploymentId, closeId);
+  if (String(close.close_status || '') === 'LOCKED') {
+    return { monthly_close_id: closeId, status: close.status, approval_status: close.approval_status, layer_a: close.layer_a || null };
+  }
   const source = await evaluateSourceCompleteness(deploymentId, closeId);
   const balanceSheet = await loadBalanceSheetReconciliation(closeId);
+  const scopeSnap = await realtimeDatabase().ref(`finclose_balance_sheet_scope/${deploymentId}`).once('value');
+  const currentScope = scopeSnap.exists() ? Object.values(scopeSnap.val() as Record<string, any>) as Record<string, any>[] : [];
+  const currentScopeFingerprint = currentScope.length ? balanceScopeFingerprint(currentScope) : null;
+  const scopeMatches = Boolean(balanceSheet && currentScopeFingerprint && String(balanceSheet.scope_fingerprint || '') === currentScopeFingerprint);
   const corePass = String(close.control_status || '') === 'PASS';
   const sourcePass = String(source.status) === 'SYSTEM_DERIVED_COMPLETE';
-  const balanceSheetPass = String(balanceSheet?.status || '') === 'PASS';
+  const balanceSheetPass = String(balanceSheet?.status || '') === 'PASS' && scopeMatches;
   const blockers = [
     ...(Array.isArray(close.exceptions) ? close.exceptions.map(String) : []),
     ...source.blockers.map((item: string) => `SOURCE:${item}`),
-    ...(balanceSheet ? (balanceSheet.exceptions || []).map((item: string) => `BALANCE_SHEET:${item}`) : ['BALANCE_SHEET:NOT_PREPARED'])
+    ...(balanceSheet ? (balanceSheet.exceptions || []).map((item: string) => `BALANCE_SHEET:${item}`) : ['BALANCE_SHEET:NOT_PREPARED']),
+    ...(balanceSheet && !scopeMatches ? ['BALANCE_SHEET:SCOPE_CHANGED_RECONCILIATION_REQUIRED'] : [])
   ];
   const ready = corePass && sourcePass && balanceSheetPass && blockers.length === 0;
   const existingApproval = String(close.approval_status || '');
@@ -665,6 +694,8 @@ export async function refreshCloseGovernance(deploymentId: string, closeId: stri
     source_completeness_status: source.status,
     balance_sheet_reconciliation_id: balanceSheet?.balance_sheet_reconciliation_id || null,
     balance_sheet_reconciliation_status: balanceSheet?.status || 'NOT_PREPARED',
+    balance_sheet_scope_fingerprint: currentScopeFingerprint,
+    balance_sheet_scope_matches_reconciliation: scopeMatches,
     governance_status: reopened ? 'REOPENED_REQUIRES_NEW_CLOSE' : effectiveReady ? 'READY_FOR_APPROVAL' : 'BLOCKED',
     blockers: effectiveBlockers,
     evaluated_at: now
@@ -741,6 +772,7 @@ export async function approveMonthlyClose(deploymentId: string, closeId: string,
     actor: identity,
     note: String(note || '').trim().slice(0, 500) || null,
     evidence_hash: evidenceHash,
+    evidence_snapshot: snapshot,
     status: 'APPROVED',
     created_at: now
   };
@@ -822,6 +854,7 @@ export async function lockMonthlyClose(deploymentId: string, closeId: string, ac
     period_end: close.period_end,
     approval_id: close.approval_id,
     approval_evidence_hash: currentHash,
+    evidence_snapshot: snapshot,
     status: 'LOCKED',
     locked_by: identity,
     lock_note: String(note || '').trim().slice(0, 500) || null,
