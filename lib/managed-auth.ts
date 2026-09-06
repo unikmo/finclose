@@ -1,12 +1,14 @@
+import crypto from 'node:crypto';
 import { getAuth } from 'firebase-admin/auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { firebaseApp } from './finclose-backend';
+import { firebaseApp, realtimeDatabase } from './finclose-backend';
 import { assertCustomerOrLab as assertLegacyCustomerOrLab, currentUser as currentLegacyUser, logoutResponse as legacyLogoutResponse } from './lab-auth';
-import { firebaseClientConfig, isRealDataMode, runtimeMode } from './runtime-mode';
+import { assertRealDataRuntimeReady, firebaseClientConfig, isRealDataMode } from './runtime-mode';
 
 const FIREBASE_SESSION_COOKIE = 'finclose_firebase_session';
 const FIREBASE_SESSION_MS = 8 * 60 * 60 * 1000;
 const MAX_AUTH_AGE_SECONDS = 5 * 60;
+const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 
 export type ManagedUser = {
   user_id: string;
@@ -58,7 +60,79 @@ function managedUserFromClaims(claims: Record<string, unknown>): ManagedUser {
   };
 }
 
-async function firebasePasswordSignIn(email: string, password: string) {
+async function consumeAuthRateLimit(action: string, email: string, limit: number) {
+  if (!isRealDataMode()) return;
+  const key = crypto.createHash('sha256').update(`${action}:${email}`).digest('hex').slice(0, 48);
+  const ref = realtimeDatabase().ref(`finclose_auth_rate_limits/${key}`);
+  const now = Date.now();
+  let blocked = false;
+  const result = await ref.transaction(current => {
+    const data = (current || {}) as Record<string, unknown>;
+    const windowStartedAt = Number(data.window_started_at || 0);
+    const count = Number(data.count || 0);
+    if (!windowStartedAt || now - windowStartedAt >= AUTH_RATE_WINDOW_MS) {
+      return { action, count: 1, window_started_at: now, expires_at: now + AUTH_RATE_WINDOW_MS };
+    }
+    if (count >= limit) {
+      blocked = true;
+      return;
+    }
+    return { ...data, action, count: count + 1, expires_at: windowStartedAt + AUTH_RATE_WINDOW_MS };
+  });
+  if (blocked || !result.committed) throw httpError('too many authentication attempts; try again later', 429);
+}
+
+async function identityToolkitRequest(payload: Record<string, unknown>) {
+  const apiKey = firebaseClientConfig().apiKey;
+  if (!apiKey) throw httpError('Firebase Authentication web API key is not configured', 503);
+  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+    cache: 'no-store'
+  });
+  const body = await response.json().catch(() => ({})) as Record<string, any>;
+  return { response, body };
+}
+
+async function sendVerificationEmail(idToken: string) {
+  const { response, body } = await identityToolkitRequest({ requestType: 'VERIFY_EMAIL', idToken });
+  if (!response.ok) {
+    const code = String(body?.error?.message || 'EMAIL_VERIFICATION_FAILED');
+    if (!['TOO_MANY_ATTEMPTS_TRY_LATER'].includes(code)) throw httpError(`Firebase verification email failed: ${code}`, 502);
+  }
+}
+
+export async function requestPasswordReset(input: Record<string, unknown>) {
+  if (!isRealDataMode()) throw httpError('managed password reset is only enabled in PILOT or PRODUCTION mode', 409);
+  assertRealDataRuntimeReady();
+  const email = normalizedEmail(input.email);
+  await consumeAuthRateLimit('password-reset', email, 5);
+  const { response, body } = await identityToolkitRequest({ requestType: 'PASSWORD_RESET', email });
+  if (!response.ok) {
+    const code = String(body?.error?.message || 'PASSWORD_RESET_FAILED');
+    if (!['EMAIL_NOT_FOUND', 'INVALID_EMAIL'].includes(code)) {
+      throw httpError('password reset could not be requested', code === 'TOO_MANY_ATTEMPTS_TRY_LATER' ? 429 : 502);
+    }
+  }
+  return NextResponse.json({ accepted: true, message: 'If an account exists for that email, Firebase will send password reset instructions.' });
+}
+
+export async function resendVerification(input: Record<string, unknown>) {
+  if (!isRealDataMode()) throw httpError('managed verification is only enabled in PILOT or PRODUCTION mode', 409);
+  assertRealDataRuntimeReady();
+  const email = normalizedEmail(input.email);
+  const password = normalizedPassword(input.password);
+  await consumeAuthRateLimit('verification-resend', email, 5);
+  const idToken = await firebasePasswordSignIn(email, password, false);
+  const decoded = await getAuth(firebaseApp()).verifyIdToken(idToken, true);
+  if (decoded.email_verified === true) return NextResponse.json({ accepted: true, already_verified: true });
+  await sendVerificationEmail(idToken);
+  return NextResponse.json({ accepted: true, verification_required: true });
+}
+
+async function firebasePasswordSignIn(email: string, password: string, rateLimit = true) {
+  if (rateLimit) await consumeAuthRateLimit('login', email, 10);
   const apiKey = firebaseClientConfig().apiKey;
   if (!apiKey) throw httpError('Firebase Authentication web API key is not configured', 503);
   const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`, {
@@ -74,6 +148,7 @@ async function firebasePasswordSignIn(email: string, password: string) {
       throw httpError('email or password is incorrect', 401);
     }
     if (code === 'USER_DISABLED') throw httpError('account is disabled', 403);
+    if (code === 'TOO_MANY_ATTEMPTS_TRY_LATER') throw httpError('too many authentication attempts; try again later', 429);
     throw httpError(`Firebase sign-in failed: ${code}`, 502);
   }
   return String(body.idToken);
@@ -81,6 +156,7 @@ async function firebasePasswordSignIn(email: string, password: string) {
 
 export async function createFirebaseSessionResponse(idToken: string) {
   if (!isRealDataMode()) throw httpError('Firebase session exchange is only enabled in PILOT or PRODUCTION mode', 409);
+  assertRealDataRuntimeReady();
   if (!idToken) throw httpError('Firebase ID token is required', 400);
   const auth = getAuth(firebaseApp());
   const decoded = await auth.verifyIdToken(idToken, true);
@@ -89,12 +165,14 @@ export async function createFirebaseSessionResponse(idToken: string) {
     throw httpError('recent sign-in is required before creating a FinClose session', 401);
   }
   if (!decoded.email) throw httpError('email identity is required', 403);
-  if (decoded.email_verified !== true && runtimeMode() === 'PRODUCTION') {
-    throw httpError('verify your email before using FinClose production', 403);
-  }
   const cookie = await auth.createSessionCookie(idToken, { expiresIn: FIREBASE_SESSION_MS });
   const user = managedUserFromClaims(decoded as unknown as Record<string, unknown>);
-  const response = NextResponse.json({ authenticated: true, user, auth_mode: user.auth_mode });
+  const response = NextResponse.json({
+    authenticated: true,
+    user,
+    auth_mode: user.auth_mode,
+    verification_required: user.email_verified !== true
+  });
   response.cookies.set({
     name: FIREBASE_SESSION_COOKIE,
     value: cookie,
@@ -109,9 +187,11 @@ export async function createFirebaseSessionResponse(idToken: string) {
 
 export async function registerManagedAccount(input: Record<string, unknown>) {
   if (!isRealDataMode()) throw httpError('managed registration is only enabled in PILOT or PRODUCTION mode', 409);
+  assertRealDataRuntimeReady();
   const name = normalizedName(input.name);
   const email = normalizedEmail(input.email);
   const password = normalizedPassword(input.password);
+  await consumeAuthRateLimit('register', email, 5);
   const auth = getAuth(firebaseApp());
   try {
     await auth.createUser({ email, password, displayName: name, disabled: false });
@@ -121,15 +201,19 @@ export async function registerManagedAccount(input: Record<string, unknown>) {
     if (code.includes('invalid-password') || code.includes('invalid-email')) throw httpError('account details are invalid', 400);
     throw error;
   }
-  const idToken = await firebasePasswordSignIn(email, password);
+  const idToken = await firebasePasswordSignIn(email, password, false);
+  await sendVerificationEmail(idToken);
   return createFirebaseSessionResponse(idToken);
 }
 
 export async function loginManagedAccount(input: Record<string, unknown>) {
   if (!isRealDataMode()) throw httpError('managed login is only enabled in PILOT or PRODUCTION mode', 409);
+  assertRealDataRuntimeReady();
   const email = normalizedEmail(input.email);
   const password = normalizedPassword(input.password);
   const idToken = await firebasePasswordSignIn(email, password);
+  const decoded = await getAuth(firebaseApp()).verifyIdToken(idToken, true);
+  if (decoded.email_verified !== true) await sendVerificationEmail(idToken);
   return createFirebaseSessionResponse(idToken);
 }
 
@@ -160,6 +244,7 @@ export async function authenticateRequest(req: NextRequest): Promise<RequestIden
   }
   const user = await currentManagedUser(req);
   if (!user) throw httpError('sign in is required', 401);
+  if (!user.email_verified) throw httpError('verify your email before using real financial data in FinClose', 403);
   return { kind: 'customer', user };
 }
 

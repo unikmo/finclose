@@ -3,6 +3,7 @@ import { realtimeDatabase, storageBucket } from './finclose-backend';
 import { validateFinancialUpload } from './file-security';
 import { getServiceDeployment } from './service-deployments';
 import { assertRealDataRuntimeReady, isRealDataMode } from './runtime-mode';
+import { quarantineStorageSegment, realDataUploadSecurityState } from './upload-quarantine';
 
 function httpError(message: string, status: number) {
   const error = new Error(message);
@@ -90,11 +91,12 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
   const historyId = `${deploymentId}__history__${sha256}`;
   const db = realtimeDatabase();
   const existing = await db.ref(`finclose_service_history/${historyId}`).once('value');
-  if (existing.exists()) return { ...existing.val(), status: 'ALREADY_RECEIVED' };
+  if (existing.exists()) return { ...existing.val(), duplicate: true };
 
   const organizationId = String(deployment.organization_id || 'lab').trim() || 'lab';
   const companyId = String(deployment.company_id || 'unlinked').trim() || 'unlinked';
-  const storagePath = `finclose/organizations/${organizationId}/companies/${companyId}/service-deployments/${deploymentId}/historical-context/${crypto.randomUUID()}/${validation.safe_name}`;
+  const securityState = realDataUploadSecurityState();
+  const storagePath = `finclose/organizations/${organizationId}/companies/${companyId}/service-deployments/${deploymentId}/historical-context/${quarantineStorageSegment()}/${crypto.randomUUID()}/${validation.safe_name}`;
   await storageBucket().file(storagePath).save(buffer, {
     resumable: false,
     metadata: {
@@ -107,7 +109,8 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
         purpose: 'historical_context',
         sha256,
         validationStatus: validation.validation_status,
-        malwareScanStatus: validation.malware_scan_status
+        malwareScanStatus: validation.malware_scan_status,
+        securityReviewStatus: securityState.security_review_status
       }
     }
   });
@@ -125,32 +128,40 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
     content_type: validation.content_type,
     validation_status: validation.validation_status,
     malware_scan_status: validation.malware_scan_status,
+    security_review_status: securityState.security_review_status,
     bytes: buffer.length,
     sha256,
     storage_path: storagePath,
-    status: 'RECEIVED',
+    status: securityState.status,
     created_at: now
   };
   const auditKey = db.ref('finclose_audit_events').push().key!;
-
-  await db.ref().update({
+  const updates: Record<string, unknown> = {
     [`finclose_service_history/${historyId}`]: record,
-    [`finclose_service_deployments/${deploymentId}/history_status`]: 'RECEIVED',
-    [`finclose_service_deployments/${deploymentId}/history_count`]: previousCount + 1,
-    [`finclose_service_deployments/${deploymentId}/latest_history_id`]: historyId,
-    [`finclose_service_deployments/${deploymentId}/status`]: 'HISTORY_RECEIVED_CONNECTOR_READY',
     [`finclose_service_deployments/${deploymentId}/updated_at`]: now,
     [`finclose_audit_events/${auditKey}`]: {
-      event: 'SERVICE_HISTORICAL_CONTEXT_RECEIVED',
+      event: securityState.status === 'RECEIVED' ? 'SERVICE_HISTORICAL_CONTEXT_RECEIVED' : 'SERVICE_HISTORICAL_CONTEXT_QUARANTINED',
       organization_id: deployment.organization_id || null,
       deployment_id: deploymentId,
       company_id: deployment.company_id || null,
       service: deployment.service,
       history_id: historyId,
       sha256,
+      security_review_status: securityState.security_review_status,
       created_at: now
     }
-  });
+  };
+  if (securityState.status === 'RECEIVED') {
+    updates[`finclose_service_deployments/${deploymentId}/history_status`] = 'RECEIVED';
+    updates[`finclose_service_deployments/${deploymentId}/history_count`] = previousCount + 1;
+    updates[`finclose_service_deployments/${deploymentId}/latest_history_id`] = historyId;
+    updates[`finclose_service_deployments/${deploymentId}/status`] = 'HISTORY_RECEIVED_CONNECTOR_READY';
+  } else {
+    updates[`finclose_service_deployments/${deploymentId}/history_status`] = 'QUARANTINED_REVIEW_REQUIRED';
+    updates[`finclose_service_deployments/${deploymentId}/latest_quarantined_history_id`] = historyId;
+    updates[`finclose_service_deployments/${deploymentId}/status`] = 'HISTORY_QUARANTINED_REVIEW_REQUIRED';
+  }
+  await db.ref().update(updates);
 
   return record;
 }
