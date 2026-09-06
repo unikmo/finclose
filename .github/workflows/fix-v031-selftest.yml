@@ -1,0 +1,35 @@
+name: Fix v0.31 finance-cycle self-test
+on:
+  push:
+    branches: [fix/v031-finance-cycle-selftest]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v031-finance-cycle-selftest
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('lib/finance-cycle-engine.ts')
+          s=p.read_text()
+          replacements=[
+            ("totals: { net_pay: 800, income_tax: 200, employee_pension: 20, employer_pension: 20 }", "totals: { net_pay: 780, income_tax: 200, employee_pension: 20, employer_pension: 20 }"),
+            ("{ side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: 800 }", "{ side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: 780 }"),
+            ("{ settlement_id: 'NET', category: 'NET_PAYROLL', date: '2026-08-31', amount: 800, reference: 'PAYROLL-AUG' }", "{ settlement_id: 'NET', category: 'NET_PAYROLL', date: '2026-08-31', amount: 780, reference: 'PAYROLL-AUG' }"),
+            ("{ transaction_id: 'BANK-NET', date: '2026-08-31', amount: -800, reference: 'PAYROLL-AUG' }", "{ transaction_id: 'BANK-NET', date: '2026-08-31', amount: -780, reference: 'PAYROLL-AUG' }")
+          ]
+          for old,new in replacements:
+              if old not in s: raise SystemExit(f'missing expected snippet: {old}')
+              s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/finance-cycle-engine.ts
+          git commit -m 'Correct finance-cycle synthetic payroll balance'
+          git push origin HEAD:fix/v031-finance-cycle-selftest
