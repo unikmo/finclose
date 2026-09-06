@@ -17,6 +17,23 @@ function target(kind: UploadArtifactKind, artifactId: string) {
     : { path: `finclose_service_sources/${artifactId}`, idField: 'source_id' };
 }
 
+async function loadArtifact(deploymentId: string, kind: UploadArtifactKind, artifactId: string) {
+  const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
+  const pointer = target(kind, artifactId);
+  const db = realtimeDatabase();
+  const snap = await db.ref(pointer.path).once('value');
+  if (!snap.exists()) throw httpError('upload artifact not found', 404);
+  const artifact = snap.val() as Record<string, any>;
+  if (String(artifact[pointer.idField] || '') !== artifactId || String(artifact.deployment_id || '') !== deploymentId) {
+    throw httpError('upload artifact does not belong to this deployment', 403);
+  }
+  if (String(artifact.organization_id || '') !== String(deployment.organization_id || '')) {
+    throw httpError('upload artifact organization ownership mismatch', 403);
+  }
+  if (!artifact.storage_path) throw httpError('upload artifact storage path is missing', 409);
+  return { deployment, pointer, artifact };
+}
+
 export function realDataUploadSecurityState() {
   if (!isRealDataMode()) return { status: 'RECEIVED', security_review_status: 'NOT_REQUIRED_LAB' } as const;
   assertRealDataRuntimeReady();
@@ -32,6 +49,32 @@ export function quarantineStorageSegment() {
   return isRealDataMode() ? 'quarantine' : 'accepted';
 }
 
+export async function downloadServiceUploadForReview(input: {
+  deployment_id: string;
+  kind: UploadArtifactKind;
+  artifact_id: string;
+}) {
+  if (!isRealDataMode()) throw httpError('upload security review is only used in PILOT or PRODUCTION mode', 409);
+  assertRealDataRuntimeReady();
+  if (uploadQuarantineMode() !== 'MANUAL_REVIEW') {
+    throw httpError('manual upload inspection is disabled unless MANUAL_REVIEW quarantine mode is active', 409);
+  }
+  const { artifact } = await loadArtifact(input.deployment_id, input.kind, input.artifact_id);
+  if (String(artifact.status || '') !== 'QUARANTINED') throw httpError('only quarantined artifacts can be downloaded for manual review', 409);
+  const [buffer] = await storageBucket().file(String(artifact.storage_path)).download();
+  return {
+    artifact: {
+      artifact_id: input.artifact_id,
+      filename: String(artifact.filename || 'financial-upload'),
+      bytes: Number(artifact.bytes || buffer.length),
+      sha256: String(artifact.sha256 || ''),
+      content_type: String(artifact.content_type || 'application/octet-stream'),
+      security_review_status: String(artifact.security_review_status || '')
+    },
+    buffer
+  };
+}
+
 export async function reviewServiceUpload(input: {
   deployment_id: string;
   kind: UploadArtifactKind;
@@ -42,23 +85,21 @@ export async function reviewServiceUpload(input: {
 }) {
   if (!isRealDataMode()) throw httpError('upload security review is only used in PILOT or PRODUCTION mode', 409);
   assertRealDataRuntimeReady();
+  if (uploadQuarantineMode() !== 'MANUAL_REVIEW') {
+    throw httpError('manual upload clearance is disabled unless MANUAL_REVIEW quarantine mode is active', 409);
+  }
   if (!input.actor_user_id) throw httpError('authenticated reviewer identity is required', 403);
   if (!['CLEAN', 'REJECTED'].includes(input.decision)) throw httpError('decision must be CLEAN or REJECTED', 400);
 
-  const deployment = await getServiceDeployment(input.deployment_id) as Record<string, any>;
-  const pointer = target(input.kind, input.artifact_id);
-  const db = realtimeDatabase();
-  const snap = await db.ref(pointer.path).once('value');
-  if (!snap.exists()) throw httpError('upload artifact not found', 404);
-  const artifact = snap.val() as Record<string, any>;
-  if (String(artifact[pointer.idField] || '') !== input.artifact_id || String(artifact.deployment_id || '') !== input.deployment_id) {
-    throw httpError('upload artifact does not belong to this deployment', 403);
+  const { deployment, pointer, artifact } = await loadArtifact(input.deployment_id, input.kind, input.artifact_id);
+  const existingStatus = String(artifact.status || '');
+  if (existingStatus === 'RECEIVED' && input.decision === 'CLEAN') return { ...artifact, duplicate: true };
+  if (existingStatus === 'REJECTED' && input.decision === 'REJECTED') return { ...artifact, duplicate: true };
+  if (existingStatus !== 'QUARANTINED') {
+    throw httpError('security review decisions are immutable; only a quarantined artifact can be cleared or rejected', 409);
   }
-  if (String(artifact.organization_id || '') !== String(deployment.organization_id || '')) {
-    throw httpError('upload artifact organization ownership mismatch', 403);
-  }
-  if (!artifact.storage_path) throw httpError('upload artifact storage path is missing', 409);
 
+  const db = realtimeDatabase();
   const now = Date.now();
   const note = String(input.note || '').trim().slice(0, 500) || null;
   const clean = input.decision === 'CLEAN';
@@ -86,7 +127,7 @@ export async function reviewServiceUpload(input: {
 
   if (input.kind === 'history') {
     if (clean) {
-      const approvedCount = Number(deployment.history_count || 0) + (String(artifact.status || '') === 'RECEIVED' ? 0 : 1);
+      const approvedCount = Number(deployment.history_count || 0) + 1;
       updates[`finclose_service_deployments/${input.deployment_id}/history_status`] = 'RECEIVED';
       updates[`finclose_service_deployments/${input.deployment_id}/history_count`] = approvedCount;
       updates[`finclose_service_deployments/${input.deployment_id}/latest_history_id`] = input.artifact_id;
@@ -110,14 +151,24 @@ export async function reviewServiceUpload(input: {
   try {
     await storageBucket().file(String(artifact.storage_path)).setMetadata({
       metadata: {
-        ...(artifact.storage_metadata || {}),
         securityReviewStatus,
         securityReviewedBy: input.actor_user_id,
         securityReviewedAt: String(now)
       }
     });
-  } catch {
-    // RTDB remains the workflow record. Storage metadata failure is visible through the audit trail and can be retried.
+  } catch (error) {
+    const metadataAuditKey = db.ref('finclose_audit_events').push().key!;
+    await db.ref(`finclose_audit_events/${metadataAuditKey}`).set({
+      event: 'UPLOAD_STORAGE_METADATA_SYNC_FAILED',
+      organization_id: deployment.organization_id || null,
+      company_id: deployment.company_id || null,
+      deployment_id: input.deployment_id,
+      artifact_kind: input.kind,
+      artifact_id: input.artifact_id,
+      actor_user_id: input.actor_user_id,
+      detail: (error as Error).message,
+      created_at: Date.now()
+    });
   }
 
   const reviewed = await db.ref(pointer.path).once('value');
