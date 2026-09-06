@@ -1,0 +1,133 @@
+name: Harden Layer A reopen lineage
+on:
+  push:
+    branches: [feature/layer-a-close-governance-v032]
+permissions:
+  contents: write
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/layer-a-close-governance-v032
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('lib/finance-cycle-engine.ts')
+          s=p.read_text()
+          old="""  let cycleId = baseCycleId;
+  let closeId = baseCloseId;
+  const db = realtimeDatabase();
+  const existing = await db.ref(`finclose_finance_cycles/${baseCycleId}`).once('value');
+  if (existing.exists()) {
+    const latestCloseId = String(deployment.latest_monthly_close_id || (existing.val() as Record<string, any>).monthly_close_id || baseCloseId);
+    const latestCloseSnap = await db.ref(`finclose_monthly_closes/${latestCloseId}`).once('value');
+    const latestClose = latestCloseSnap.exists() ? latestCloseSnap.val() as Record<string, any> : null;
+    if (latestClose && String(latestClose.close_status || '') === 'REOPENED' && String(latestClose.period_end) === periodEnd) {
+      const nonce = String(latestClose.reopen_nonce || '');
+      if (!nonce) throw httpError('reopened close is missing version nonce', 409);
+      cycleId = `${baseCycleId}__reopen_${nonce}`;
+      closeId = `${baseCloseId}__reopen_${nonce}`;
+      const reopenedExisting = await db.ref(`finclose_finance_cycles/${cycleId}`).once('value');
+      if (reopenedExisting.exists()) return { ...reopenedExisting.val(), duplicate: true };
+    } else {
+      return { ...existing.val(), duplicate: true };
+    }
+  }
+"""
+          new="""  let cycleId = baseCycleId;
+  let closeId = baseCloseId;
+  let supersedesCloseId: string | null = null;
+  let supersedesCycleId: string | null = null;
+  const db = realtimeDatabase();
+
+  const latestCloseId = String(deployment.latest_monthly_close_id || '');
+  let latestClose: Record<string, any> | null = null;
+  if (latestCloseId) {
+    const latestCloseSnap = await db.ref(`finclose_monthly_closes/${latestCloseId}`).once('value');
+    latestClose = latestCloseSnap.exists() ? latestCloseSnap.val() as Record<string, any> : null;
+  }
+
+  if (latestClose && String(latestClose.period_end) === periodEnd) {
+    if (String(latestClose.close_status || '') === 'REOPENED') {
+      const nonce = String(latestClose.reopen_nonce || '');
+      if (!nonce) throw httpError('reopened close is missing version nonce', 409);
+      supersedesCloseId = String(latestClose.monthly_close_id || latestCloseId);
+      supersedesCycleId = String(latestClose.finance_cycle_id || '') || null;
+      cycleId = `${baseCycleId}__reopen_${nonce}`;
+      closeId = `${baseCloseId}__reopen_${nonce}`;
+      const reopenedExisting = await db.ref(`finclose_finance_cycles/${cycleId}`).once('value');
+      if (reopenedExisting.exists()) return { ...reopenedExisting.val(), duplicate: true };
+    } else if (latestClose.finance_cycle_id) {
+      const latestCycleSnap = await db.ref(`finclose_finance_cycles/${latestClose.finance_cycle_id}`).once('value');
+      if (latestCycleSnap.exists()) {
+        const latestCycle = latestCycleSnap.val() as Record<string, any>;
+        if (String(latestCycle.input_fingerprint || '') === fingerprint) return { ...latestCycle, duplicate: true };
+      }
+    }
+  }
+
+  if (cycleId === baseCycleId) {
+    const existing = await db.ref(`finclose_finance_cycles/${baseCycleId}`).once('value');
+    if (existing.exists()) {
+      const baseCloseSnap = await db.ref(`finclose_monthly_closes/${baseCloseId}`).once('value');
+      const baseClose = baseCloseSnap.exists() ? baseCloseSnap.val() as Record<string, any> : null;
+      if (baseClose && String(baseClose.close_status || '') === 'REOPENED' && latestClose && String(latestClose.monthly_close_id || '') !== baseCloseId) {
+        throw httpError('this reopened close has already been superseded by a newer close version', 409);
+      }
+      return { ...existing.val(), duplicate: true };
+    }
+  }
+"""
+          if old not in s: raise SystemExit('expected reopen-id block not found')
+          s=s.replace(old,new,1)
+          old2="""    bookkeeping_batch_id: bookkeepingBatch.bookkeeping_batch_id,
+    created_at: now,
+    updated_at: now
+"""
+          new2="""    bookkeeping_batch_id: bookkeepingBatch.bookkeeping_batch_id,
+    input_fingerprint: fingerprint,
+    supersedes_monthly_close_id: supersedesCloseId,
+    created_at: now,
+    updated_at: now
+"""
+          if old2 not in s: raise SystemExit('expected close record lineage block not found')
+          s=s.replace(old2,new2,1)
+          old3="""    bookkeeping_batch_id: bookkeepingBatch.bookkeeping_batch_id,
+    monthly_close_id: closeId,
+    stage_status: {
+"""
+          new3="""    bookkeeping_batch_id: bookkeepingBatch.bookkeeping_batch_id,
+    monthly_close_id: closeId,
+    supersedes_finance_cycle_id: supersedesCycleId,
+    supersedes_monthly_close_id: supersedesCloseId,
+    stage_status: {
+"""
+          if old3 not in s: raise SystemExit('expected cycle lineage block not found')
+          s=s.replace(old3,new3,1)
+          s=s.replace("execution_boundary: 'NO_PAYMENT_NO_FILING_NO_EXTERNAL_POSTING_NO_PERIOD_LOCK'", "execution_boundary: 'NO_PAYMENT_NO_FILING_NO_EXTERNAL_POSTING; INTERNAL_PERIOD_LOCK_AFTER_LAYER_A_APPROVAL'", 1)
+          old4="""    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/finance_cycle_id`]: cycleId,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/source_payroll_run_id`]: payrollRun.payroll_run_id,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/monthly_close_id`]: closeId,
+"""
+          new4="""    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/latest_finance_cycle_id`]: cycleId,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/source_payroll_run_id`]: payrollRun.payroll_run_id,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/latest_monthly_close_id`]: closeId,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/finance_cycle_links/${cycleId}`]: {
+      finance_cycle_id: cycleId,
+      monthly_close_id: closeId,
+      supersedes_finance_cycle_id: supersedesCycleId,
+      linked_at: now
+    },
+"""
+          if old4 not in s: raise SystemExit('expected bookkeeping lineage writes not found')
+          s=s.replace(old4,new4,1)
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/finance-cycle-engine.ts
+          git commit -m 'Preserve reopen versions and bookkeeping lineage'
+          git push origin HEAD:feature/layer-a-close-governance-v032
