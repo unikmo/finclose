@@ -1,1 +1,0 @@
-FinClose canonical data architecture is Firebase-only. Do not provision or introduce Supabase/PostgreSQL unless the user explicitly reverses this decision.
