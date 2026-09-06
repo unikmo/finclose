@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import PayrollOnboarding from './PayrollOnboarding';
 import ServiceOnboarding from './ServiceOnboarding';
 
 const SERVICES = new Set(['balance-books', 'payroll', 'do-bookkeeping', 'bookkeeping-payroll']);
@@ -14,5 +15,7 @@ export default function ServiceStartPage({ params }: { params: { service: string
       </main>
     );
   }
+
+  if (params.service === 'payroll') return <PayrollOnboarding />;
   return <ServiceOnboarding serviceKey={params.service} />;
 }
