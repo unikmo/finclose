@@ -69,6 +69,9 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       if (!deep || !configured) return NextResponse.json({ version: '0.34.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', runtime: readiness, configured });
       const reachable = { database: false, storage: false, firestore: false };
       const errors: string[] = [];
+      if (readiness.real_data_mode && !readiness.real_data_allowed_by_config) {
+        errors.push(`runtime: ${readiness.blockers.join(', ') || 'real-data release gate is not ready'}`);
+      }
       try {
         await realtimeDatabase().ref('finclose_health').limitToFirst(1).once('value');
         reachable.database = true;
@@ -90,6 +93,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       if (!closeGovernance.ok) errors.push('close-governance: deterministic regression check failed');
       const engineOk = payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok;
       const infrastructureOk = reachable.database && reachable.storage && (!readiness.real_data_mode || firestore.ready);
+      const releaseOk = !readiness.real_data_mode || readiness.real_data_allowed_by_config;
       return NextResponse.json({
         version: '0.34.0',
         hosting: 'vercel',
@@ -110,7 +114,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
           balance_sheet_reconciliation: closeGovernance.ok,
           close_approval_and_period_lock: closeGovernance.ok
         },
-        ok: infrastructureOk && engineOk && errors.length === 0,
+        ok: infrastructureOk && engineOk && releaseOk && errors.length === 0,
         errors
       });
     }

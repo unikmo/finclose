@@ -372,7 +372,7 @@ export async function saveServiceSource(id: string, filename: string, buffer: Bu
   const sourceId = `${id}__${sha256}`;
   const db = realtimeDatabase();
   const existing = await db.ref(`finclose_service_sources/${sourceId}`).once('value');
-  if (existing.exists()) return { ...existing.val(), status: 'ALREADY_RECEIVED' };
+  if (existing.exists()) return { ...existing.val(), duplicate: true };
 
   const organizationId = String(deployment.organization_id || 'lab').trim() || 'lab';
   const companyId = String(deployment.company_id || 'unlinked').trim() || 'unlinked';

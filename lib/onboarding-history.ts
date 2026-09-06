@@ -91,7 +91,7 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
   const historyId = `${deploymentId}__history__${sha256}`;
   const db = realtimeDatabase();
   const existing = await db.ref(`finclose_service_history/${historyId}`).once('value');
-  if (existing.exists()) return { ...existing.val(), status: 'ALREADY_RECEIVED' };
+  if (existing.exists()) return { ...existing.val(), duplicate: true };
 
   const organizationId = String(deployment.organization_id || 'lab').trim() || 'lab';
   const companyId = String(deployment.company_id || 'unlinked').trim() || 'unlinked';
