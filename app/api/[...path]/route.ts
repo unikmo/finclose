@@ -66,7 +66,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       const readiness = runtimeReadiness();
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.33.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', runtime: readiness, configured });
+      if (!deep || !configured) return NextResponse.json({ version: '0.34.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', runtime: readiness, configured });
       const reachable = { database: false, storage: false, firestore: false };
       const errors: string[] = [];
       try {
@@ -91,7 +91,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       const engineOk = payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok;
       const infrastructureOk = reachable.database && reachable.storage && (!readiness.real_data_mode || firestore.ready);
       return NextResponse.json({
-        version: '0.33.0',
+        version: '0.34.0',
         hosting: 'vercel',
         database: 'firebase-realtime-database-control-plane',
         authoritative_ledger: 'firebase-firestore',
@@ -119,7 +119,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
 
     if (p.join('/') === 'account/session') {
       const user = await currentManagedUser(req);
-      if (user && isRealDataMode()) await ensurePersonalOrganization(user);
+      if (user && isRealDataMode() && user.email_verified) await ensurePersonalOrganization(user);
       return NextResponse.json({ authenticated: Boolean(user), user, auth_mode: user?.auth_mode || (isRealDataMode() ? 'FIREBASE_AUTH_SESSION' : 'LAB_ACCOUNT_SESSION') });
     }
 

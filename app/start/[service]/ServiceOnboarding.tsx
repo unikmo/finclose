@@ -28,7 +28,7 @@ type Profile = {
 };
 
 type Country = { code: string; name: string; currency: string };
-type User = { user_id: string; name: string; email: string };
+type User = { user_id: string; name: string; email: string; email_verified?: boolean; auth_mode?: string };
 type Company = { company_id: string; legal_name: string; country_code?: string; country_name?: string; service_scope?: string; status?: string };
 type InitRecord = { initialization_id: string; legal_name: string; country_code: string; country_name: string; status: string; ready: boolean; blockers?: { message: string }[]; company_id?: string };
 
@@ -100,6 +100,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [verificationPassword, setVerificationPassword] = useState('');
   const [country, setCountry] = useState('GE');
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -118,15 +119,17 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
 
   const profile = useMemo(() => profiles.find(p => p.key === serviceKey) || null, [profiles, serviceKey]);
   const companyInitializationRequired = serviceKey !== 'balance-books';
-  const companyComplete = Boolean(user && (!companyInitializationRequired || deployment?.company_id));
-  const historyComplete = Boolean(deployment && (deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY' || historyResults.length));
+  const managedRealDataAccount = Boolean(user?.auth_mode === 'FIREBASE_AUTH_SESSION');
+  const accountComplete = Boolean(user && (!managedRealDataAccount || user.email_verified === true));
+  const companyComplete = Boolean(accountComplete && (!companyInitializationRequired || deployment?.company_id));
+  const historyComplete = Boolean(deployment && (deployment.history_status === 'RECEIVED' || deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY'));
   const effectiveCountry = String(deployment?.country_code || country || '').toUpperCase();
   const visibleConnectors = useMemo(() => profile ? profile.connectors.filter(c => connectorFits(profile, c, effectiveCountry)) : [], [profile, effectiveCountry]);
 
   const phases = companyInitializationRequired
     ? ['Account', 'Company', 'Prior information', 'System connection']
     : ['Account', 'Prior information', 'System connection'];
-  const currentPhase = !user ? 0 : companyInitializationRequired && !companyComplete ? 1 : !historyComplete ? (companyInitializationRequired ? 2 : 1) : (companyInitializationRequired ? 3 : 2);
+  const currentPhase = !accountComplete ? 0 : companyInitializationRequired && !companyComplete ? 1 : !historyComplete ? (companyInitializationRequired ? 2 : 1) : (companyInitializationRequired ? 3 : 2);
 
   useEffect(() => {
     Promise.all([
@@ -145,7 +148,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   }, []);
 
   useEffect(() => {
-    if (!user || !profile || deployment || restoring) return;
+    if (!accountComplete || !user || !profile || deployment || restoring) return;
     const stored = sessionStorage.getItem(`fincloseDeployment:${serviceKey}`);
     if (!stored) {
       if (!companyInitializationRequired) void createDeployment();
@@ -190,7 +193,42 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       });
       setUser(result.user);
       setPassword('');
-      setNote(authMode === 'register' ? 'Account created. Continue with the company setup this service requires.' : 'Signed in. Continue where you left off.');
+      if (result.verification_required) {
+        setNote('Check your email and verify the address. Real financial-data access stays locked until verification is complete and you sign in again.');
+      } else {
+        setNote(authMode === 'register' ? 'Account created. Continue with the company setup this service requires.' : 'Signed in. Continue where you left off.');
+      }
+    } catch (error: any) {
+      setNote(`Error: ${error.message}`);
+    } finally { setBusy(false); }
+  }
+
+  async function requestPasswordReset() {
+    if (!email) return;
+    setBusy(true);
+    try {
+      const result = await api('/account/password-reset', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      setNote(result.message || 'If an account exists for that email, password reset instructions will be sent.');
+    } catch (error: any) {
+      setNote(`Error: ${error.message}`);
+    } finally { setBusy(false); }
+  }
+
+  async function resendVerification() {
+    if (!user?.email || !verificationPassword) return;
+    setBusy(true);
+    try {
+      await api('/account/verification', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: user.email, password: verificationPassword })
+      });
+      setVerificationPassword('');
+      setNote('Verification email sent. After verifying, sign out and sign in again so FinClose receives the verified Firebase identity.');
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
@@ -212,7 +250,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   }
 
   async function createDeployment(selectedCountry?: string) {
-    if (!profile || !user) return null;
+    if (!profile || !user || !accountComplete) return null;
     setBusy(true);
     try {
       const result = await api('/service-deployments/start', {
@@ -320,7 +358,10 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       }
       setHistoryResults(received);
       setDeployment(await api(`/service-deployments/${deployment.deployment_id}`));
-      setNote(`${received.length} prior file${received.length === 1 ? '' : 's'} received. Current-system connection is now available.`);
+      const quarantined = received.some(item => item.status === 'QUARANTINED');
+      setNote(quarantined
+        ? `${received.length} prior file${received.length === 1 ? '' : 's'} stored in security quarantine. Current-system connection remains locked until an authorized review clears the history.`
+        : `${received.length} prior file${received.length === 1 ? '' : 's'} received. Current-system connection is now available.`);
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
@@ -365,7 +406,9 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ filename: sourceFile.name, content_base64: await base64(sourceFile) })
       });
-      setNote(`${result.status}: current source received. SHA ${String(result.sha256).slice(0, 12)}…`);
+      setNote(result.status === 'QUARANTINED'
+        ? `Current source stored in security quarantine. FinClose will not process it until an authorized review clears it. SHA ${String(result.sha256).slice(0, 12)}…`
+        : `${result.status}: current source received. SHA ${String(result.sha256).slice(0, 12)}…`);
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
@@ -381,6 +424,8 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
 
   const heroText = !user
     ? 'Start with your FinClose account. After that, we ask only for the company information this service actually needs.'
+    : !accountComplete
+      ? 'Verify your Firebase email address before FinClose unlocks company or real financial-data access.'
     : companyInitializationRequired && !companyComplete
       ? 'You are signed in. Next, connect an already initialized company or initialize a new one.'
       : !historyComplete
@@ -428,10 +473,24 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
           <label><span>Password</span><input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={authMode === 'register' ? 'new-password' : 'current-password'} /></label>
           {authMode === 'register' && <div className="field-hint">Use at least 10 characters.</div>}
           <button className="service-primary" onClick={submitAccount} disabled={busy || !email || !password || (authMode === 'register' && !name)}>{authMode === 'register' ? 'Create account & continue' : 'Sign in & continue'}</button>
+          {authMode === 'login' && <button className="service-secondary" onClick={requestPasswordReset} disabled={busy || !email}>Forgot password?</button>}
         </div>
       </section>}
 
-      {user && companyInitializationRequired && !companyComplete && <section className="focus-panel">
+      {user && managedRealDataAccount && !user.email_verified && <section className="focus-panel auth-panel">
+        <div className="focus-kicker">STEP 1</div>
+        <h2>Verify your email</h2>
+        <p className="focus-lead">Firebase Authentication has created your account, but FinClose will not allow real financial-data operations until the email address is verified.</p>
+        <div className="setup-block account-form">
+          <div className="completed-line"><span>✓</span> Account created · {user.email}</div>
+          <label><span>Password</span><input type="password" value={verificationPassword} onChange={e => setVerificationPassword(e.target.value)} autoComplete="current-password" /></label>
+          <button className="service-primary" onClick={resendVerification} disabled={busy || !verificationPassword}>Resend verification email</button>
+          <div className="field-hint">After verifying the email, sign out and sign in again to refresh the verified Firebase session.</div>
+          <button className="service-secondary" onClick={signOut} disabled={busy}>Sign out</button>
+        </div>
+      </section>}
+
+      {accountComplete && user && companyInitializationRequired && !companyComplete && <section className="focus-panel">
         <div className="completed-line"><span>✓</span> Account · {user.email}</div>
         <div className="focus-kicker">STEP 2</div>
         <h2>Company</h2>
@@ -469,7 +528,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         </div>}
       </section>}
 
-      {user && companyComplete && !historyComplete && deployment && <section className="focus-panel">
+      {accountComplete && user && companyComplete && !historyComplete && deployment && <section className="focus-panel">
         <div className="completed-line"><span>✓</span> Account · {user.email}</div>
         {companyInitializationRequired && <div className="completed-line"><span>✓</span> Company · {deployment.company_name || 'initialized company'}</div>}
         <div className="focus-kicker">STEP {companyInitializationRequired ? '3' : '2'}</div>
@@ -491,7 +550,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         </div>
       </section>}
 
-      {user && historyComplete && deployment && <section className="focus-panel">
+      {accountComplete && user && historyComplete && deployment && <section className="focus-panel">
         <div className="completed-line"><span>✓</span> Account</div>
         {companyInitializationRequired && <div className="completed-line"><span>✓</span> Company</div>}
         <div className="completed-line"><span>✓</span> Prior information {deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY' ? 'not applicable for new company' : 'received'}</div>
