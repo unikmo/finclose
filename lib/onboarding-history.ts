@@ -1,23 +1,13 @@
 import crypto from 'node:crypto';
 import { realtimeDatabase, storageBucket } from './finclose-backend';
+import { validateFinancialUpload } from './file-security';
 import { getServiceDeployment } from './service-deployments';
+import { assertRealDataRuntimeReady, isRealDataMode } from './runtime-mode';
 
 function httpError(message: string, status: number) {
   const error = new Error(message);
   (error as Error & { status?: number }).status = status;
   return error;
-}
-
-function safeFilename(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || 'history.bin';
-}
-
-function contentType(name: string) {
-  if (/\.xlsx$/i.test(name)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  if (/\.xls$/i.test(name)) return 'application/vnd.ms-excel';
-  if (/\.csv$/i.test(name)) return 'text/csv';
-  if (/\.pdf$/i.test(name)) return 'application/pdf';
-  return 'application/octet-stream';
 }
 
 export async function linkDeploymentCompany(deploymentId: string, companyId: string) {
@@ -27,6 +17,14 @@ export async function linkDeploymentCompany(deploymentId: string, companyId: str
   if (!companySnap.exists()) throw httpError('initialized company not found', 404);
 
   const company = companySnap.val() as Record<string, any>;
+  if (isRealDataMode()) {
+    assertRealDataRuntimeReady();
+    const deploymentOrg = String(deployment.organization_id || '').trim();
+    const companyOrg = String(company.organization_id || '').trim();
+    if (!deploymentOrg || !companyOrg || deploymentOrg !== companyOrg) {
+      throw httpError('selected company does not belong to this organization', 403);
+    }
+  }
   const deploymentCountry = String(deployment.country_code || '').toUpperCase();
   const companyCountry = String(company.country_code || '').toUpperCase();
   if (deploymentCountry && companyCountry && deploymentCountry !== companyCountry) {
@@ -51,6 +49,7 @@ export async function linkDeploymentCompany(deploymentId: string, companyId: str
     [`finclose_service_deployments/${deploymentId}/updated_at`]: now,
     [`finclose_audit_events/${auditKey}`]: {
       event: 'SERVICE_INITIALIZED_COMPANY_LINKED',
+      organization_id: deployment.organization_id || null,
       deployment_id: deploymentId,
       company_id: companyId,
       service: deployment.service,
@@ -75,10 +74,17 @@ export async function linkDeploymentCompany(deploymentId: string, companyId: str
 
 export async function saveHistoricalContext(deploymentId: string, filename: string, buffer: Buffer) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
+  if (isRealDataMode()) assertRealDataRuntimeReady();
   if (deployment.service !== 'balance-books' && !deployment.company_id) {
     throw httpError('complete company initialization or link an initialized company before uploading history', 409);
   }
-  if (!filename || !buffer.length) throw httpError('historical file is required', 400);
+  if (isRealDataMode() && deployment.company_id) {
+    const companySnap = await realtimeDatabase().ref(`finclose_companies/${deployment.company_id}`).once('value');
+    if (!companySnap.exists()) throw httpError('initialized company not found', 404);
+    const company = companySnap.val() as Record<string, any>;
+    if (company.data_is_synthetic === true) throw httpError('real financial history cannot be attached to a company explicitly marked synthetic', 409);
+  }
+  const validation = validateFinancialUpload(filename, buffer, 'historical_context');
 
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   const historyId = `${deploymentId}__history__${sha256}`;
@@ -86,16 +92,22 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
   const existing = await db.ref(`finclose_service_history/${historyId}`).once('value');
   if (existing.exists()) return { ...existing.val(), status: 'ALREADY_RECEIVED' };
 
-  const path = `finclose/service-deployments/${deploymentId}/historical-context/${crypto.randomUUID()}/${safeFilename(filename)}`;
-  await storageBucket().file(path).save(buffer, {
+  const organizationId = String(deployment.organization_id || 'lab').trim() || 'lab';
+  const companyId = String(deployment.company_id || 'unlinked').trim() || 'unlinked';
+  const storagePath = `finclose/organizations/${organizationId}/companies/${companyId}/service-deployments/${deploymentId}/historical-context/${crypto.randomUUID()}/${validation.safe_name}`;
+  await storageBucket().file(storagePath).save(buffer, {
     resumable: false,
     metadata: {
-      contentType: contentType(filename),
+      contentType: validation.content_type,
       metadata: {
+        organizationId,
+        companyId,
         deploymentId,
         service: String(deployment.service || ''),
         purpose: 'historical_context',
-        sha256
+        sha256,
+        validationStatus: validation.validation_status,
+        malwareScanStatus: validation.malware_scan_status
       }
     }
   });
@@ -104,14 +116,18 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
   const previousCount = Number(deployment.history_count || 0);
   const record = {
     history_id: historyId,
+    organization_id: deployment.organization_id || null,
     deployment_id: deploymentId,
     company_id: deployment.company_id || null,
     service: deployment.service,
     purpose: 'historical_context',
-    filename,
+    filename: validation.safe_name,
+    content_type: validation.content_type,
+    validation_status: validation.validation_status,
+    malware_scan_status: validation.malware_scan_status,
     bytes: buffer.length,
     sha256,
-    storage_path: path,
+    storage_path: storagePath,
     status: 'RECEIVED',
     created_at: now
   };
@@ -126,6 +142,7 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
     [`finclose_service_deployments/${deploymentId}/updated_at`]: now,
     [`finclose_audit_events/${auditKey}`]: {
       event: 'SERVICE_HISTORICAL_CONTEXT_RECEIVED',
+      organization_id: deployment.organization_id || null,
       deployment_id: deploymentId,
       company_id: deployment.company_id || null,
       service: deployment.service,
@@ -163,6 +180,7 @@ export async function skipHistoricalContext(deploymentId: string) {
     [`finclose_service_deployments/${deploymentId}/updated_at`]: now,
     [`finclose_audit_events/${auditKey}`]: {
       event: 'SERVICE_HISTORICAL_CONTEXT_NOT_APPLICABLE',
+      organization_id: deployment.organization_id || null,
       deployment_id: deploymentId,
       company_id: deployment.company_id,
       service: deployment.service,

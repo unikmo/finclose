@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
 import { getServiceDeployment } from './service-deployments';
+import { assertProductionDateRangeOpen, commitPeriodLock, recordCloseApproval, reopenPeriodLock } from './production-ledger';
+import { isRealDataMode } from './runtime-mode';
 
 export type CloseActor = {
   kind: 'customer' | 'lab';
@@ -115,10 +117,10 @@ export const CLOSE_GOVERNANCE_CAPABILITIES = {
     'A close cannot be locked if its evidence snapshot changed after approval.',
     'A locked period blocks overlapping new payroll/bookkeeping/finance-cycle work until explicitly reopened.',
     'Reopening never deletes the original lock or approval history.',
-    'This is an internal FinClose lock only; it does not yet lock an external accounting provider.',
+    'In PILOT/PRODUCTION, Cloud Firestore is the authoritative FinClose close-evidence and period-lock boundary; external provider locks remain separate.',
     'Manual-upload evidence proves artifact presence and declared coverage inside FinClose, not independent third-party connector completeness.'
   ],
-  execution_boundary: 'SYNTHETIC_LAB_INTERNAL_CLOSE_ONLY'
+  execution_boundary: 'LAB_OR_CONTROLLED_REAL_DATA_WITH_FIRESTORE'
 } as const;
 
 function httpError(message: string, status: number) {
@@ -751,7 +753,7 @@ async function approvalEvidenceSnapshot(closeId: string) {
 export async function approveMonthlyClose(deploymentId: string, closeId: string, actor: CloseActor, note?: string) {
   const identity = actorRecord(actor);
   await refreshCloseGovernance(deploymentId, closeId);
-  const { close } = await requireClose(deploymentId, closeId);
+  const { deployment, close } = await requireClose(deploymentId, closeId);
   if (String(close.close_status || '') === 'LOCKED') return { ...close, duplicate: true };
   if (String(close.close_status || '') === 'REOPENED') throw httpError('reopened close requires a new close version before approval', 409);
   if (String(close.layer_a?.governance_status || '') !== 'READY_FOR_APPROVAL') throw httpError('monthly close is not ready for approval', 409);
@@ -776,6 +778,19 @@ export async function approveMonthlyClose(deploymentId: string, closeId: string,
     status: 'APPROVED',
     created_at: now
   };
+  if (isRealDataMode()) {
+    if (actor.kind !== 'customer' || !actor.user_id) throw httpError('authenticated customer approval identity is required in real-data mode', 403);
+    const organizationId = String(deployment.organization_id || '').trim();
+    if (!organizationId) throw httpError('monthly close deployment is missing organization ownership', 409);
+    await recordCloseApproval({
+      organization_id: organizationId,
+      company_id: String(close.company_id),
+      close_id: closeId,
+      evidence_hash: evidenceHash,
+      actor_user_id: String(actor.user_id),
+      snapshot
+    });
+  }
   const db = realtimeDatabase();
   const auditKey = db.ref('finclose_audit_events').push().key!;
   await db.ref().update({
@@ -810,6 +825,7 @@ export async function assertDateRangeOpenForCompany(companyId: string, periodSta
   const start = isoDate(periodStart, `${context} period_start`);
   const end = isoDate(periodEnd, `${context} period_end`);
   if (start > end) throw httpError(`${context} period_start must not be after period_end`, 400);
+  if (isRealDataMode()) await assertProductionDateRangeOpen(companyId, start, end, context);
   const snap = await realtimeDatabase().ref(`finclose_period_locks_by_company/${companyId}`).once('value');
   if (!snap.exists()) return;
   const locks = Object.values(snap.val() as Record<string, any>) as Record<string, any>[];
@@ -820,7 +836,7 @@ export async function assertDateRangeOpenForCompany(companyId: string, periodSta
 export async function lockMonthlyClose(deploymentId: string, closeId: string, actor: CloseActor, note?: string) {
   const identity = actorRecord(actor);
   await refreshCloseGovernance(deploymentId, closeId);
-  const { close } = await requireClose(deploymentId, closeId);
+  const { deployment, close } = await requireClose(deploymentId, closeId);
   if (String(close.close_status || '') === 'LOCKED') return { ...close, duplicate: true };
   if (String(close.approval_status || '') !== 'APPROVED') throw httpError('approve the monthly close before locking the period', 409);
   if (String(close.layer_a?.governance_status || '') !== 'READY_FOR_APPROVAL') throw httpError('Layer A controls changed after approval; re-approval is required', 409);
@@ -841,7 +857,24 @@ export async function lockMonthlyClose(deploymentId: string, closeId: string, ac
     }
   }
 
-  const lockId = `${close.company_id}__${close.period_end}__${currentHash.slice(0, 12)}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  let lockId = `${close.company_id}__${close.period_end}__${currentHash.slice(0, 12)}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  if (isRealDataMode()) {
+    if (actor.kind !== 'customer' || !actor.user_id) throw httpError('authenticated customer lock identity is required in real-data mode', 403);
+    const organizationId = String(deployment.organization_id || '').trim();
+    if (!organizationId) throw httpError('monthly close deployment is missing organization ownership', 409);
+    const authoritativeLockId = await commitPeriodLock({
+      organization_id: organizationId,
+      company_id: String(close.company_id),
+      close_id: closeId,
+      period_start: String(close.period_start),
+      period_end: String(close.period_end),
+      evidence_hash: currentHash,
+      actor_user_id: String(actor.user_id),
+      payload: snapshot
+    });
+    if (!authoritativeLockId) throw httpError('authoritative PostgreSQL period lock was not created', 503);
+    lockId = String(authoritativeLockId);
+  }
   const now = Date.now();
   const lock = {
     period_lock_id: lockId,
@@ -891,7 +924,7 @@ export async function lockMonthlyClose(deploymentId: string, closeId: string, ac
 
 export async function reopenMonthlyClose(deploymentId: string, closeId: string, actor: CloseActor, reason: string) {
   const identity = actorRecord(actor);
-  const { close } = await requireClose(deploymentId, closeId);
+  const { deployment, close } = await requireClose(deploymentId, closeId);
   const reasonText = cleanText(reason, 'reopen reason', 500);
   if (reasonText.length < 10) throw httpError('reopen reason must be at least 10 characters', 400);
   const lockId = String(close.period_lock_id || '');
@@ -901,6 +934,18 @@ export async function reopenMonthlyClose(deploymentId: string, closeId: string, 
   if (!lockSnap.exists()) throw httpError('period lock record not found', 409);
   const lock = lockSnap.val() as Record<string, any>;
   if (String(lock.status) !== 'LOCKED') return { ...close, duplicate: true };
+  if (isRealDataMode()) {
+    if (actor.kind !== 'customer' || !actor.user_id) throw httpError('authenticated customer reopen identity is required in real-data mode', 403);
+    const organizationId = String(deployment.organization_id || '').trim();
+    if (!organizationId) throw httpError('monthly close deployment is missing organization ownership', 409);
+    await reopenPeriodLock({
+      organization_id: organizationId,
+      company_id: String(close.company_id),
+      close_id: closeId,
+      actor_user_id: String(actor.user_id),
+      reason: reasonText
+    });
+  }
   const now = Date.now();
   const reopenCount = Number(lock.reopen_count || 0) + 1;
   const reopenNonce = crypto.randomUUID().replace(/-/g, '').slice(0, 12);

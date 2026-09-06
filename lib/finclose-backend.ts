@@ -4,6 +4,9 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getDatabase } from 'firebase-admin/database';
 import { getStorage } from 'firebase-admin/storage';
 import { NextRequest } from 'next/server';
+import { validateFinancialUpload } from './file-security';
+import { registerProductionCompany } from './production-ledger';
+import { assertRealDataRuntimeReady, isRealDataMode, runtimeMode } from './runtime-mode';
 
 export type Country = {
   code: string;
@@ -70,8 +73,9 @@ function fieldSheet(title: string, subtitle: string, rows: Array<[string,string,
 
 export function buildTemplate(country: Country) {
   const wb = XLSX.utils.book_new();
+  const synthetic = isRealDataMode() ? 'NO' : 'YES';
   const companyRows: Array<[string,string,string,string,string]> = [
-    ['template_version','Template version','1.0','YES','Do not change.'],
+    ['template_version','Template version','1.1','YES','Do not change.'],
     ['template_country','Country template',country.code,'YES',country.name],
     ['legal_name','Legal company name','','YES','As registered.'],
     ['trading_name','Trading name','','NO','If different.'],
@@ -108,10 +112,10 @@ export function buildTemplate(country: Country) {
   ]),'Historical Takeover');
   XLSX.utils.book_append_sheet(wb, fieldSheet('Attestation','Confirm the initialization facts are complete enough for FinClose to validate',[
     ['authorized_to_provide','Authorized to provide company data','','YES','YES required.'],
-    ['data_is_synthetic','Data is synthetic/test data','YES','YES','For the Lab this must be YES.'],
+    ['data_is_synthetic','Data is synthetic/test data',synthetic,'YES',isRealDataMode() ? 'Use NO for real company data and YES only for a test company.' : 'Lab requires YES.'],
     ['information_complete_to_best_knowledge','Information complete to best knowledge','','YES','YES required.'],
     ['prepared_by','Prepared by','','YES','Name or role.'],
-    ['prepared_date','Prepared date','2026-09-03','YES','YYYY-MM-DD.']
+    ['prepared_date','Prepared date','2026-09-06','YES','YYYY-MM-DD.']
   ]),'Attestation');
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
@@ -134,11 +138,16 @@ export function parseInitialization(buffer: Buffer) {
   const attestation = readFieldMap(workbook, 'Attestation');
   const country = getCountry(company.template_country || '');
   const blockers: Array<{message:string}> = [];
+  const warnings: Array<{message:string}> = [];
   for (const id of ['legal_name','template_country','service_scope','company_stage','base_currency','timezone','cutover_date']) if (!company[id]) blockers.push({ message: `Missing required field: ${id}` });
   if (!country) blockers.push({ message: `Unsupported country: ${company.template_country || '(blank)'}` });
-  if (attestation.data_is_synthetic !== 'YES') blockers.push({ message: 'Lab requires data_is_synthetic = YES' });
-  if (attestation.authorized_to_provide && attestation.authorized_to_provide !== 'YES') blockers.push({ message: 'authorized_to_provide must be YES' });
-  return { company, country, blockers, warnings: [] as Array<{message:string}> };
+  if (attestation.authorized_to_provide !== 'YES') blockers.push({ message: 'authorized_to_provide must be YES' });
+  if (attestation.information_complete_to_best_knowledge !== 'YES') blockers.push({ message: 'information_complete_to_best_knowledge must be YES' });
+  const synthetic = String(attestation.data_is_synthetic || '').toUpperCase();
+  if (!['YES','NO'].includes(synthetic)) blockers.push({ message: 'data_is_synthetic must be YES or NO' });
+  if (!isRealDataMode() && synthetic !== 'YES') blockers.push({ message: 'Lab requires data_is_synthetic = YES' });
+  if (isRealDataMode() && synthetic === 'YES') warnings.push({ message: `${runtimeMode()} is configured for real data, but this initialization is explicitly synthetic.` });
+  return { company, attestation, country, blockers, warnings };
 }
 
 export function workbookMetadata(buffer: Buffer, filename: string) {
@@ -159,17 +168,46 @@ function plainInit(data: Record<string, unknown>): InitRecord {
   return { initialization_id:String(data.initialization_id), filename:String(data.filename), legal_name:String(data.legal_name||''), country_code:String(data.country_code||''), country_name:String(data.country_name||''), service_scope:String(data.service_scope||''), status:String(data.status||''), ready:Boolean(data.ready), blockers:(data.blockers||[]) as Array<{message:string}>, warnings:(data.warnings||[]) as Array<{message:string}>, company_id:data.company_id?String(data.company_id):undefined };
 }
 
-export async function saveInitialization(filename: string, buffer: Buffer) {
+export async function saveInitialization(filename: string, buffer: Buffer, ownership?: { organization_id?: string; owner_user_id?: string }) {
+  if (isRealDataMode()) assertRealDataRuntimeReady();
+  const validation = validateFinancialUpload(filename, buffer, 'initialization');
   const parsed = parseInitialization(buffer);
   const id = crypto.randomUUID();
   const ready = parsed.blockers.length === 0;
   const now = Date.now();
-  const record = { initialization_id:id, filename, legal_name:parsed.company.legal_name||'', country_code:parsed.country?.code||parsed.company.template_country||'', country_name:parsed.country?.name||'', base_currency:parsed.company.base_currency||parsed.country?.currency||'', timezone:parsed.company.timezone||parsed.country?.timezone||'', service_scope:parsed.company.service_scope||'', company_stage:parsed.company.company_stage||'', cutover_date:parsed.company.cutover_date||'', source_as_of_date:parsed.company.source_as_of_date||'', registration_number:parsed.company.registration_number||'', finance_admin_email:parsed.company.finance_admin_email||'', status:ready?'READY':'BLOCKED', ready, blockers:parsed.blockers, warnings:parsed.warnings, created_at:now };
+  const organizationId = String(ownership?.organization_id || '').trim();
+  const ownerUserId = String(ownership?.owner_user_id || '').trim();
+  if (isRealDataMode() && (!organizationId || !ownerUserId)) {
+    const e = new Error('production initialization requires organization and authenticated owner identity');
+    (e as Error & {status?:number}).status = 409;
+    throw e;
+  }
+  const record = {
+    initialization_id:id,
+    runtime_mode: runtimeMode(),
+    data_is_synthetic: String(parsed.attestation.data_is_synthetic || '').toUpperCase() === 'YES',
+    organization_id: organizationId || null,
+    owner_user_id: ownerUserId || null,
+    filename: validation.safe_name,
+    file_validation_status: validation.validation_status,
+    legal_name:parsed.company.legal_name||'',
+    country_code:parsed.country?.code||parsed.company.template_country||'',
+    country_name:parsed.country?.name||'',
+    base_currency:parsed.company.base_currency||parsed.country?.currency||'',
+    timezone:parsed.company.timezone||parsed.country?.timezone||'',
+    service_scope:parsed.company.service_scope||'',
+    company_stage:parsed.company.company_stage||'',
+    cutover_date:parsed.company.cutover_date||'',
+    source_as_of_date:parsed.company.source_as_of_date||'',
+    registration_number:parsed.company.registration_number||'',
+    finance_admin_email:parsed.company.finance_admin_email||'',
+    status:ready?'READY':'BLOCKED', ready, blockers:parsed.blockers, warnings:parsed.warnings, created_at:now
+  };
   const db = realtimeDatabase();
   const auditKey = db.ref('finclose_audit_events').push().key!;
   await db.ref().update({
     [`finclose_initializations/${id}`]: record,
-    [`finclose_audit_events/${auditKey}`]: { event:'INITIALIZATION_VALIDATED', initialization_id:id, status:record.status, created_at:now }
+    [`finclose_audit_events/${auditKey}`]: { event:'INITIALIZATION_VALIDATED', initialization_id:id, organization_id:organizationId||null, owner_user_id:ownerUserId||null, runtime_mode:runtimeMode(), status:record.status, created_at:now }
   });
   return plainInit(record);
 }
@@ -183,16 +221,54 @@ export async function initializeCompany(initializationId: string) {
   if (init.company_id) return plainInit(init);
 
   const companyId = initializationId;
+  const organizationId = String(init.organization_id || '').trim();
+  const ownerUserId = String(init.owner_user_id || '').trim();
+  if (isRealDataMode() && (!organizationId || !ownerUserId)) {
+    const e = new Error('production initialization is missing tenant ownership');
+    (e as Error & {status?:number}).status = 409;
+    throw e;
+  }
   const now = Date.now();
-  const company = { company_id:companyId, legal_name:init.legal_name, country_code:init.country_code, country_name:init.country_name, base_currency:init.base_currency, timezone:init.timezone, service_scope:init.service_scope, company_stage:init.company_stage, cutover_date:init.cutover_date, source_as_of_date:init.source_as_of_date, registration_number:init.registration_number, status:'INITIALIZED', initialization_id:initializationId, created_at:now };
+  const company = {
+    company_id:companyId,
+    organization_id:organizationId||null,
+    legal_name:init.legal_name,
+    country_code:init.country_code,
+    country_name:init.country_name,
+    base_currency:init.base_currency,
+    timezone:init.timezone,
+    service_scope:init.service_scope,
+    company_stage:init.company_stage,
+    cutover_date:init.cutover_date,
+    source_as_of_date:init.source_as_of_date,
+    registration_number:init.registration_number,
+    data_is_synthetic:init.data_is_synthetic===true,
+    status:'INITIALIZED',
+    initialization_id:initializationId,
+    created_at:now
+  };
+  if (isRealDataMode()) {
+    await registerProductionCompany({
+      organization_id: organizationId,
+      company_id: companyId,
+      legal_name: String(init.legal_name || ''),
+      country_code: String(init.country_code || ''),
+      base_currency: String(init.base_currency || ''),
+      actor_user_id: ownerUserId
+    });
+  }
   const auditKey = db.ref('finclose_audit_events').push().key!;
-  await db.ref().update({
+  const updates: Record<string, unknown> = {
     [`finclose_companies/${companyId}`]: company,
     [`finclose_initializations/${initializationId}/company_id`]: companyId,
     [`finclose_initializations/${initializationId}/status`]: 'INITIALIZED',
     [`finclose_initializations/${initializationId}/initialized_at`]: now,
-    [`finclose_audit_events/${auditKey}`]: { event:'COMPANY_INITIALIZED', initialization_id:initializationId, company_id:companyId, created_at:now }
-  });
+    [`finclose_audit_events/${auditKey}`]: { event:'COMPANY_INITIALIZED', initialization_id:initializationId, company_id:companyId, organization_id:organizationId||null, actor_user_id:ownerUserId||null, created_at:now }
+  };
+  if (organizationId) {
+    updates[`finclose_company_ownership/${companyId}`] = { company_id:companyId, organization_id:organizationId, status:'ACTIVE', bound_by_user_id:ownerUserId, created_at:now, updated_at:now };
+  }
+  await db.ref().update(updates);
   return plainInit({ ...init, company_id:companyId, status:'INITIALIZED' });
 }
 
@@ -205,28 +281,28 @@ export async function listCompanies() {
     .map(d=>({company_id:d.company_id,legal_name:d.legal_name,country_code:d.country_code,country_name:d.country_name,base_currency:d.base_currency,service_scope:d.service_scope,status:d.status}));
 }
 
-function safeFilename(name:string){return name.replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,180)||'upload.bin';}
-function contentType(name:string){if(/\.xlsx$/i.test(name))return'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';if(/\.csv$/i.test(name))return'text/csv';if(/\.pdf$/i.test(name))return'application/pdf';return'application/octet-stream';}
-
 export async function saveDataChunk(companyId:string,stage:string,filename:string,buffer:Buffer){
+  if (isRealDataMode()) assertRealDataRuntimeReady();
   const db = realtimeDatabase();
   const companySnap = await db.ref(`finclose_companies/${companyId}`).once('value');
   if(!companySnap.exists()){const e=new Error('company not found');(e as Error & {status?:number}).status=404;throw e;}
   const company = companySnap.val() as Record<string, unknown>;
+  const validation = validateFinancialUpload(filename, buffer, 'current_source');
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   const importId = `${companyId}__${sha256}`;
   const importRef = db.ref(`finclose_data_imports/${importId}`);
   const existing = await importRef.once('value');
   if(existing.exists()) return {...existing.val(),status:'ALREADY_RECEIVED'};
 
-  const path = `finclose/${companyId}/${stage}/${crypto.randomUUID()}/${safeFilename(filename)}`;
-  await storageBucket().file(path).save(buffer,{resumable:false,metadata:{contentType:contentType(filename),metadata:{companyId,stage,sha256}}});
+  const organizationId = String(company.organization_id || 'lab');
+  const storagePath = `finclose/organizations/${organizationId}/companies/${companyId}/data/${stage}/${crypto.randomUUID()}/${validation.safe_name}`;
+  await storageBucket().file(storagePath).save(buffer,{resumable:false,metadata:{contentType:validation.content_type,metadata:{organizationId,companyId,stage,sha256,validationStatus:validation.validation_status}}});
   const now = Date.now();
-  const record = {import_id:importId,company_id:companyId,country_code:company.country_code,country_name:company.country_name,base_currency:company.base_currency,stage,filename,bytes:buffer.length,sha256,storage_path:path,metadata:workbookMetadata(buffer,filename),status:'RECEIVED',created_at:now};
+  const record = {import_id:importId,organization_id:company.organization_id||null,company_id:companyId,country_code:company.country_code,country_name:company.country_name,base_currency:company.base_currency,stage,filename:validation.safe_name,bytes:buffer.length,sha256,content_type:validation.content_type,validation_status:validation.validation_status,malware_scan_status:validation.malware_scan_status,storage_path:storagePath,metadata:workbookMetadata(buffer,filename),status:'RECEIVED',created_at:now};
   const auditKey = db.ref('finclose_audit_events').push().key!;
   await db.ref().update({
     [`finclose_data_imports/${importId}`]: record,
-    [`finclose_audit_events/${auditKey}`]: {event:'DATA_CHUNK_RECEIVED',company_id:companyId,import_id:importId,stage,sha256,created_at:now}
+    [`finclose_audit_events/${auditKey}`]: {event:'DATA_CHUNK_RECEIVED',organization_id:company.organization_id||null,company_id:companyId,import_id:importId,stage,sha256,created_at:now}
   });
   return record;
 }

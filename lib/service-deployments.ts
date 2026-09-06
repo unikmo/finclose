@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { getCountry, realtimeDatabase, storageBucket } from './finclose-backend';
+import { validateFinancialUpload } from './file-security';
+import { assertRealDataRuntimeReady, isRealDataMode, runtimeMode } from './runtime-mode';
 
 export type ServiceKey = 'balance-books' | 'payroll' | 'do-bookkeeping' | 'bookkeeping-payroll';
 export type AgentKey = 'orchestrator' | 'reconciliation' | 'bookkeeping' | 'payroll';
@@ -123,7 +125,7 @@ export const CONNECTORS: Record<ConnectorKey, Connector> = {
     capabilities: ['accounting-read', 'payroll-read'],
     accountingCountries: ['*'],
     payrollCountries: ['*'],
-    note: 'Available now for synthetic Lab testing. Upload accounting or payroll source files without initializing a full company.'
+    note: 'Validated private upload path. In PILOT/PRODUCTION it is tenant-scoped and real-data readiness is checked before acceptance.'
   }
 };
 
@@ -185,7 +187,15 @@ function cleanEmail(value: unknown) {
   return email;
 }
 
-export async function startServiceDeployment(input: { service: string; name?: string; email?: string; country_code?: string }) {
+export async function startServiceDeployment(input: {
+  service: string;
+  name?: string;
+  email?: string;
+  country_code?: string;
+  organization_id?: string;
+  owner_user_id?: string;
+}) {
+  if (isRealDataMode()) assertRealDataRuntimeReady();
   const profile = getProfile(input.service);
   const name = String(input.name || '').trim();
   if (!name) {
@@ -200,11 +210,22 @@ export async function startServiceDeployment(input: { service: string; name?: st
     (error as Error & { status?: number }).status = 400;
     throw error;
   }
+  const organizationId = String(input.organization_id || '').trim();
+  const ownerUserId = String(input.owner_user_id || '').trim();
+  if (isRealDataMode() && (!organizationId || !ownerUserId)) {
+    const error = new Error('production service deployment requires organization and owner identity');
+    (error as Error & { status?: number }).status = 409;
+    throw error;
+  }
 
   const id = crypto.randomUUID();
   const now = Date.now();
   const record = {
     deployment_id: id,
+    runtime_mode: runtimeMode(),
+    data_policy: isRealDataMode() ? 'CONTROLLED_REAL_DATA' : 'SYNTHETIC_TEST_ONLY',
+    organization_id: organizationId || null,
+    owner_user_id: ownerUserId || null,
     service: profile.key,
     service_title: profile.title,
     billing_scope: profile.billingScope,
@@ -227,6 +248,9 @@ export async function startServiceDeployment(input: { service: string; name?: st
     [`finclose_audit_events/${auditKey}`]: {
       event: 'SERVICE_DEPLOYMENT_REGISTERED',
       deployment_id: id,
+      organization_id: organizationId || null,
+      owner_user_id: ownerUserId || null,
+      runtime_mode: runtimeMode(),
       service: profile.key,
       agents: profile.agents,
       full_company_initialization_required: profile.fullCompanyInitializationRequired,
@@ -277,7 +301,7 @@ export async function saveServiceConfiguration(id: string, input: Record<string,
     [`finclose_service_deployments/${id}/country_code`]: configuration.country_code || deployment.country_code || null,
     [`finclose_service_deployments/${id}/status`]: status,
     [`finclose_service_deployments/${id}/updated_at`]: now,
-    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_CONFIGURATION_SAVED', deployment_id: id, service: profile.key, created_at: now }
+    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_CONFIGURATION_SAVED', deployment_id: id, organization_id: deployment.organization_id || null, service: profile.key, created_at: now }
   });
   return getServiceDeployment(id);
 }
@@ -314,49 +338,75 @@ export async function selectServiceConnector(id: string, connectorId: string) {
     [`finclose_service_deployments/${id}/connector_state`]: state.state,
     [`finclose_service_deployments/${id}/status`]: status,
     [`finclose_service_deployments/${id}/updated_at`]: now,
-    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_CONNECTOR_SELECTED', deployment_id: id, service: profile.key, connector: connector.id, connector_state: state.state, country_code: country || null, created_at: now }
+    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_CONNECTOR_SELECTED', deployment_id: id, organization_id: deployment.organization_id || null, service: profile.key, connector: connector.id, connector_state: state.state, country_code: country || null, created_at: now }
   });
   return { deployment: await getServiceDeployment(id), connector: { ...connector, ...state } };
-}
-
-function safeFilename(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || 'source.bin';
 }
 
 export async function saveServiceSource(id: string, filename: string, buffer: Buffer) {
   const deployment = await getServiceDeployment(id) as Record<string, any>;
   const profile = getProfile(String(deployment.service));
+  if (isRealDataMode()) assertRealDataRuntimeReady();
   if (deployment.selected_connector !== 'manual-upload') {
     const error = new Error('direct file upload is only available when Secure file upload is selected');
     (error as Error & { status?: number }).status = 409;
     throw error;
   }
-  if (!filename || !buffer.length) {
-    const error = new Error('source file is required');
-    (error as Error & { status?: number }).status = 400;
-    throw error;
+  if (isRealDataMode() && deployment.company_id) {
+    const companySnap = await realtimeDatabase().ref(`finclose_companies/${deployment.company_id}`).once('value');
+    if (!companySnap.exists()) {
+      const error = new Error('linked company was not found');
+      (error as Error & { status?: number }).status = 404;
+      throw error;
+    }
+    const company = companySnap.val() as Record<string, any>;
+    if (company.data_is_synthetic === true) {
+      const error = new Error('real financial data cannot be attached to a company explicitly marked synthetic');
+      (error as Error & { status?: number }).status = 409;
+      throw error;
+    }
   }
+  const validation = validateFinancialUpload(filename, buffer, 'current_source');
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   const sourceId = `${id}__${sha256}`;
   const db = realtimeDatabase();
   const existing = await db.ref(`finclose_service_sources/${sourceId}`).once('value');
   if (existing.exists()) return { ...existing.val(), status: 'ALREADY_RECEIVED' };
 
-  const path = `finclose/service-deployments/${id}/${profile.key}/${crypto.randomUUID()}/${safeFilename(filename)}`;
-  await storageBucket().file(path).save(buffer, {
+  const organizationId = String(deployment.organization_id || 'lab').trim() || 'lab';
+  const companyId = String(deployment.company_id || 'unlinked').trim() || 'unlinked';
+  const storagePath = `finclose/organizations/${organizationId}/companies/${companyId}/service-deployments/${id}/${profile.key}/${crypto.randomUUID()}/${validation.safe_name}`;
+  await storageBucket().file(storagePath).save(buffer, {
     resumable: false,
-    metadata: { metadata: { deploymentId: id, service: profile.key, sha256 } }
+    metadata: {
+      contentType: validation.content_type,
+      metadata: {
+        deploymentId: id,
+        organizationId,
+        companyId,
+        service: profile.key,
+        purpose: 'current_source',
+        sha256,
+        validationStatus: validation.validation_status,
+        malwareScanStatus: validation.malware_scan_status
+      }
+    }
   });
   const now = Date.now();
   const source = {
     source_id: sourceId,
+    organization_id: deployment.organization_id || null,
+    company_id: deployment.company_id || null,
     deployment_id: id,
     service: profile.key,
     connector: 'manual-upload',
-    filename,
+    filename: validation.safe_name,
     bytes: buffer.length,
     sha256,
-    storage_path: path,
+    content_type: validation.content_type,
+    validation_status: validation.validation_status,
+    malware_scan_status: validation.malware_scan_status,
+    storage_path: storagePath,
     status: 'RECEIVED',
     created_at: now
   };
@@ -366,7 +416,7 @@ export async function saveServiceSource(id: string, filename: string, buffer: Bu
     [`finclose_service_deployments/${id}/status`]: 'READY_FOR_AGENT',
     [`finclose_service_deployments/${id}/latest_source_id`]: sourceId,
     [`finclose_service_deployments/${id}/updated_at`]: now,
-    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_SOURCE_RECEIVED', deployment_id: id, service: profile.key, source_id: sourceId, sha256, created_at: now }
+    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_SOURCE_RECEIVED', deployment_id: id, organization_id: deployment.organization_id || null, company_id: deployment.company_id || null, service: profile.key, source_id: sourceId, sha256, created_at: now }
   });
   return source;
 }
