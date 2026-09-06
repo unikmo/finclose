@@ -369,20 +369,44 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
   const baseCloseId = `${deploymentId}__close__${periodEnd}__${fingerprint.slice(0, 16)}`;
   let cycleId = baseCycleId;
   let closeId = baseCloseId;
+  let supersedesCloseId: string | null = null;
+  let supersedesCycleId: string | null = null;
   const db = realtimeDatabase();
-  const existing = await db.ref(`finclose_finance_cycles/${baseCycleId}`).once('value');
-  if (existing.exists()) {
-    const latestCloseId = String(deployment.latest_monthly_close_id || (existing.val() as Record<string, any>).monthly_close_id || baseCloseId);
+
+  const latestCloseId = String(deployment.latest_monthly_close_id || '');
+  let latestClose: Record<string, any> | null = null;
+  if (latestCloseId) {
     const latestCloseSnap = await db.ref(`finclose_monthly_closes/${latestCloseId}`).once('value');
-    const latestClose = latestCloseSnap.exists() ? latestCloseSnap.val() as Record<string, any> : null;
-    if (latestClose && String(latestClose.close_status || '') === 'REOPENED' && String(latestClose.period_end) === periodEnd) {
+    latestClose = latestCloseSnap.exists() ? latestCloseSnap.val() as Record<string, any> : null;
+  }
+
+  if (latestClose && String(latestClose.period_end) === periodEnd) {
+    if (String(latestClose.close_status || '') === 'REOPENED') {
       const nonce = String(latestClose.reopen_nonce || '');
       if (!nonce) throw httpError('reopened close is missing version nonce', 409);
+      supersedesCloseId = String(latestClose.monthly_close_id || latestCloseId);
+      supersedesCycleId = String(latestClose.finance_cycle_id || '') || null;
       cycleId = `${baseCycleId}__reopen_${nonce}`;
       closeId = `${baseCloseId}__reopen_${nonce}`;
       const reopenedExisting = await db.ref(`finclose_finance_cycles/${cycleId}`).once('value');
       if (reopenedExisting.exists()) return { ...reopenedExisting.val(), duplicate: true };
-    } else {
+    } else if (latestClose.finance_cycle_id) {
+      const latestCycleSnap = await db.ref(`finclose_finance_cycles/${latestClose.finance_cycle_id}`).once('value');
+      if (latestCycleSnap.exists()) {
+        const latestCycle = latestCycleSnap.val() as Record<string, any>;
+        if (String(latestCycle.input_fingerprint || '') === fingerprint) return { ...latestCycle, duplicate: true };
+      }
+    }
+  }
+
+  if (cycleId === baseCycleId) {
+    const existing = await db.ref(`finclose_finance_cycles/${baseCycleId}`).once('value');
+    if (existing.exists()) {
+      const baseCloseSnap = await db.ref(`finclose_monthly_closes/${baseCloseId}`).once('value');
+      const baseClose = baseCloseSnap.exists() ? baseCloseSnap.val() as Record<string, any> : null;
+      if (baseClose && String(baseClose.close_status || '') === 'REOPENED' && latestClose && String(latestClose.monthly_close_id || '') !== baseCloseId) {
+        throw httpError('this reopened close has already been superseded by a newer close version', 409);
+      }
       return { ...existing.val(), duplicate: true };
     }
   }
@@ -408,6 +432,8 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
     period_end: periodEnd,
     payroll_run_id: payrollRun.payroll_run_id,
     bookkeeping_batch_id: bookkeepingBatch.bookkeeping_batch_id,
+    input_fingerprint: fingerprint,
+    supersedes_monthly_close_id: supersedesCloseId,
     created_at: now,
     updated_at: now
   };
@@ -426,6 +452,8 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
     payroll_journal_external_id: payrollJournal.external_id,
     bookkeeping_batch_id: bookkeepingBatch.bookkeeping_batch_id,
     monthly_close_id: closeId,
+    supersedes_finance_cycle_id: supersedesCycleId,
+    supersedes_monthly_close_id: supersedesCloseId,
     stage_status: {
       payroll: payrollRun.status || 'PREPARED',
       payroll_journal_handoff: 'HANDED_OFF_TO_BOOKKEEPING',
@@ -433,7 +461,7 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
       bank_reconciliation: close.controls.bank_reconciliation_ambiguous_count === 0 && close.controls.bank_reconciliation_unmatched_bank_count === 0 && close.controls.bank_reconciliation_unmatched_ledger_count === 0 ? 'PASS' : 'EXCEPTIONS_OPEN',
       monthly_close: close.status
     },
-    execution_boundary: 'NO_PAYMENT_NO_FILING_NO_EXTERNAL_POSTING_NO_PERIOD_LOCK',
+    execution_boundary: 'NO_PAYMENT_NO_FILING_NO_EXTERNAL_POSTING; INTERNAL_PERIOD_LOCK_AFTER_LAYER_A_APPROVAL',
     monthly_close: closeRecord,
     created_at: now,
     updated_at: now
@@ -447,9 +475,15 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
     [`finclose_payroll_runs/${payrollRun.payroll_run_id}/latest_finance_cycle_id`]: cycleId,
     [`finclose_payroll_runs/${payrollRun.payroll_run_id}/latest_bookkeeping_batch_id`]: bookkeepingBatch.bookkeeping_batch_id,
     [`finclose_payroll_runs/${payrollRun.payroll_run_id}/handoff_status`]: 'HANDED_OFF_TO_BOOKKEEPING',
-    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/finance_cycle_id`]: cycleId,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/latest_finance_cycle_id`]: cycleId,
     [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/source_payroll_run_id`]: payrollRun.payroll_run_id,
-    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/monthly_close_id`]: closeId,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/latest_monthly_close_id`]: closeId,
+    [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/finance_cycle_links/${cycleId}`]: {
+      finance_cycle_id: cycleId,
+      monthly_close_id: closeId,
+      supersedes_finance_cycle_id: supersedesCycleId,
+      linked_at: now
+    },
     [`finclose_service_deployments/${deploymentId}/latest_finance_cycle_id`]: cycleId,
     [`finclose_service_deployments/${deploymentId}/latest_monthly_close_id`]: closeId,
     [`finclose_service_deployments/${deploymentId}/updated_at`]: now,
