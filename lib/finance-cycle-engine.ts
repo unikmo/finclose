@@ -491,12 +491,12 @@ export function financeCycleSelfTest() {
     currency: 'GEL',
     pay_period_start: '2026-08-01',
     pay_period_end: '2026-08-31',
-    totals: { net_pay: 800, income_tax: 200, employee_pension: 20, employer_pension: 20 },
+    totals: { net_pay: 780, income_tax: 200, employee_pension: 20, employer_pension: 20 },
     controls: { journal_balanced: true },
     journal: [
       { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: 1000 },
       { side: 'DEBIT', account_role: 'EMPLOYER_PENSION_EXPENSE', amount: 20 },
-      { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: 800 },
+      { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: 780 },
       { side: 'CREDIT', account_role: 'INCOME_TAX_PAYABLE', amount: 200 },
       { side: 'CREDIT', account_role: 'PENSION_PAYABLE', amount: 40 }
     ]
@@ -511,14 +511,14 @@ export function financeCycleSelfTest() {
   };
   const payrollJournal = payrollRunToJournal(payrollRun, mapping);
   const settlements = settlementArtifacts(payrollRun, [
-    { settlement_id: 'NET', category: 'NET_PAYROLL', date: '2026-08-31', amount: 800, reference: 'PAYROLL-AUG' }
+    { settlement_id: 'NET', category: 'NET_PAYROLL', date: '2026-08-31', amount: 780, reference: 'PAYROLL-AUG' }
   ], mapping);
   const bookkeeping = calculateBookkeepingBatch({
     period_start: '2026-08-01',
     period_end: '2026-08-31',
     currency: 'GEL',
     journals: [payrollJournal, ...settlements.journals],
-    bank_transactions: [{ transaction_id: 'BANK-NET', date: '2026-08-31', amount: -800, reference: 'PAYROLL-AUG' }],
+    bank_transactions: [{ transaction_id: 'BANK-NET', date: '2026-08-31', amount: -780, reference: 'PAYROLL-AUG' }],
     ledger_cash_items: settlements.ledger_cash_items
   });
   const closePass = evaluateMonthlyClose({
