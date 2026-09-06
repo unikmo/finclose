@@ -82,5 +82,5 @@ export const FINANCIAL_UPLOAD_SECURITY = {
   executable_files_allowed: false,
   content_signature_validation: true,
   malware_scanner_integrated: false,
-  note: 'v0.33 validates file type, filename, size and magic bytes. A dedicated malware scanning service remains required before unrestricted production upload volume.'
+  note: 'v0.34 validates file type, filename, size and magic bytes and adds quarantine-first controlled-pilot review. A verified automated malware scanner remains required before unrestricted production upload volume.'
 } as const;
