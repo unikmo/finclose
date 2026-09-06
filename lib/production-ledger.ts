@@ -128,6 +128,22 @@ export async function appendProductionAuditEvent(input: {
   return result.rows[0]?.event_id || null;
 }
 
+export async function assertProductionDateRangeOpen(companyId: string, periodStart: string, periodEnd: string, context = 'transaction') {
+  if (!isRealDataMode()) return;
+  await assertProductionLedgerReady();
+  const result = await databasePool().query(
+    `select period_start, period_end from finclose_period_locks
+     where company_id = $1 and status = 'LOCKED'
+       and daterange(period_start, period_end, '[]') && daterange($2::date, $3::date, '[]')
+     order by period_start limit 1`,
+    [companyId, periodStart, periodEnd]
+  );
+  if (result.rowCount) {
+    const row = result.rows[0];
+    throw httpError(`${context} overlaps authoritative locked period ${String(row.period_start).slice(0, 10)} to ${String(row.period_end).slice(0, 10)}`, 409);
+  }
+}
+
 export async function commitPeriodLock(input: {
   organization_id: string;
   company_id: string;
