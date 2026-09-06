@@ -36,7 +36,7 @@ jobs:
           out.mkdir(exist_ok=True)
           for old in out.glob('source*.b64'):
               old.unlink()
-          chunk_size = 7000
+          chunk_size = 3000
           chunks = [bundle[i:i+chunk_size] for i in range(0, len(bundle), chunk_size)]
           for index, chunk in enumerate(chunks):
               (out / f'source-{index:03d}.b64').write_text(chunk, encoding='ascii')
@@ -52,5 +52,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A deployment
-          git commit -m "Generate chunked temporary Vercel source bundle"
+          git commit -m "Generate small-chunk temporary Vercel source bundle"
           git push
