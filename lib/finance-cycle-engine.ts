@@ -108,7 +108,7 @@ function lineFor(account: AccountRef, side: 'DEBIT' | 'CREDIT', amount: number):
   return line;
 }
 
-function stable(value: unknown) {
+function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
