@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 1 && p[0] === 'health') {
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.27.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
+      if (!deep || !configured) return NextResponse.json({ version: '0.28.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
       const reachable = { database: false, storage: false };
       const errors: string[] = [];
       try {
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
         await storageBucket().getMetadata();
         reachable.storage = true;
       } catch (e) { errors.push(`storage: ${(e as Error).message}`); }
-      return NextResponse.json({ version: '0.27.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, ok: reachable.database && reachable.storage, errors });
+      return NextResponse.json({ version: '0.28.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, ok: reachable.database && reachable.storage, errors });
     }
 
     if (p.join('/') === 'account/session') {
