@@ -128,6 +128,82 @@ export async function appendProductionAuditEvent(input: {
   return result.rows[0]?.event_id || null;
 }
 
+export async function persistBookkeepingBatch(input: {
+  organization_id: string;
+  company_id: string;
+  actor_user_id: string;
+  batch: Record<string, any>;
+}) {
+  if (!isRealDataMode()) return { persisted: false, journal_count: 0 };
+  await assertProductionLedgerReady();
+  const batch = input.batch;
+  const journals = Array.isArray(batch.journals) ? batch.journals as Record<string, any>[] : [];
+  const batchFingerprint = String(batch.input_fingerprint || '');
+  if (!batchFingerprint) throw httpError('bookkeeping batch is missing input fingerprint', 409);
+  return transaction(async client => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [`bookkeeping:${input.company_id}:${batch.bookkeeping_batch_id}`]);
+    let inserted = 0;
+    for (let journalIndex = 0; journalIndex < journals.length; journalIndex += 1) {
+      const journal = journals[journalIndex];
+      const journalFingerprint = crypto.createHash('sha256')
+        .update(`${batchFingerprint}:${String(journal.external_id || journalIndex)}`)
+        .digest('hex');
+      const journalId = crypto.randomUUID();
+      const result = await client.query(
+        `insert into finclose_journal_entries
+           (journal_entry_id, organization_id, company_id, external_id, journal_date, description, currency, source_type, source_id, input_fingerprint, status, created_by_user_id)
+         values ($1, $2, $3, $4, $5::date, $6, $7, 'BOOKKEEPING_BATCH', $8, $9, 'PREPARED', $10)
+         on conflict (company_id, input_fingerprint) do nothing
+         returning journal_entry_id`,
+        [journalId, input.organization_id, input.company_id, String(journal.external_id || ''), String(journal.date || ''), String(journal.description || ''), String(journal.currency || batch.currency || '').toUpperCase(), String(batch.bookkeeping_batch_id || ''), journalFingerprint, input.actor_user_id]
+      );
+      const persistedJournalId = result.rows[0]?.journal_entry_id;
+      if (!persistedJournalId) continue;
+      inserted += 1;
+      const lines = Array.isArray(journal.lines) ? journal.lines as Record<string, any>[] : [];
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+        const line = lines[lineIndex];
+        await client.query(
+          `insert into finclose_journal_lines
+             (journal_line_id, journal_entry_id, organization_id, company_id, line_no, account_code, account_name, debit, credit)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [crypto.randomUUID(), persistedJournalId, input.organization_id, input.company_id, lineIndex + 1, String(line.account_code || ''), line.account_name ? String(line.account_name) : null, Number(line.debit || 0), Number(line.credit || 0)]
+        );
+      }
+    }
+    return { persisted: true, journal_count: journals.length, inserted_count: inserted };
+  });
+}
+
+export async function recordCloseApproval(input: {
+  organization_id: string;
+  company_id: string;
+  close_id: string;
+  evidence_hash: string;
+  actor_user_id: string;
+  snapshot: unknown;
+}) {
+  if (!isRealDataMode()) return;
+  await assertProductionLedgerReady();
+  await databasePool().query(
+    `insert into finclose_close_snapshots
+       (close_snapshot_id, organization_id, company_id, monthly_close_id, evidence_hash, snapshot, approved_by_user_id)
+     values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+     on conflict (monthly_close_id, evidence_hash) do nothing`,
+    [crypto.randomUUID(), input.organization_id, input.company_id, input.close_id, input.evidence_hash, JSON.stringify(input.snapshot), input.actor_user_id]
+  );
+  await appendProductionAuditEvent({
+    organization_id: input.organization_id,
+    company_id: input.company_id,
+    actor_user_id: input.actor_user_id,
+    action: 'MONTHLY_CLOSE_APPROVED',
+    entity_type: 'MONTHLY_CLOSE',
+    entity_id: input.close_id,
+    payload: { evidence_hash: input.evidence_hash },
+    idempotency_key: `MONTHLY_CLOSE_APPROVED:${input.close_id}:${input.evidence_hash}`
+  });
+}
+
 export async function assertProductionDateRangeOpen(companyId: string, periodStart: string, periodEnd: string, context = 'transaction') {
   if (!isRealDataMode()) return;
   await assertProductionLedgerReady();
@@ -158,6 +234,11 @@ export async function commitPeriodLock(input: {
   await assertProductionLedgerReady();
   return transaction(async client => {
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [`${input.company_id}:${input.period_start}:${input.period_end}`]);
+    const existingForClose = await client.query(
+      `select period_lock_id, status from finclose_period_locks where organization_id = $1 and company_id = $2 and monthly_close_id = $3 order by created_at desc limit 1`,
+      [input.organization_id, input.company_id, input.close_id]
+    );
+    if (existingForClose.rowCount && String(existingForClose.rows[0].status) === 'LOCKED') return String(existingForClose.rows[0].period_lock_id);
     const overlap = await client.query(
       `select period_lock_id from finclose_period_locks
        where company_id = $1 and status = 'LOCKED'
