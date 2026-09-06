@@ -4,6 +4,7 @@ import { getServiceDeployment, publicServiceCatalog, saveServiceConfiguration, s
 import { linkDeploymentCompany, saveHistoricalContext, skipHistoricalContext } from '../../../lib/onboarding-history';
 import { accountResponse, assertCustomerOrLab, currentUser, loginLabAccount, logoutResponse, registerLabAccount } from '../../../lib/lab-auth';
 import { getPayrollRun, PAYROLL_RULE_PACKS, payrollEngineSelfTest, preparePayrollRun } from '../../../lib/payroll-engine';
+import { BOOKKEEPING_CORE_CAPABILITIES, bookkeepingEngineSelfTest, getBookkeepingBatch, prepareBookkeepingBatch } from '../../../lib/bookkeeping-engine';
 
 function segments(params: { path?: string[] }) { return params.path || []; }
 function historyReady(deployment: Record<string, any>) {
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 1 && p[0] === 'health') {
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET && process.env.FINCLOSE_LAB_TOKEN);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
-      if (!deep || !configured) return NextResponse.json({ version: '0.29.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
+      if (!deep || !configured) return NextResponse.json({ version: '0.30.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured });
       const reachable = { database: false, storage: false };
       const errors: string[] = [];
       try {
@@ -45,8 +46,20 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
         reachable.storage = true;
       } catch (e) { errors.push(`storage: ${(e as Error).message}`); }
       const payroll = payrollEngineSelfTest();
+      const bookkeeping = bookkeepingEngineSelfTest();
       if (!payroll.ok) errors.push('payroll-engine: deterministic regression check failed');
-      return NextResponse.json({ version: '0.29.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', configured, reachable, engines: { payroll_ge_basic: payroll.ok }, ok: reachable.database && reachable.storage && payroll.ok, errors });
+      if (!bookkeeping.ok) errors.push('bookkeeping-engine: deterministic regression check failed');
+      return NextResponse.json({
+        version: '0.30.0',
+        hosting: 'vercel',
+        database: 'firebase-realtime-database',
+        storage: 'firebase-storage',
+        configured,
+        reachable,
+        engines: { payroll_ge_basic: payroll.ok, bookkeeping_core: bookkeeping.ok },
+        ok: reachable.database && reachable.storage && payroll.ok && bookkeeping.ok,
+        errors
+      });
     }
 
     if (p.join('/') === 'account/session') {
@@ -56,6 +69,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
 
     if (p.join('/') === 'service-deployments/catalog') return NextResponse.json(publicServiceCatalog());
     if (p.join('/') === 'initialization/countries') return NextResponse.json(COUNTRIES.map(({ code, name, currency }) => ({ code, name, currency })));
+    if (p.join('/') === 'bookkeeping/capabilities') return NextResponse.json(BOOKKEEPING_CORE_CAPABILITIES);
 
     if (p.length === 3 && p[0] === 'payroll' && p[1] === 'rules') {
       const country = String(p[2] || '').toUpperCase() as keyof typeof PAYROLL_RULE_PACKS;
@@ -72,6 +86,11 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'runs') {
       await authorizedDeployment(req, p[1]);
       return NextResponse.json(await getPayrollRun(p[1], p[4]));
+    }
+
+    if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'bookkeeping' && p[3] === 'batches') {
+      await authorizedDeployment(req, p[1]);
+      return NextResponse.json(await getBookkeepingBatch(p[1], p[4]));
     }
 
     if (p.length === 3 && p[0] === 'initialization' && p[1] === 'template') {
@@ -136,6 +155,10 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'runs') {
       return NextResponse.json(await preparePayrollRun(p[1], await req.json()));
+    }
+
+    if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'bookkeeping' && p[3] === 'batches') {
+      return NextResponse.json(await prepareBookkeepingBatch(p[1], await req.json()));
     }
 
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'configuration') {
