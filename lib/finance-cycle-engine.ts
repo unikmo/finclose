@@ -365,11 +365,27 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
     bank_control: input.bank_control || null,
     period_scope_complete: input.period_scope_complete ?? null
   });
-  const cycleId = `${deploymentId}__${periodEnd}__${fingerprint.slice(0, 16)}`;
-  const closeId = `${deploymentId}__close__${periodEnd}__${fingerprint.slice(0, 16)}`;
+  const baseCycleId = `${deploymentId}__${periodEnd}__${fingerprint.slice(0, 16)}`;
+  const baseCloseId = `${deploymentId}__close__${periodEnd}__${fingerprint.slice(0, 16)}`;
+  let cycleId = baseCycleId;
+  let closeId = baseCloseId;
   const db = realtimeDatabase();
-  const existing = await db.ref(`finclose_finance_cycles/${cycleId}`).once('value');
-  if (existing.exists()) return { ...existing.val(), duplicate: true };
+  const existing = await db.ref(`finclose_finance_cycles/${baseCycleId}`).once('value');
+  if (existing.exists()) {
+    const latestCloseId = String(deployment.latest_monthly_close_id || (existing.val() as Record<string, any>).monthly_close_id || baseCloseId);
+    const latestCloseSnap = await db.ref(`finclose_monthly_closes/${latestCloseId}`).once('value');
+    const latestClose = latestCloseSnap.exists() ? latestCloseSnap.val() as Record<string, any> : null;
+    if (latestClose && String(latestClose.close_status || '') === 'REOPENED' && String(latestClose.period_end) === periodEnd) {
+      const nonce = String(latestClose.reopen_nonce || '');
+      if (!nonce) throw httpError('reopened close is missing version nonce', 409);
+      cycleId = `${baseCycleId}__reopen_${nonce}`;
+      closeId = `${baseCloseId}__reopen_${nonce}`;
+      const reopenedExisting = await db.ref(`finclose_finance_cycles/${cycleId}`).once('value');
+      if (reopenedExisting.exists()) return { ...reopenedExisting.val(), duplicate: true };
+    } else {
+      return { ...existing.val(), duplicate: true };
+    }
+  }
 
   const bookkeepingBatch = await prepareBookkeepingBatch(deploymentId, bookkeepingInput) as Record<string, any>;
   const close = evaluateMonthlyClose({

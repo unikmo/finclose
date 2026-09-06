@@ -521,12 +521,20 @@ export function calculateBalanceSheetReconciliation(scope: Record<string, any>[]
     }
     const gl = signedMoney(entry.gl_balance, `gl_balance for ${code}`);
     const independent = signedMoney(entry.independent_balance, `independent_balance for ${code}`);
-    const items = (entry.reconciling_items || []).map(item => ({
-      item_id: cleanId(item.item_id, `reconciling item id for ${code}`),
-      description: cleanText(item.description, `reconciling item description for ${code}`),
-      amount: signedMoney(item.amount, `reconciling item amount for ${code}`),
-      status: item.status
-    }));
+    const seenItems = new Set<string>();
+    const items = (entry.reconciling_items || []).map(item => {
+      const itemId = cleanId(item.item_id, `reconciling item id for ${code}`);
+      if (seenItems.has(itemId)) throw httpError(`duplicate reconciling item ${itemId} for ${code}`, 400);
+      seenItems.add(itemId);
+      const status = String(item.status || '').toUpperCase();
+      if (!['RESOLVED', 'ACCEPTED_TIMING', 'OPEN'].includes(status)) throw httpError(`invalid reconciling item status for ${code}:${itemId}`, 400);
+      return {
+        item_id: itemId,
+        description: cleanText(item.description, `reconciling item description for ${code}`),
+        amount: signedMoney(item.amount, `reconciling item amount for ${code}`),
+        status: status as ReconcilingItemInput['status']
+      };
+    });
     const rawDifference = signedMoney(gl - independent, `raw difference for ${code}`);
     const explainedDifference = signedMoney(items.reduce((sum, item) => sum + item.amount, 0), `explained difference for ${code}`);
     const unexplainedDifference = signedMoney(rawDifference - explainedDifference, `unexplained difference for ${code}`);
@@ -634,17 +642,22 @@ export async function refreshCloseGovernance(deploymentId: string, closeId: stri
   const existingApproval = String(close.approval_status || '');
   const existingCloseStatus = String(close.close_status || '');
   const locked = existingCloseStatus === 'LOCKED';
+  const reopened = existingCloseStatus === 'REOPENED';
   const approved = existingApproval === 'APPROVED';
+  const effectiveReady = ready && !reopened;
+  const effectiveBlockers = reopened ? [...blockers, 'CLOSE_REOPENED_REQUIRES_NEW_VERSION'] : blockers;
   const status = locked
     ? 'CLOSED_LOCKED'
-    : approved
-      ? 'APPROVED_READY_TO_LOCK'
-      : ready
-        ? 'CONTROLS_PASS_APPROVAL_REQUIRED'
-        : corePass
-          ? 'LAYER_A_INCOMPLETE'
-          : 'EXCEPTIONS_OPEN';
-  const approvalStatus = locked || approved ? existingApproval : ready ? 'APPROVAL_REQUIRED' : 'BLOCKED_PENDING_LAYER_A';
+    : reopened
+      ? 'REOPENED_REQUIRES_NEW_CLOSE'
+      : approved
+        ? 'APPROVED_READY_TO_LOCK'
+        : effectiveReady
+          ? 'CONTROLS_PASS_APPROVAL_REQUIRED'
+          : corePass
+            ? 'LAYER_A_INCOMPLETE'
+            : 'EXCEPTIONS_OPEN';
+  const approvalStatus = locked || approved ? existingApproval : reopened ? 'INVALIDATED_BY_REOPEN' : effectiveReady ? 'APPROVAL_REQUIRED' : 'BLOCKED_PENDING_LAYER_A';
   const now = Date.now();
   const layerA = {
     engine_version: CLOSE_GOVERNANCE_CAPABILITIES.version,
@@ -652,8 +665,8 @@ export async function refreshCloseGovernance(deploymentId: string, closeId: stri
     source_completeness_status: source.status,
     balance_sheet_reconciliation_id: balanceSheet?.balance_sheet_reconciliation_id || null,
     balance_sheet_reconciliation_status: balanceSheet?.status || 'NOT_PREPARED',
-    governance_status: ready ? 'READY_FOR_APPROVAL' : 'BLOCKED',
-    blockers,
+    governance_status: reopened ? 'REOPENED_REQUIRES_NEW_CLOSE' : effectiveReady ? 'READY_FOR_APPROVAL' : 'BLOCKED',
+    blockers: effectiveBlockers,
     evaluated_at: now
   };
   await realtimeDatabase().ref(`finclose_monthly_closes/${closeId}`).update({
@@ -672,6 +685,8 @@ async function approvalEvidenceSnapshot(closeId: string) {
   const balanceSnap = await db.ref(`finclose_balance_sheet_reconciliations/${closeId}`).once('value');
   if (!closeSnap.exists()) throw httpError('monthly close not found', 404);
   const close = closeSnap.val() as Record<string, any>;
+  const source = sourceSnap.exists() ? sourceSnap.val() as Record<string, any> : null;
+  const balance = balanceSnap.exists() ? balanceSnap.val() as Record<string, any> : null;
   return {
     monthly_close_id: closeId,
     finance_cycle_id: close.finance_cycle_id,
@@ -682,8 +697,23 @@ async function approvalEvidenceSnapshot(closeId: string) {
     core_control_status: close.control_status,
     core_controls: close.controls,
     core_exceptions: close.exceptions || [],
-    source_completeness: sourceSnap.exists() ? sourceSnap.val() : null,
-    balance_sheet_reconciliation: balanceSnap.exists() ? balanceSnap.val() : null
+    source_completeness: source ? {
+      engine_version: source.engine_version,
+      status: source.status,
+      proof_basis: source.proof_basis,
+      required_count: source.required_count,
+      complete_count: source.complete_count,
+      requirements: source.requirements || [],
+      blockers: source.blockers || []
+    } : null,
+    balance_sheet_reconciliation: balance ? {
+      engine_version: balance.engine_version,
+      status: balance.status,
+      material_account_count: balance.material_account_count,
+      reconciled_material_account_count: balance.reconciled_material_account_count,
+      accounts: balance.accounts || [],
+      exceptions: balance.exceptions || []
+    } : null
   };
 }
 
@@ -692,6 +722,7 @@ export async function approveMonthlyClose(deploymentId: string, closeId: string,
   await refreshCloseGovernance(deploymentId, closeId);
   const { close } = await requireClose(deploymentId, closeId);
   if (String(close.close_status || '') === 'LOCKED') return { ...close, duplicate: true };
+  if (String(close.close_status || '') === 'REOPENED') throw httpError('reopened close requires a new close version before approval', 409);
   if (String(close.layer_a?.governance_status || '') !== 'READY_FOR_APPROVAL') throw httpError('monthly close is not ready for approval', 409);
   if (String(close.control_status || '') !== 'PASS') throw httpError('core monthly-close controls have not passed', 409);
 
@@ -839,6 +870,7 @@ export async function reopenMonthlyClose(deploymentId: string, closeId: string, 
   if (String(lock.status) !== 'LOCKED') return { ...close, duplicate: true };
   const now = Date.now();
   const reopenCount = Number(lock.reopen_count || 0) + 1;
+  const reopenNonce = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
   const eventKey = db.ref('finclose_period_lock_events').push().key!;
   const auditKey = db.ref('finclose_audit_events').push().key!;
   const reopened = {
@@ -869,6 +901,8 @@ export async function reopenMonthlyClose(deploymentId: string, closeId: string, 
     [`finclose_monthly_closes/${closeId}/reopened_by`]: identity,
     [`finclose_monthly_closes/${closeId}/reopened_at`]: now,
     [`finclose_monthly_closes/${closeId}/reopen_reason`]: reasonText,
+    [`finclose_monthly_closes/${closeId}/reopen_count`]: reopenCount,
+    [`finclose_monthly_closes/${closeId}/reopen_nonce`]: reopenNonce,
     [`finclose_monthly_closes/${closeId}/updated_at`]: now,
     [`finclose_audit_events/${auditKey}`]: {
       event: 'MONTHLY_CLOSE_REOPENED',
