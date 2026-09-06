@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
 import { getServiceDeployment } from './service-deployments';
+import { assertDateRangeOpenForCompany } from './close-governance-engine';
 
 export type JournalLineInput = {
   account_code: string;
@@ -81,7 +82,7 @@ export const BOOKKEEPING_CORE_CAPABILITIES = {
     'VAT or sales-tax coding',
     'invoice/receipt extraction and matching',
     'automatic journal posting to external accounting systems',
-    'period locking',
+    'external accounting-provider period locking',
     'accounts-receivable or accounts-payable subledger automation',
     'country-specific bookkeeping/tax rule packs'
   ],
@@ -389,6 +390,8 @@ export async function prepareBookkeepingBatch(deploymentId: string, input: Bookk
   if (!['RECEIVED', 'NOT_APPLICABLE_NEW_COMPANY'].includes(String(deployment.history_status || ''))) {
     throw httpError('complete bookkeeping history before preparing bookkeeping', 409);
   }
+
+  await assertDateRangeOpenForCompany(String(deployment.company_id), String(input.period_start), String(input.period_end), 'bookkeeping batch');
 
   const db = realtimeDatabase();
   const companySnap = await db.ref(`finclose_companies/${deployment.company_id}`).once('value');

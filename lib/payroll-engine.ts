@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
 import { getServiceDeployment } from './service-deployments';
+import { assertDateRangeOpenForCompany } from './close-governance-engine';
 
 export type PayrollEmployeeInput = {
   employee_id: string;
@@ -283,6 +284,8 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
     (error as Error & { status?: number }).status = 409;
     throw error;
   }
+
+  await assertDateRangeOpenForCompany(String(deployment.company_id), String(input.pay_period_start), String(input.pay_period_end), 'payroll run');
 
   const countryCode = String(deployment.country_code || deployment.configuration?.country_code || '').toUpperCase();
   if (countryCode !== 'GE') {
