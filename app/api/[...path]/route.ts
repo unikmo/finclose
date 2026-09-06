@@ -6,7 +6,7 @@ import { accountResponse, loginLabAccount, registerLabAccount } from '../../../l
 import { authenticateRequest, createFirebaseSessionResponse, currentManagedUser, loginManagedAccount, logoutManagedResponse, registerManagedAccount, type RequestIdentity } from '../../../lib/managed-auth';
 import { ensurePersonalOrganization, deploymentAuthorization, listOrganizationCompanies, requireCompanyAccess, type OrganizationRole } from '../../../lib/tenancy';
 import { isRealDataMode, publicRuntimeProfile, runtimeReadiness } from '../../../lib/runtime-mode';
-import { ledgerHealth, persistBookkeepingBatch } from '../../../lib/production-ledger';
+import { assertProductionLedgerReady, ledgerHealth, persistBookkeepingBatch, persistFinanceCycle, persistPayrollRun } from '../../../lib/production-ledger';
 import { FINANCIAL_UPLOAD_SECURITY } from '../../../lib/file-security';
 import { getPayrollRun, PAYROLL_RULE_PACKS, payrollEngineSelfTest, preparePayrollRun } from '../../../lib/payroll-engine';
 import { BOOKKEEPING_CORE_CAPABILITIES, bookkeepingEngineSelfTest, getBookkeepingBatch, prepareBookkeepingBatch } from '../../../lib/bookkeeping-engine';
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET);
       const deep = req.nextUrl.searchParams.get('deep') === '1';
       if (!deep || !configured) return NextResponse.json({ version: '0.33.0', hosting: 'vercel', database: 'firebase-realtime-database', storage: 'firebase-storage', runtime: readiness, configured });
-      const reachable = { database: false, storage: false, postgres: false };
+      const reachable = { database: false, storage: false, firestore: false };
       const errors: string[] = [];
       try {
         await realtimeDatabase().ref('finclose_health').limitToFirst(1).once('value');
@@ -77,9 +77,9 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
         await storageBucket().getMetadata();
         reachable.storage = true;
       } catch (e) { errors.push(`storage: ${(e as Error).message}`); }
-      const postgres = await ledgerHealth();
-      reachable.postgres = postgres.ready;
-      if (readiness.real_data_mode && !postgres.ready) errors.push(`postgres-ledger: ${postgres.error || 'schema not ready'}`);
+      const firestore = await ledgerHealth();
+      reachable.firestore = firestore.ready;
+      if (readiness.real_data_mode && !firestore.ready) errors.push(`firestore-ledger: ${firestore.error || 'ledger not ready'}`);
       const payroll = payrollEngineSelfTest();
       const bookkeeping = bookkeepingEngineSelfTest();
       const financeCycle = financeCycleSelfTest();
@@ -89,17 +89,17 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       if (!financeCycle.ok) errors.push('finance-cycle: deterministic regression check failed');
       if (!closeGovernance.ok) errors.push('close-governance: deterministic regression check failed');
       const engineOk = payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok;
-      const infrastructureOk = reachable.database && reachable.storage && (!readiness.real_data_mode || postgres.ready);
+      const infrastructureOk = reachable.database && reachable.storage && (!readiness.real_data_mode || firestore.ready);
       return NextResponse.json({
         version: '0.33.0',
         hosting: 'vercel',
         database: 'firebase-realtime-database-control-plane',
-        authoritative_ledger: 'postgresql',
+        authoritative_ledger: 'firebase-firestore',
         storage: 'firebase-storage',
         runtime: readiness,
         configured,
         reachable,
-        postgres,
+        firestore,
         upload_security: FINANCIAL_UPLOAD_SECURITY,
         engines: {
           payroll_ge_basic: payroll.ok,
@@ -214,6 +214,7 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
 
     const auth = await authenticateRequest(req);
     const organization = auth.kind === 'customer' && isRealDataMode() ? await ensurePersonalOrganization(auth.user) : null;
+    if (isRealDataMode()) await assertProductionLedgerReady();
 
     if (p.join('/') === 'initialization/template/request') {
       const body = await req.json();
@@ -238,8 +239,17 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     if (p.length >= 2 && p[0] === 'service-deployments') await authorizedDeployment(req, p[1], 'VIEWER');
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'runs') {
-      await authorizedDeployment(req, p[1], 'ACCOUNTANT');
-      return NextResponse.json(await preparePayrollRun(p[1], await req.json()));
+      const scoped = await authorizedDeployment(req, p[1], 'ACCOUNTANT');
+      const run = await preparePayrollRun(p[1], await req.json()) as Record<string, any>;
+      if (isRealDataMode() && scoped.auth.kind === 'customer') {
+        await persistPayrollRun({
+          organization_id: String(scoped.deployment.organization_id),
+          company_id: String(scoped.deployment.company_id),
+          actor_user_id: scoped.auth.user.user_id,
+          run
+        });
+      }
+      return NextResponse.json(run);
     }
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'bookkeeping' && p[3] === 'batches') {
@@ -259,13 +269,21 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     if (p.length === 3 && p[0] === 'service-deployments' && p[2] === 'finance-cycles') {
       const scoped = await authorizedDeployment(req, p[1], 'ACCOUNTANT');
       const cycle = await prepareFinanceCycle(p[1], await req.json()) as Record<string, any>;
-      if (isRealDataMode() && scoped.auth.kind === 'customer' && cycle.bookkeeping_batch_id) {
-        const batch = await getBookkeepingBatch(p[1], String(cycle.bookkeeping_batch_id)) as Record<string, any>;
-        await persistBookkeepingBatch({
+      if (isRealDataMode() && scoped.auth.kind === 'customer') {
+        if (cycle.bookkeeping_batch_id) {
+          const batch = await getBookkeepingBatch(p[1], String(cycle.bookkeeping_batch_id)) as Record<string, any>;
+          await persistBookkeepingBatch({
+            organization_id: String(scoped.deployment.organization_id),
+            company_id: String(scoped.deployment.company_id),
+            actor_user_id: scoped.auth.user.user_id,
+            batch
+          });
+        }
+        await persistFinanceCycle({
           organization_id: String(scoped.deployment.organization_id),
           company_id: String(scoped.deployment.company_id),
           actor_user_id: scoped.auth.user.user_id,
-          batch
+          cycle
         });
       }
       return NextResponse.json(cycle);

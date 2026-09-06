@@ -1,6 +1,6 @@
 # FinClose Canonical Truth Registry
 
-Version: 14
+Version: 15
 Effective date: 2026-09-06
 
 | Field | Canonical value | Authority | Status | Supersedes |
@@ -17,7 +17,7 @@ Effective date: 2026-09-06
 | First-view rule | A service route initially exposes only account access. Company setup, historical upload and connectors remain hidden until their preceding gate is complete | User decision | ACTIVE | Registration / initialization shown before account access |
 | Lab access token | `FINCLOSE_LAB_TOKEN` is an internal server/test secret only. It remains available for `/lab` and backend test access but is not part of customer onboarding | User decision + implementation | ACTIVE | Customer enters Lab token |
 | Lab account authentication | v0.27+ uses a temporary server-side Lab account bridge: scrypt-hashed password records in Firebase RTDB plus signed HTTP-only session cookie. This is for synthetic Lab testing only and is not the production identity architecture | Implementation + security gate | ACTIVE | Customer-facing shared Lab token |
-| Production authentication | Proper managed customer authentication/tenant authorization remains required before real customer use; Firebase Auth is the preferred current candidate but is not yet verified/configured for FinClose | Security architecture gate | OPEN | — |
+| Production authentication | v0.33 implements Firebase Authentication with server-side HTTP-only session cookies, token revocation checks and organization/role authorization for PILOT/PRODUCTION. Actual Firebase Email/Password enablement and live release verification remain required before the mode is switched from LAB | User architecture decision + implementation | ACTIVE / CONFIGURATION REQUIRED | Preferred-candidate-only Firebase Auth |
 | Existing initialized companies | An already initialized FinClose company can be linked to a new service deployment instead of initialized again; MDA remains an existing initialized company from prior Lab work | User decision + existing Lab state | ACTIVE | Re-initializing every service deployment |
 | Balance-books onboarding | Account → historical accounting information → current-system connection; no company initialization required | User decision | ACTIVE | Registration only before history |
 | Payroll onboarding | Account → company country + pay schedule → reuse or initialize company → prior payroll information → current payroll source → payroll handoff | User decision + v0.28 UX implementation | ACTIVE | Generic account/company/history/connector screen |
@@ -53,10 +53,12 @@ Effective date: 2026-09-06
 | Live external connector status | Provider slots implemented; external OAuth/API authorization not production-enabled until provider credentials, callback/token-vault controls and QA are complete | Security gate | ACTIVE | — |
 | Secure file upload connector | Functional for synthetic Lab service-deployment tests | Verified implementation target | ACTIVE | Company-only file upload path |
 | Legacy technical workflow | `/lab` is retained as a direct/internal initialization/testing route but is not linked from the customer homepage | Implementation + UX boundary | ACTIVE | Public homepage Lab entry |
-| Test database | Firebase Realtime Database | User-provided active Firebase database + implementation | ACTIVE | Firebase Cloud Firestore test candidate |
+| Workflow/control database | Firebase Realtime Database remains the workflow/orchestration control plane while real-data ledger state is authoritative in Cloud Firestore | User architecture decision + implementation | ACTIVE | RTDB as candidate final ledger |
 | Realtime Database URL | `https://theantibalcony-default-rtdb.europe-west1.firebasedatabase.app/` | User-provided Firebase endpoint | ACTIVE | — |
 | File storage | Firebase Cloud Storage | User decision + verified connectivity | ACTIVE | Supabase Storage |
 | Firebase project | `theantibalcony` | User-provided Firebase project | ACTIVE | — |
-| Test data policy | Synthetic/test data only | FinClose safety boundary | ACTIVE | — |
-| Final ledger database | NOT YET LOCKED; relational gate required | Architecture gate required | OPEN | — |
-| Production readiness | NOT READY | QA/release gate | ACTIVE | — |
+| Firebase-only production architecture | Vercel application/API + Firebase Authentication + Firebase Realtime Database control plane + Cloud Firestore authoritative ledger + Firebase Cloud Storage; Supabase/PostgreSQL is not part of FinClose | Explicit user decision | ACTIVE | Proposed Supabase-hosted PostgreSQL ledger |
+| Firestore authoritative ledger | v0.33 stores production organizations/companies, payroll evidence, bookkeeping batches/journals, finance cycles, monthly-close snapshots, approvals, period locks and append-only audit events in Cloud Firestore. Direct browser access is denied; server writes use Firebase Admin | User decision + implementation | ACTIVE / NOT YET LIVE | PostgreSQL production-ledger implementation |
+| Data-mode policy | LAB = synthetic/test data only; PILOT = controlled real customer/company data only after Firebase Auth, Firestore, tenant, upload and QA gates pass; PRODUCTION remains a separate release gate | User architecture decision + safety boundary | ACTIVE | Global synthetic-only policy |
+| Final ledger database | Cloud Firestore in the existing Firebase project is the authoritative FinClose ledger for PILOT/PRODUCTION. Firestore transactions, deterministic idempotency, immutable evidence records and transactional company-period lock state replace the abandoned PostgreSQL/Supabase proposal | User decision + v0.33 implementation | ACTIVE / NOT YET LIVE | Relational/PostgreSQL gate |
+| Production readiness | NOT READY. v0.33 is a Firebase-only controlled-real-data foundation branch; PILOT cannot be declared live until Firestore/Auth/rules are enabled and independently QA-tested in the actual Firebase project | QA/release gate | ACTIVE | — |

@@ -117,10 +117,10 @@ export const CLOSE_GOVERNANCE_CAPABILITIES = {
     'A close cannot be locked if its evidence snapshot changed after approval.',
     'A locked period blocks overlapping new payroll/bookkeeping/finance-cycle work until explicitly reopened.',
     'Reopening never deletes the original lock or approval history.',
-    'In PILOT/PRODUCTION, PostgreSQL is the authoritative FinClose close-evidence and period-lock boundary; external provider locks remain separate.',
+    'In PILOT/PRODUCTION, Cloud Firestore is the authoritative FinClose close-evidence and period-lock boundary; external provider locks remain separate.',
     'Manual-upload evidence proves artifact presence and declared coverage inside FinClose, not independent third-party connector completeness.'
   ],
-  execution_boundary: 'LAB_OR_CONTROLLED_REAL_DATA_WITH_POSTGRES'
+  execution_boundary: 'LAB_OR_CONTROLLED_REAL_DATA_WITH_FIRESTORE'
 } as const;
 
 function httpError(message: string, status: number) {
