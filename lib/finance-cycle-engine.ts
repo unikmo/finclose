@@ -362,8 +362,7 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
     bank_transactions: input.bank_transactions || [],
     additional_journals: input.additional_journals || [],
     additional_ledger_cash_items: input.additional_ledger_cash_items || [],
-    bank_control: input.bank_control || null,
-    period_scope_complete: input.period_scope_complete ?? null
+    bank_control: input.bank_control || null
   });
   const baseCycleId = `${deploymentId}__${periodEnd}__${fingerprint.slice(0, 16)}`;
   const baseCloseId = `${deploymentId}__close__${periodEnd}__${fingerprint.slice(0, 16)}`;
