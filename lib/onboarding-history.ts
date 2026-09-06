@@ -78,6 +78,12 @@ export async function saveHistoricalContext(deploymentId: string, filename: stri
   if (deployment.service !== 'balance-books' && !deployment.company_id) {
     throw httpError('complete company initialization or link an initialized company before uploading history', 409);
   }
+  if (isRealDataMode() && deployment.company_id) {
+    const companySnap = await realtimeDatabase().ref(`finclose_companies/${deployment.company_id}`).once('value');
+    if (!companySnap.exists()) throw httpError('initialized company not found', 404);
+    const company = companySnap.val() as Record<string, any>;
+    if (company.data_is_synthetic === true) throw httpError('real financial history cannot be attached to a company explicitly marked synthetic', 409);
+  }
   const validation = validateFinancialUpload(filename, buffer, 'historical_context');
 
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');

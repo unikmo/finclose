@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
 import { getServiceDeployment } from './service-deployments';
-import { appendProductionAuditEvent, assertProductionDateRangeOpen, commitPeriodLock, recordCloseApproval, reopenPeriodLock } from './production-ledger';
+import { assertProductionDateRangeOpen, commitPeriodLock, recordCloseApproval, reopenPeriodLock } from './production-ledger';
 import { isRealDataMode } from './runtime-mode';
 
 export type CloseActor = {

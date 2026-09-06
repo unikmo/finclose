@@ -276,6 +276,14 @@ export async function reopenPeriodLock(input: {
   await assertProductionLedgerReady();
   await transaction(async client => {
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [`${input.company_id}:${input.close_id}`]);
+    const current = await client.query(
+      `select period_lock_id, status from finclose_period_locks
+       where organization_id = $1 and company_id = $2 and monthly_close_id = $3
+       order by created_at desc limit 1`,
+      [input.organization_id, input.company_id, input.close_id]
+    );
+    if (!current.rowCount) throw httpError('authoritative PostgreSQL period lock was not found', 409);
+    if (String(current.rows[0].status) === 'REOPENED') return;
     const result = await client.query(
       `update finclose_period_locks
        set status = 'REOPENED', reopened_by_user_id = $1, reopen_reason = $2, reopened_at = now(), updated_at = now()
@@ -283,6 +291,6 @@ export async function reopenPeriodLock(input: {
        returning period_lock_id`,
       [input.actor_user_id, input.reason, input.organization_id, input.company_id, input.close_id]
     );
-    if (!result.rowCount) throw httpError('authoritative PostgreSQL period lock was not found', 409);
+    if (!result.rowCount) throw httpError('authoritative PostgreSQL period lock could not be reopened', 409);
   });
 }

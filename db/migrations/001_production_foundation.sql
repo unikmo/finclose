@@ -107,6 +107,17 @@ create table if not exists finclose_period_locks (
 );
 create index if not exists finclose_period_locks_company_idx on finclose_period_locks(company_id, status, period_start, period_end);
 
+create extension if not exists btree_gist;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'finclose_no_overlapping_locked_periods') then
+    alter table finclose_period_locks
+      add constraint finclose_no_overlapping_locked_periods
+      exclude using gist (company_id with =, daterange(period_start, period_end, '[]') with &&)
+      where (status = 'LOCKED');
+  end if;
+end $$;
+
 create table if not exists finclose_audit_events (
   event_id uuid primary key,
   organization_id text not null references finclose_organizations(organization_id),
@@ -166,6 +177,15 @@ drop trigger if exists finclose_journal_locked_period_guard on finclose_journal_
 create trigger finclose_journal_locked_period_guard
 before insert on finclose_journal_entries
 for each row execute function finclose_reject_locked_period_journal();
+
+alter table finclose_organizations enable row level security;
+alter table finclose_companies enable row level security;
+alter table finclose_accounting_periods enable row level security;
+alter table finclose_journal_entries enable row level security;
+alter table finclose_journal_lines enable row level security;
+alter table finclose_close_snapshots enable row level security;
+alter table finclose_period_locks enable row level security;
+alter table finclose_audit_events enable row level security;
 
 insert into finclose_schema_migrations(version, name)
 values (1, 'production_foundation')

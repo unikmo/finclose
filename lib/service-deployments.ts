@@ -352,6 +352,20 @@ export async function saveServiceSource(id: string, filename: string, buffer: Bu
     (error as Error & { status?: number }).status = 409;
     throw error;
   }
+  if (isRealDataMode() && deployment.company_id) {
+    const companySnap = await realtimeDatabase().ref(`finclose_companies/${deployment.company_id}`).once('value');
+    if (!companySnap.exists()) {
+      const error = new Error('linked company was not found');
+      (error as Error & { status?: number }).status = 404;
+      throw error;
+    }
+    const company = companySnap.val() as Record<string, any>;
+    if (company.data_is_synthetic === true) {
+      const error = new Error('real financial data cannot be attached to a company explicitly marked synthetic');
+      (error as Error & { status?: number }).status = 409;
+      throw error;
+    }
+  }
   const validation = validateFinancialUpload(filename, buffer, 'current_source');
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   const sourceId = `${id}__${sha256}`;
