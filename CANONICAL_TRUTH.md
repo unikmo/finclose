@@ -1,7 +1,7 @@
 # FinClose Canonical Truth Registry
 
-Version: 9
-Effective date: 2026-09-05
+Version: 10
+Effective date: 2026-09-06
 
 | Field | Canonical value | Authority | Status | Supersedes |
 |---|---|---|---|---|
@@ -20,7 +20,9 @@ Effective date: 2026-09-05
 | Production authentication | Proper managed customer authentication/tenant authorization remains required before real customer use; Firebase Auth is the preferred current candidate but is not yet verified/configured for FinClose | Security architecture gate | OPEN | — |
 | Existing initialized companies | An already initialized FinClose company can be linked to a new service deployment instead of initialized again; MDA remains an existing initialized company from prior Lab work | User decision + existing Lab state | ACTIVE | Re-initializing every service deployment |
 | Balance-books onboarding | Account → historical accounting information → current-system connection; no company initialization required | User decision | ACTIVE | Registration only before history |
-| Payroll onboarding | Account → initialized company → prior payroll information → relevant current-system connector | User decision | ACTIVE | Registration + initialized company |
+| Payroll onboarding | Account → company country + pay schedule → reuse or initialize company → prior payroll information → current payroll source → payroll handoff | User decision + v0.28 UX implementation | ACTIVE | Generic account/company/history/connector screen |
+| Payroll screen rule | Payroll has a dedicated four-screen customer flow: Account, Company, Payroll history, Current payroll. Internal connector states and provider-credential requirements are never exposed as customer actions | User decision + UX safeguard | ACTIVE | Shared generic service onboarding UI for payroll |
+| Payroll connector presentation | Secure file upload is shown whenever it is the currently usable payroll path. Direct payroll integrations appear only when configured and country-supported; unavailable internal provider slots stay hidden | UX truthfulness rule | ACTIVE | Customer-facing `PROVIDER_CREDENTIALS_REQUIRED` / `PARTNER_APP_REQUIRED` states |
 | Bookkeeping onboarding | Account → initialized company → prior bookkeeping information → accounting connector | User decision | ACTIVE | Registration + initialized company |
 | Bookkeeping + Payroll onboarding | Account → initialized company → prior bookkeeping/payroll information → relevant current-system connectors | User decision | ACTIVE | Registration + initialized company |
 | Historical-context storage | Historical files are stored separately from current/operational source data under the service deployment and are used to understand the starting position | User decision + implementation | ACTIVE | Treating all uploads as current source data |
