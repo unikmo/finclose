@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
-import { calculateBookkeepingBatch, getBookkeepingBatch, prepareBookkeepingBatch } from './bookkeeping-engine';
+import { calculateBookkeepingBatch, prepareBookkeepingBatch } from './bookkeeping-engine';
 import type { BankTransactionInput, JournalEntryInput, JournalLineInput, LedgerCashItemInput } from './bookkeeping-engine';
 import { getPayrollRun, preparePayrollRun } from './payroll-engine';
 import type { PayrollJournalLine, PayrollRunInput } from './payroll-engine';
@@ -63,7 +63,8 @@ export const FINANCE_CYCLE_CAPABILITIES = {
     'A monthly close can pass controls only when period_scope_complete is explicitly true.',
     'A monthly close can pass controls only when a bank closing-balance control is supplied and balances agree.',
     'Ambiguous or unmatched bank reconciliation items remain close blockers.',
-    'Prepared monthly close does not lock the period, post externally, submit payroll filings or initiate payments.'
+    'Prepared monthly close does not lock the period, post externally, submit payroll filings or initiate payments.',
+    'Payroll recognition journals are dated at pay_period_end in V1; alternative recognition-date policies are not yet configurable.'
   ],
   execution_boundary: 'PREPARED_NOT_CLOSED'
 } as const;
@@ -108,7 +109,7 @@ function lineFor(account: AccountRef, side: 'DEBIT' | 'CREDIT', amount: number):
 }
 
 function stable(value: unknown) {
-  if (Array.isArray(value)) return value.map(stable);
+  if (Array.isArray(value)) return value.map(stable).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     return Object.keys(record).sort().reduce<Record<string, unknown>>((out, key) => {
@@ -328,13 +329,13 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
   if (periodStart > periodEnd) throw httpError('period_start must not be after period_end', 400);
   if (typeof input.period_scope_complete !== 'boolean') throw httpError('period_scope_complete must be true or false', 400);
 
+  const mapping = normalizedMapping(input.account_mapping);
   const payrollRun = await resolvePayrollRun(deploymentId, input);
   const payrollPeriodEnd = isoDate(payrollRun.pay_period_end, 'payroll pay_period_end');
   if (payrollPeriodEnd < periodStart || payrollPeriodEnd > periodEnd) {
     throw httpError('payroll pay-period end must fall inside the finance-cycle period', 409);
   }
 
-  const mapping = normalizedMapping(input.account_mapping);
   const settlements = settlementArtifacts(payrollRun, input.settlements || [], mapping as PayrollAccountMapping);
   for (const journal of settlements.journals) {
     if (journal.date < periodStart || journal.date > periodEnd) {
@@ -427,8 +428,8 @@ export async function prepareFinanceCycle(deploymentId: string, input: FinanceCy
   await db.ref().update({
     [`finclose_finance_cycles/${cycleId}`]: cycleRecord,
     [`finclose_monthly_closes/${closeId}`]: closeRecord,
-    [`finclose_payroll_runs/${payrollRun.payroll_run_id}/finance_cycle_id`]: cycleId,
-    [`finclose_payroll_runs/${payrollRun.payroll_run_id}/bookkeeping_batch_id`]: bookkeepingBatch.bookkeeping_batch_id,
+    [`finclose_payroll_runs/${payrollRun.payroll_run_id}/latest_finance_cycle_id`]: cycleId,
+    [`finclose_payroll_runs/${payrollRun.payroll_run_id}/latest_bookkeeping_batch_id`]: bookkeepingBatch.bookkeeping_batch_id,
     [`finclose_payroll_runs/${payrollRun.payroll_run_id}/handoff_status`]: 'HANDED_OFF_TO_BOOKKEEPING',
     [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/finance_cycle_id`]: cycleId,
     [`finclose_bookkeeping_batches/${bookkeepingBatch.bookkeeping_batch_id}/source_payroll_run_id`]: payrollRun.payroll_run_id,
