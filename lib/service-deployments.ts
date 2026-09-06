@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { getCountry, realtimeDatabase, storageBucket } from './finclose-backend';
 import { validateFinancialUpload } from './file-security';
 import { assertRealDataRuntimeReady, isRealDataMode, runtimeMode } from './runtime-mode';
+import { quarantineStorageSegment, realDataUploadSecurityState } from './upload-quarantine';
 
 export type ServiceKey = 'balance-books' | 'payroll' | 'do-bookkeeping' | 'bookkeeping-payroll';
 export type AgentKey = 'orchestrator' | 'reconciliation' | 'bookkeeping' | 'payroll';
@@ -375,7 +376,8 @@ export async function saveServiceSource(id: string, filename: string, buffer: Bu
 
   const organizationId = String(deployment.organization_id || 'lab').trim() || 'lab';
   const companyId = String(deployment.company_id || 'unlinked').trim() || 'unlinked';
-  const storagePath = `finclose/organizations/${organizationId}/companies/${companyId}/service-deployments/${id}/${profile.key}/${crypto.randomUUID()}/${validation.safe_name}`;
+  const securityState = realDataUploadSecurityState();
+  const storagePath = `finclose/organizations/${organizationId}/companies/${companyId}/service-deployments/${id}/${profile.key}/${quarantineStorageSegment()}/${crypto.randomUUID()}/${validation.safe_name}`;
   await storageBucket().file(storagePath).save(buffer, {
     resumable: false,
     metadata: {
@@ -388,7 +390,8 @@ export async function saveServiceSource(id: string, filename: string, buffer: Bu
         purpose: 'current_source',
         sha256,
         validationStatus: validation.validation_status,
-        malwareScanStatus: validation.malware_scan_status
+        malwareScanStatus: validation.malware_scan_status,
+        securityReviewStatus: securityState.security_review_status
       }
     }
   });
@@ -406,17 +409,28 @@ export async function saveServiceSource(id: string, filename: string, buffer: Bu
     content_type: validation.content_type,
     validation_status: validation.validation_status,
     malware_scan_status: validation.malware_scan_status,
+    security_review_status: securityState.security_review_status,
     storage_path: storagePath,
-    status: 'RECEIVED',
+    status: securityState.status,
     created_at: now
   };
   const auditKey = db.ref('finclose_audit_events').push().key!;
-  await db.ref().update({
+  const updates: Record<string, unknown> = {
     [`finclose_service_sources/${sourceId}`]: source,
-    [`finclose_service_deployments/${id}/status`]: 'READY_FOR_AGENT',
-    [`finclose_service_deployments/${id}/latest_source_id`]: sourceId,
     [`finclose_service_deployments/${id}/updated_at`]: now,
-    [`finclose_audit_events/${auditKey}`]: { event: 'SERVICE_SOURCE_RECEIVED', deployment_id: id, organization_id: deployment.organization_id || null, company_id: deployment.company_id || null, service: profile.key, source_id: sourceId, sha256, created_at: now }
-  });
+    [`finclose_audit_events/${auditKey}`]: {
+      event: securityState.status === 'RECEIVED' ? 'SERVICE_SOURCE_RECEIVED' : 'SERVICE_SOURCE_QUARANTINED',
+      deployment_id: id, organization_id: deployment.organization_id || null, company_id: deployment.company_id || null,
+      service: profile.key, source_id: sourceId, sha256, security_review_status: securityState.security_review_status, created_at: now
+    }
+  };
+  if (securityState.status === 'RECEIVED') {
+    updates[`finclose_service_deployments/${id}/status`] = 'READY_FOR_AGENT';
+    updates[`finclose_service_deployments/${id}/latest_source_id`] = sourceId;
+  } else {
+    updates[`finclose_service_deployments/${id}/status`] = 'SOURCE_QUARANTINED_REVIEW_REQUIRED';
+    updates[`finclose_service_deployments/${id}/latest_quarantined_source_id`] = sourceId;
+  }
+  await db.ref().update(updates);
   return source;
 }
