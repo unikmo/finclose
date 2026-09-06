@@ -58,14 +58,21 @@ type ReconciliationMatch = {
   reason: 'AMOUNT_REFERENCE_DATE' | 'AMOUNT_REFERENCE' | 'AMOUNT_DATE';
 };
 
+type ReconciliationAmbiguity = {
+  bank_transaction_id: string;
+  candidate_ledger_item_ids: string[];
+  score: number;
+  reason: 'MULTIPLE_TOP_CANDIDATES' | 'LEDGER_CONTENTION';
+};
+
 export const BOOKKEEPING_CORE_CAPABILITIES = {
   version: 'BOOKKEEPING-CORE-V1',
   implemented: [
     'balanced journal validation',
     'duplicate external journal-id detection inside a batch',
     'linked-company base-currency enforcement',
-    'deterministic bank-to-ledger cash reconciliation',
-    'ambiguous-match isolation',
+    'order-independent deterministic bank-to-ledger cash reconciliation',
+    'ambiguous-match and ledger-contention isolation',
     'prepared bookkeeping batch persistence with SHA-256 fingerprinting',
     'service-scope enforcement for bookkeeping-only and bookkeeping-plus-payroll'
   ],
@@ -183,7 +190,7 @@ function normalizeBankTransactions(items: BankTransactionInput[]) {
       reference: String(item.reference || '').trim(),
       description: String(item.description || '').trim()
     };
-  });
+  }).sort((a, b) => a.transaction_id.localeCompare(b.transaction_id));
 }
 
 function normalizeLedgerItems(items: LedgerCashItemInput[]) {
@@ -199,7 +206,7 @@ function normalizeLedgerItems(items: LedgerCashItemInput[]) {
       reference: String(item.reference || '').trim(),
       description: String(item.description || '').trim()
     };
-  });
+  }).sort((a, b) => a.ledger_item_id.localeCompare(b.ledger_item_id));
 }
 
 function candidateScore(bank: ReturnType<typeof normalizeBankTransactions>[number], ledger: ReturnType<typeof normalizeLedgerItems>[number]) {
@@ -218,13 +225,19 @@ function candidateScore(bank: ReturnType<typeof normalizeBankTransactions>[numbe
 export function reconcileBankToLedger(bankInput: BankTransactionInput[], ledgerInput: LedgerCashItemInput[]) {
   const bank = normalizeBankTransactions(bankInput || []);
   const ledger = normalizeLedgerItems(ledgerInput || []);
-  const usedLedger = new Set<string>();
   const matches: ReconciliationMatch[] = [];
-  const ambiguous: Array<{ bank_transaction_id: string; candidate_ledger_item_ids: string[]; score: number }> = [];
+  const ambiguous: ReconciliationAmbiguity[] = [];
 
+  type Proposal = {
+    bank: typeof bank[number];
+    ledger: typeof ledger[number];
+    score: number;
+    reason: ReconciliationMatch['reason'];
+  };
+
+  const proposals: Proposal[] = [];
   for (const bankItem of bank) {
     const candidates = ledger
-      .filter(item => !usedLedger.has(item.ledger_item_id))
       .map(item => ({ item, candidate: candidateScore(bankItem, item) }))
       .filter(row => row.candidate)
       .map(row => ({ item: row.item, score: row.candidate!.score, reason: row.candidate!.reason }))
@@ -237,23 +250,59 @@ export function reconcileBankToLedger(bankInput: BankTransactionInput[], ledgerI
       ambiguous.push({
         bank_transaction_id: bankItem.transaction_id,
         candidate_ledger_item_ids: top.map(candidate => candidate.item.ledger_item_id),
-        score: topScore
+        score: topScore,
+        reason: 'MULTIPLE_TOP_CANDIDATES'
       });
       continue;
     }
-
-    const winner = top[0];
-    usedLedger.add(winner.item.ledger_item_id);
-    matches.push({
-      bank_transaction_id: bankItem.transaction_id,
-      ledger_item_id: winner.item.ledger_item_id,
-      amount: bankItem.amount,
-      bank_date: bankItem.date,
-      ledger_date: winner.item.date,
-      score: winner.score,
-      reason: winner.reason
-    });
+    proposals.push({ bank: bankItem, ledger: top[0].item, score: top[0].score, reason: top[0].reason });
   }
+
+  const proposalsByLedger = new Map<string, Proposal[]>();
+  for (const proposal of proposals) {
+    const list = proposalsByLedger.get(proposal.ledger.ledger_item_id) || [];
+    list.push(proposal);
+    proposalsByLedger.set(proposal.ledger.ledger_item_id, list);
+  }
+
+  for (const [ledgerId, contendersRaw] of Array.from(proposalsByLedger.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    const contenders = contendersRaw.sort((a, b) => b.score - a.score || a.bank.transaction_id.localeCompare(b.bank.transaction_id));
+    const highestScore = contenders[0].score;
+    const highest = contenders.filter(contender => contender.score === highestScore);
+
+    if (highest.length === 1) {
+      const winner = highest[0];
+      matches.push({
+        bank_transaction_id: winner.bank.transaction_id,
+        ledger_item_id: winner.ledger.ledger_item_id,
+        amount: winner.bank.amount,
+        bank_date: winner.bank.date,
+        ledger_date: winner.ledger.date,
+        score: winner.score,
+        reason: winner.reason
+      });
+      for (const loser of contenders.slice(1)) {
+        ambiguous.push({
+          bank_transaction_id: loser.bank.transaction_id,
+          candidate_ledger_item_ids: [ledgerId],
+          score: loser.score,
+          reason: 'LEDGER_CONTENTION'
+        });
+      }
+    } else {
+      for (const contender of contenders) {
+        ambiguous.push({
+          bank_transaction_id: contender.bank.transaction_id,
+          candidate_ledger_item_ids: [ledgerId],
+          score: contender.score,
+          reason: 'LEDGER_CONTENTION'
+        });
+      }
+    }
+  }
+
+  matches.sort((a, b) => a.bank_transaction_id.localeCompare(b.bank_transaction_id));
+  ambiguous.sort((a, b) => a.bank_transaction_id.localeCompare(b.bank_transaction_id) || a.reason.localeCompare(b.reason));
 
   const matchedBank = new Set(matches.map(match => match.bank_transaction_id));
   const matchedLedger = new Set(matches.map(match => match.ledger_item_id));
@@ -415,14 +464,25 @@ export function bookkeepingEngineSelfTest() {
     }],
     bank_transactions: [
       { transaction_id: 'B001', date: '2026-08-31', amount: -800, reference: 'SAL-001' },
-      { transaction_id: 'B002', date: '2026-08-31', amount: -100, reference: '' }
+      { transaction_id: 'B002', date: '2026-08-31', amount: -100, reference: '' },
+      { transaction_id: 'B003', date: '2026-08-31', amount: -50, reference: 'STRONG' },
+      { transaction_id: 'B004', date: '2026-08-31', amount: -50, reference: '' }
     ],
     ledger_cash_items: [
       { ledger_item_id: 'L001', date: '2026-08-31', amount: -800, reference: 'SAL-001' },
       { ledger_item_id: 'L002', date: '2026-08-31', amount: -100, reference: '' },
-      { ledger_item_id: 'L003', date: '2026-08-31', amount: -100, reference: '' }
+      { ledger_item_id: 'L003', date: '2026-08-31', amount: -100, reference: '' },
+      { ledger_item_id: 'L004', date: '2026-08-31', amount: -50, reference: 'STRONG' }
     ]
   });
+
+  const permuted = reconcileBankToLedger(
+    [
+      { transaction_id: 'B004', date: '2026-08-31', amount: -50, reference: '' },
+      { transaction_id: 'B003', date: '2026-08-31', amount: -50, reference: 'STRONG' }
+    ],
+    [{ ledger_item_id: 'L004', date: '2026-08-31', amount: -50, reference: 'STRONG' }]
+  );
 
   let unbalancedRejected = false;
   try {
@@ -440,16 +500,20 @@ export function bookkeepingEngineSelfTest() {
     unbalancedRejected = true;
   }
 
+  const b003Match = valid.reconciliation.matches.find(match => match.bank_transaction_id === 'B003');
+  const b004Ambiguity = valid.reconciliation.ambiguous.find(item => item.bank_transaction_id === 'B004');
   return {
     ok:
       valid.controls.all_journals_balanced &&
-      valid.reconciliation.matches.length === 1 &&
-      valid.reconciliation.matches[0].bank_transaction_id === 'B001' &&
-      valid.reconciliation.ambiguous.length === 1 &&
-      valid.reconciliation.ambiguous[0].bank_transaction_id === 'B002' &&
+      valid.reconciliation.matches.some(match => match.bank_transaction_id === 'B001' && match.ledger_item_id === 'L001') &&
+      valid.reconciliation.ambiguous.some(item => item.bank_transaction_id === 'B002' && item.reason === 'MULTIPLE_TOP_CANDIDATES') &&
+      b003Match?.ledger_item_id === 'L004' &&
+      b003Match.score === 100 &&
+      b004Ambiguity?.reason === 'LEDGER_CONTENTION' &&
       valid.reconciliation.unmatched_bank.includes('B002') &&
-      valid.reconciliation.unmatched_ledger.includes('L002') &&
-      valid.reconciliation.unmatched_ledger.includes('L003') &&
+      valid.reconciliation.unmatched_bank.includes('B004') &&
+      permuted.matches.length === 1 &&
+      permuted.matches[0].bank_transaction_id === 'B003' &&
       unbalancedRejected &&
       valid.execution_status === 'PREPARED_NOT_POSTED',
     sample: valid
