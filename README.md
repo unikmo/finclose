@@ -1,94 +1,134 @@
 # FinClose
 
-Canonical repository for the FinClose financial-operations product and Lab.
+Canonical repository for the FinClose financial-operations product.
 
-## Canonical architecture — v0.27 test build
+## Canonical architecture — v0.33 production foundation
 
 - **Source:** `unikmo/finclose`
-- **Hosting/runtime:** Vercel
-- **Test database:** Firebase Realtime Database
-- **File storage:** Firebase Cloud Storage
-- **Frontend/API:** Next.js
-- **Supabase:** not used
+- **Application/API runtime:** Vercel + Next.js
+- **Customer identity:** Firebase Authentication in `PILOT` / `PRODUCTION`
+- **Workflow/control plane:** Firebase Realtime Database
+- **Authoritative accounting ledger:** Cloud Firestore
+- **Financial documents:** Firebase Cloud Storage
+- **Firebase project:** `theantibalcony`
+- **Supabase/PostgreSQL:** not used
 
-## Product deployment rule
+Cloud Firestore is the authoritative financial-state boundary for real-data modes. Realtime Database remains the workflow/orchestration control plane while existing engines are progressively migrated. Direct browser access to Realtime Database, Firestore and Storage is denied; Vercel server routes use the Firebase Admin SDK.
 
-FinClose deploys and bills only the service selected on the homepage. Company initialization is company/master-data setup; it does not automatically activate or bill unrelated agents.
+## Runtime modes
 
-## Customer onboarding order
+FinClose has three explicit modes:
+
+- `LAB` — synthetic/test financial data and the legacy internal test bridge.
+- `PILOT` — controlled real customer/company data with Firebase Authentication, tenant isolation, Firestore ledger controls and human approval.
+- `PRODUCTION` — unrestricted production only after security, connector, compliance and release gates pass.
+
+`FINCLOSE_RUNTIME_MODE` controls the mode. Moving from `LAB` to `PILOT` is a release decision, not a UI rename.
+
+## Customer onboarding
 
 The customer flow is account-first:
 
-1. **Sign in or create an account.** The shared technical Lab token is never requested in the customer journey.
-2. **Company only if required.** Payroll, bookkeeping and combined service link an already initialized FinClose company or initialize one with the existing country form. Balance-books skips company initialization.
-3. **Prior information.** Historical accounting/payroll records give FinClose context about balances, open items and prior decisions.
-4. **Current system connection.** Only after the earlier gates are complete are Xero, QuickBooks, DATEV, SmartAccounts or secure upload shown.
+1. **Sign in or create an account.** No technical Lab token is requested.
+2. **Company only if required.** Existing initialized companies are reused rather than re-initialized.
+3. **Prior information.** Historical accounting/payroll information is ingested separately from current operational data.
+4. **Current system connection.** Xero, QuickBooks, DATEV, SmartAccounts or secure upload is shown only after earlier gates pass.
 
-An existing initialized company can be reused for a new service deployment. It must not be initialized again. The previously initialized MDA company therefore remains reusable in the synthetic Lab.
+Balance-books skips company initialization. Payroll, bookkeeping and combined service require a company link or initialization.
 
-## Account layer
+## Managed identity and tenancy
 
-v0.27 removes `FINCLOSE_LAB_TOKEN` from the customer UI. The token remains an internal server/test secret and is still available to the legacy `/lab` technical workflow.
+In `PILOT` / `PRODUCTION`:
 
-For the current synthetic Lab, account registration/login uses a temporary server-side authentication bridge:
+- Firebase Authentication provides the user identity.
+- FinClose exchanges Firebase credentials for secure HTTP-only server session cookies.
+- Organizations and memberships use `OWNER`, `ADMIN`, `ACCOUNTANT`, `APPROVER` and `VIEWER` roles.
+- Service deployments and companies are organization-owned.
+- Company lists and financial actions are tenant-scoped server-side.
+- Close approval requires `APPROVER`; reopening requires `ADMIN`.
 
-- email + password account
-- password derived with Node `scrypt` and a per-user random salt
-- account record stored in Firebase Realtime Database
-- signed HTTP-only session cookie
-- server-side session signing uses the existing private Lab secret
+The legacy scrypt Lab account bridge and `FINCLOSE_LAB_TOKEN` remain restricted to `LAB`.
 
-This is **not** the final production identity architecture. Managed authentication and tenant/company authorization remain mandatory before real customer use. Firebase Authentication is the preferred current candidate, but FinClose has not yet verified/configured it for production.
+## Authoritative Firestore ledger
 
-## Historical context
+The v0.33 real-data ledger uses Cloud Firestore collections for:
 
-Historical uploads are stored separately from current/operational source files under the service deployment. Examples include general ledgers, trial balances, bank reconciliations/statements, open AR/AP, payroll registers, YTD payroll and unresolved-item lists.
+- production organizations and companies;
+- payroll-run evidence;
+- bookkeeping batches and journal entries;
+- finance-cycle and monthly-close snapshots;
+- close approvals and approval history;
+- company period-lock state;
+- period-lock/reopen events;
+- append-only production audit events.
 
-- Balance-books requires historical context.
-- A company initialized as `NEW` may explicitly mark history as not applicable.
-- Historical files use SHA-256 duplicate detection.
+Firestore transactions enforce deterministic idempotency and concurrent close/lock controls. A per-company lock-state document is updated transactionally with the authoritative period-lock record so concurrent operations cannot create overlapping active locks.
+
+Prepared journal entries are stored with SHA-256 immutable fingerprints. Controlled-pilot limits prevent oversized Firestore journal documents; larger posting architecture remains a later scale gate.
+
+## Layer A close governance
+
+The current close path is:
+
+**Payroll → bookkeeping → bank reconciliation → source completeness → balance-sheet reconciliation → approval → period lock**
+
+For real-data modes, approval evidence and period locking are recorded in Cloud Firestore before the Realtime Database workflow mirror is treated as complete. Reopening preserves prior evidence and creates append-only events.
+
+External accounting-provider locks, filings and payments remain separate execution layers.
+
+## Financial source documents
+
+Firebase Cloud Storage stores historical and current source files under tenant/company-specific private paths. FinClose currently enforces:
+
+- SHA-256 fingerprints;
+- filename sanitization;
+- 25 MB file limit;
+- XLSX, CSV, PDF, PNG and JPEG allowlist;
+- magic-byte/content-signature checks;
+- macro-enabled/executable formats rejected by the allowlist;
+- direct client Storage access denied.
+
+A dedicated malware-scanning/quarantine workflow remains a release gate before unrestricted production upload volume.
 
 ## Connector layer
 
-The connector layer remains shared by the specialist agents and is only shown after account/company/history gates are complete.
+Connector slots currently exist for:
 
-Current connector catalog:
+- Xero
+- QuickBooks Online
+- DATEV
+- SmartAccounts
+- Secure file upload
 
-- Xero — OAuth 2.0 adapter slot
-- QuickBooks Online — OAuth 2.0 accounting adapter slot
-- DATEV — Germany partner/API adapter slot
-- SmartAccounts — Estonia API-key adapter slot
-- Secure file upload — functional synthetic-Lab connector
+Provider OAuth/API execution remains disabled until provider credentials, token-vault handling, least-privilege scopes and provider-specific QA are complete.
 
-External provider authorization is **not yet production-enabled**. Provider credentials, secure OAuth callback/token-vault handling, tenant authorization and provider-specific QA remain mandatory before real customer data may flow through Xero, QuickBooks, DATEV or SmartAccounts.
+## Required Vercel/Firebase configuration
 
-## Security boundary
-
-The browser never talks directly to Firebase Realtime Database or Storage. Vercel server routes use Firebase Admin credentials. Firebase client rules deny direct reads/writes.
-
-Customer-facing service routes authenticate with an HTTP-only session cookie. The technical `/lab` workflow can still use `FINCLOSE_LAB_TOKEN` for synthetic backend testing. Use synthetic/test financial data only until managed authentication, tenant authorization, production database architecture and full security QA are complete.
-
-## Required Vercel environment variables
+Core server configuration:
 
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
 - `FIREBASE_STORAGE_BUCKET`
-- `FINCLOSE_LAB_TOKEN`
+- `FIREBASE_DATABASE_URL`
+- `FIREBASE_WEB_API_KEY`
+- `FIREBASE_AUTH_DOMAIN`
+- `FIREBASE_WEB_PROJECT_ID`
+- `FIREBASE_WEB_APP_ID` where applicable
+- `FINCLOSE_RUNTIME_MODE`
+- `FINCLOSE_LAB_TOKEN` only for `LAB`
 
-Optional connector provider variables are documented in `.env.example`.
+No Supabase or PostgreSQL connection string is part of FinClose.
 
-## v0.27 acceptance path
+## Real-data release gate
 
-1. `/api/health?deep=1` reports Realtime Database and Storage reachable.
-2. Open a homepage service route and confirm **Create account / Sign in** is the only customer action exposed first and no Lab token field exists.
-3. Create a synthetic Lab account, sign out, then sign back in.
-4. For balance-books, confirm company initialization is skipped and prior-information upload is next.
-5. For payroll/bookkeeping/combined, choose a company country, then link an existing initialized company (including MDA when available for that country) or initialize a new one using the existing country workbook.
-6. Confirm historical upload is the next visible stage and accepts multiple synthetic files.
-7. Confirm connectors/current source cannot be used until the history gate is complete.
-8. Confirm historical files and current source files use separate Firebase Storage paths.
+The v0.33 source establishes the Firebase-only production foundation, but `PILOT` must not be declared live until the actual Firebase project has been verified for:
 
-## Production gates
+1. Firebase Email/Password Authentication enabled and tested;
+2. Cloud Firestore database enabled and reachable from the Vercel service account;
+3. Firestore and Storage deny-by-default rules deployed;
+4. tenant-isolation tests passing;
+5. close-approval/lock concurrency tests passing against Firestore;
+6. upload quarantine/malware handling appropriate for the pilot risk level;
+7. independent security and accounting-control QA;
+8. live post-release verification.
 
-The v0.27 account bridge is a Lab mechanism, not a production authentication certification. Before real customer data, FinClose still requires managed identity, tenant/company authorization, password-recovery and email-verification flows, abuse/rate-limit controls, secure upload hardening, connector authorization QA, independent security QA and live release verification.
-
-Firebase Realtime Database is being used for the current deployment test because it is already active and provides durable test persistence. It is **not approved as the final ledger database**. Before real accounting journals/ledger logic are introduced, FinClose must run a relational-storage decision gate. PostgreSQL remains the preferred production candidate for ledger-grade relational data.
+Production readiness remains a separate gate from successful deployment.
