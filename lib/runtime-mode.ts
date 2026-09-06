@@ -10,6 +10,7 @@ export type RuntimeReadiness = {
   storage_ready: boolean;
   release_gate_approved: boolean;
   upload_quarantine_mode: UploadQuarantineMode;
+  upload_scanner_verified: boolean;
   upload_quarantine_ready: boolean;
   tenant_isolation_required: boolean;
   real_data_allowed_by_config: boolean;
@@ -72,7 +73,10 @@ export function runtimeReadiness(): RuntimeReadiness {
   const storageReady = Boolean(process.env.FIREBASE_STORAGE_BUCKET);
   const releaseApproved = releaseGateApproved(mode);
   const quarantineMode = uploadQuarantineMode();
-  const uploadQuarantineReady = quarantineMode === 'MANUAL_REVIEW' || quarantineMode === 'SCANNER';
+  const uploadScannerVerified = String(process.env.FINCLOSE_UPLOAD_SCANNER_VERIFIED || '').trim().toUpperCase() === 'YES';
+  const pilotQuarantineReady = quarantineMode === 'MANUAL_REVIEW' || (quarantineMode === 'SCANNER' && uploadScannerVerified);
+  const productionQuarantineReady = quarantineMode === 'SCANNER' && uploadScannerVerified;
+  const uploadQuarantineReady = mode === 'PRODUCTION' ? productionQuarantineReady : pilotQuarantineReady;
   const blockers: string[] = [];
 
   if (realDataMode) {
@@ -81,6 +85,8 @@ export function runtimeReadiness(): RuntimeReadiness {
     if (!firestoreLedgerConfigured) blockers.push('FIRESTORE_LEDGER_NOT_CONFIGURED');
     if (!storageReady) blockers.push('FIREBASE_STORAGE_NOT_CONFIGURED');
     if (!releaseApproved) blockers.push(mode === 'PILOT' ? 'PILOT_RELEASE_GATE_NOT_APPROVED' : 'PRODUCTION_RELEASE_GATE_NOT_APPROVED');
+    if (quarantineMode === 'SCANNER' && !uploadScannerVerified) blockers.push('UPLOAD_SCANNER_NOT_VERIFIED');
+    if (mode === 'PRODUCTION' && quarantineMode !== 'SCANNER') blockers.push('PRODUCTION_REQUIRES_VERIFIED_UPLOAD_SCANNER');
     if (!uploadQuarantineReady) blockers.push('REAL_DATA_UPLOAD_QUARANTINE_NOT_CONFIGURED');
   }
 
@@ -93,6 +99,7 @@ export function runtimeReadiness(): RuntimeReadiness {
     storage_ready: storageReady,
     release_gate_approved: releaseApproved,
     upload_quarantine_mode: quarantineMode,
+    upload_scanner_verified: uploadScannerVerified,
     upload_quarantine_ready: uploadQuarantineReady,
     tenant_isolation_required: realDataMode,
     real_data_allowed_by_config: realDataMode && blockers.length === 0,
@@ -120,6 +127,7 @@ export function publicRuntimeProfile() {
     blockers: readiness.blockers,
     release_gate_approved: readiness.release_gate_approved,
     upload_quarantine_mode: readiness.upload_quarantine_mode,
+    upload_scanner_verified: readiness.upload_scanner_verified,
     upload_quarantine_ready: readiness.upload_quarantine_ready,
     auth_mode: readiness.real_data_mode ? 'FIREBASE_AUTH_SESSION' : 'LAB_ACCOUNT_SESSION',
     firebase_client_config: readiness.firebase_auth_client_ready ? firebaseClientConfig() : null,
