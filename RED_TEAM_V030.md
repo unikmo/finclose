@@ -17,6 +17,7 @@ The change is suitable as a controlled bookkeeping validation/reconciliation cor
 - Journal debit and credit totals must match exactly after cent rounding.
 - Duplicate external journal IDs inside one batch are rejected.
 - Journal date and currency must agree with the batch.
+- The persisted batch currency is checked against the linked company's authoritative `base_currency` record.
 
 Result: deterministic controls are appropriate for the declared Lab scope.
 
@@ -27,7 +28,10 @@ Result: deterministic controls are appropriate for the declared Lab scope.
 - Same reference within three days is lower confidence.
 - Amount + same date without reference is lower still.
 - A tied highest score is isolated as ambiguous and is not auto-matched.
-- A ledger cash item can be used only once.
+- Competing bank transactions cannot silently claim the same ledger item.
+- Input order does not determine the winner: proposals are evaluated globally and a unique higher-confidence contender wins; ties remain ambiguous.
+
+**Red-team defect found and fixed before merge:** the first implementation assigned ledger items sequentially, so input order could affect which bank transaction claimed a shared ledger candidate. The matcher was rewritten to be order-independent and conservative, with explicit `LEDGER_CONTENTION` exceptions. A permutation regression case was added.
 
 Result: conservative enough for a first core. No fuzzy/AI-generated auto-match is allowed at this layer.
 
@@ -74,10 +78,11 @@ Synthetic regression must continue to prove:
 3. duplicate external journal ID rejected;
 4. exact reference/date/amount match accepted;
 5. tied candidates isolated as ambiguous;
-6. ambiguous items remain unmatched;
-7. company base currency enforced before persistence;
-8. bookkeeping service scope enforced;
-9. no external posting state remains explicit.
+6. shared-ledger contention is resolved by confidence rather than input order;
+7. ambiguous/contention losers remain unmatched;
+8. company base currency enforced before persistence;
+9. bookkeeping service scope enforced;
+10. no external posting state remains explicit.
 
 ## Release boundary
 
