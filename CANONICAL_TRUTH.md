@@ -1,6 +1,6 @@
 # FinClose Canonical Truth Registry
 
-Version: 11
+Version: 12
 Effective date: 2026-09-06
 
 | Field | Canonical value | Authority | Status | Supersedes |
@@ -28,7 +28,13 @@ Effective date: 2026-09-06
 | Payroll rule-pack country coverage | Georgia basic employment is implemented first. US, DE, GB, EE and CM operational payroll calculations remain `NOT_IMPLEMENTED` until their statutory rule packs are separately researched, tested and approved | Reliability boundary | ACTIVE | Implied multi-country payroll completeness |
 | Payroll execution boundary | Payroll runs are `PREPARED_NOT_APPROVED` and `NO_PAYMENT_NO_FILING`; FinClose does not yet submit payroll declarations, tax/pension filings or initiate salary payments | Safety / release gate | ACTIVE | — |
 | Bookkeeping onboarding | Account → initialized company → prior bookkeeping information → accounting connector | User decision | ACTIVE | Registration + initialized company |
+| Bookkeeping operational engine | FinClose v0.30 introduces `BOOKKEEPING-CORE-V1`: balanced journal validation, duplicate journal-ID controls, linked-company base-currency enforcement, deterministic bank-to-ledger cash reconciliation, ambiguous-match isolation and prepared-batch persistence | User implementation authorization + implementation | ACTIVE / SYNTHETIC LAB ONLY | Onboarding-only bookkeeping capability |
+| Bookkeeping reconciliation rule | Automatic reconciliation requires exact signed amount and a unique highest-confidence candidate within a 3-day window. Same normalized reference + same date scores highest; tied candidates remain ambiguous and are not auto-matched | Implementation reliability rule | ACTIVE | — |
+| Bookkeeping sign convention | Bank and ledger cash items use the same signed cash-flow convention for matching | Implementation contract | ACTIVE | — |
+| Bookkeeping execution boundary | Bookkeeping batches are `PREPARED_NOT_APPROVED`, `PREPARED_NOT_POSTED` and `NO_EXTERNAL_POSTING`; no external accounting system posting or period locking is enabled | Safety / release gate | ACTIVE | — |
+| Bookkeeping scope not yet implemented | Automatic chart-of-accounts classification, VAT/sales-tax coding, invoice/receipt extraction and matching, AR/AP subledger automation, period locks and country-specific bookkeeping/tax rule packs remain unimplemented | Reliability boundary | ACTIVE | — |
 | Bookkeeping + Payroll onboarding | Account → initialized company → prior bookkeeping/payroll information → relevant current-system connectors | User decision | ACTIVE | Registration + initialized company |
+| Bookkeeping + Payroll engine availability | The combined service is permitted to invoke both Payroll and Bookkeeping engines under the same service deployment. Automatic payroll-run → bookkeeping-batch handoff/posting is not yet implemented and must not be implied | Product architecture + implementation boundary | ACTIVE | Implied full cross-module automation |
 | Historical-context storage | Historical files are stored separately from current/operational source data under the service deployment and are used to understand the starting position | User decision + implementation | ACTIVE | Treating all uploads as current source data |
 | Historical-context skip | Only a company initialized as `NEW` may skip prior-history upload; balance-books cannot skip historical context | Product safeguard | ACTIVE | Unrestricted skip |
 | Connector architecture | Shared connector layer with service-specific least-privilege access | Product architecture | ACTIVE | Connectors embedded separately in each agent |
