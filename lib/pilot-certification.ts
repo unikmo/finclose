@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { firebaseApp, realtimeDatabase, storageBucket } from './finclose-backend';
+import { inspectFirebaseServiceAccountEnvironment } from './firebase-environment';
+import { waitForSessionRevocation } from './firebase-revocation-verification';
 import { firebaseClientConfig, runtimeMode, uploadQuarantineMode } from './runtime-mode';
 import { requireOrganizationRole, type OrganizationRole } from './tenancy';
 import { payrollEngineSelfTest } from './payroll-engine';
@@ -43,13 +45,7 @@ function gate(id: string, title: string, status: CertificationGateStatus, eviden
 }
 
 function projectId() {
-  try {
-    const raw = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
-    if (!raw) return '';
-    return String((JSON.parse(raw) as Record<string, unknown>).project_id || '').trim();
-  } catch {
-    return '';
-  }
+  return inspectFirebaseServiceAccountEnvironment().project_id || '';
 }
 
 function databaseUrl() {
@@ -130,8 +126,16 @@ async function publicRulesGate(runId: string) {
 
 async function authGate(runId: string) {
   const client = firebaseClientConfig();
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    return gate('firebase_auth_end_to_end', 'Firebase Authentication end-to-end', 'BLOCKED', 'FIREBASE_SERVICE_ACCOUNT_JSON is not configured.');
+  const credentialEnvironment = inspectFirebaseServiceAccountEnvironment();
+  if (credentialEnvironment.status !== 'PRESENT') {
+    return gate(
+      'firebase_auth_end_to_end',
+      'Firebase Authentication end-to-end',
+      'BLOCKED',
+      credentialEnvironment.error_code || 'FIREBASE_SERVICE_ACCOUNT_JSON is not configured.',
+      true,
+      { credential_environment: credentialEnvironment.status }
+    );
   }
   if (!client.apiKey || !client.authDomain || !client.projectId) {
     return gate('firebase_auth_end_to_end', 'Firebase Authentication end-to-end', 'BLOCKED', 'Firebase web/client Auth configuration is incomplete. Configure FIREBASE_WEB_API_KEY, FIREBASE_WEB_PROJECT_ID and FIREBASE_AUTH_DOMAIN before certification can test password sign-in, OOB flows and session revocation.', true, { client_configured: false });
@@ -169,12 +173,19 @@ async function authGate(runId: string) {
     const session = await auth.createSessionCookie(String(signed.idToken), { expiresIn: 60 * 60 * 1000 });
     const sessionBefore = await auth.verifySessionCookie(session, true);
     if (sessionBefore.uid !== uid) throw new Error('Firebase session cookie identity mismatch');
-    await auth.revokeRefreshTokens(uid);
-    let revokedRejected = false;
-    try { await auth.verifySessionCookie(session, true); } catch { revokedRejected = true; }
-    if (!revokedRejected) throw new Error('revoked Firebase session remained valid');
 
-    return gate('firebase_auth_end_to_end', 'Firebase Authentication end-to-end', 'PASS', 'Synthetic account creation, password sign-in, verification/reset OOB requests, session-cookie verification and revocation all succeeded against the live Firebase project.', true, { client_configured: true, email_password_provider: true, revocation_enforced: true });
+    const authTimeMs = Number(sessionBefore.auth_time || 0) * 1000;
+    const boundaryWaitMs = Math.max(0, authTimeMs + 1_001 - Date.now());
+    if (boundaryWaitMs > 0) await new Promise(resolve => setTimeout(resolve, boundaryWaitMs));
+
+    await auth.revokeRefreshTokens(uid);
+    const revocation = await waitForSessionRevocation(
+      () => auth.verifySessionCookie(session, true),
+      { maxAttempts: 6, delayMs: 250 }
+    );
+    if (!revocation.revoked) throw new Error('revoked Firebase session remained valid after bounded propagation retries');
+
+    return gate('firebase_auth_end_to_end', 'Firebase Authentication end-to-end', 'PASS', 'Synthetic account creation, password sign-in, verification/reset OOB requests, session-cookie verification and revocation all succeeded against the live Firebase project.', true, { client_configured: true, email_password_provider: true, revocation_enforced: true, revocation_attempts: revocation.attempts });
   } catch (error) {
     return gate('firebase_auth_end_to_end', 'Firebase Authentication end-to-end', 'FAIL', (error as Error).message);
   } finally {

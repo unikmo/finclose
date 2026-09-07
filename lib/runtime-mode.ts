@@ -1,3 +1,5 @@
+import { inspectFirebaseServiceAccountEnvironment } from './firebase-environment';
+
 export type FinCloseRuntimeMode = 'LAB' | 'PILOT' | 'PRODUCTION';
 export type UploadQuarantineMode = 'BLOCK' | 'MANUAL_REVIEW' | 'SCANNER';
 
@@ -40,14 +42,7 @@ function releaseGateApproved(mode: FinCloseRuntimeMode) {
 }
 
 function firebaseProjectIdFromServiceAccount() {
-  try {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-    if (!raw) return '';
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return String(parsed.project_id || '').trim();
-  } catch {
-    return '';
-  }
+  return inspectFirebaseServiceAccountEnvironment().project_id || '';
 }
 
 export function firebaseClientConfig() {
@@ -66,7 +61,8 @@ export function firebaseClientConfig() {
 export function runtimeReadiness(): RuntimeReadiness {
   const mode = runtimeMode();
   const realDataMode = mode !== 'LAB';
-  const firebaseAuthServerReady = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  const credentialEnvironment = inspectFirebaseServiceAccountEnvironment();
+  const firebaseAuthServerReady = credentialEnvironment.status === 'PRESENT';
   const client = firebaseClientConfig();
   const firebaseAuthClientReady = Boolean(client.apiKey && client.authDomain && client.projectId);
   const firestoreLedgerConfigured = firebaseAuthServerReady;

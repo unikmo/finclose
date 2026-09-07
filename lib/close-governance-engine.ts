@@ -872,7 +872,7 @@ export async function lockMonthlyClose(deploymentId: string, closeId: string, ac
       actor_user_id: String(actor.user_id),
       payload: snapshot
     });
-    if (!authoritativeLockId) throw httpError('authoritative PostgreSQL period lock was not created', 503);
+    if (!authoritativeLockId) throw httpError('authoritative Firestore period lock was not created', 503);
     lockId = String(authoritativeLockId);
   }
   const now = Date.now();
