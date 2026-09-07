@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertLabToken, statusFor } from '../../../lib/finclose-backend';
+import { ensureFirebaseWebClientConfig } from '../../../lib/firebase-web-config-discovery';
 import { getLatestPilotCertification, runPilotCertification } from '../../../lib/pilot-certification';
 import { runtimeMode } from '../../../lib/runtime-mode';
 
@@ -21,6 +22,7 @@ export async function POST(req: NextRequest) {
     if (runtimeMode() !== 'LAB') {
       return NextResponse.json({ detail: 'pilot certification must run while FinClose remains in LAB; do not use certification to justify an already-active real-data mode' }, { status: 409 });
     }
+    await ensureFirebaseWebClientConfig();
     return NextResponse.json(await runPilotCertification());
   } catch (error) {
     return NextResponse.json({ detail: (error as Error).message }, { status: statusFor(error) });

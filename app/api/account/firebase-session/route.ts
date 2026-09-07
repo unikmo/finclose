@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resendVerification } from '../../../../lib/managed-auth';
+import { createFirebaseSessionResponse } from '../../../../lib/managed-auth';
 import { statusFor } from '../../../../lib/finclose-backend';
 import { ensureFirebaseWebClientConfig } from '../../../../lib/firebase-web-config-discovery';
 import { isRealDataMode } from '../../../../lib/runtime-mode';
@@ -7,7 +7,8 @@ import { isRealDataMode } from '../../../../lib/runtime-mode';
 export async function POST(req: NextRequest) {
   try {
     if (isRealDataMode()) await ensureFirebaseWebClientConfig();
-    return await resendVerification(await req.json());
+    const body = await req.json();
+    return await createFirebaseSessionResponse(String(body.id_token || ''));
   } catch (error) {
     return NextResponse.json({ detail: (error as Error).message }, { status: statusFor(error) });
   }
