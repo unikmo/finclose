@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const deep = req.nextUrl.searchParams.get('deep') === '1';
   if (!deep || !configured) {
     return NextResponse.json({
-      version: '0.35.0',
+      version: '0.35.1',
       hosting: 'vercel',
       database: 'firebase-realtime-database',
       storage: 'firebase-storage',
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
   const releaseOk = !readiness.real_data_mode || readiness.real_data_allowed_by_config;
 
   return NextResponse.json({
-    version: '0.35.0',
+    version: '0.35.1',
     hosting: 'vercel',
     database: 'firebase-realtime-database-control-plane',
     authoritative_ledger: 'firebase-firestore',
