@@ -17,5 +17,19 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run deterministic hardening tests
         run: npm test
+      - name: Validate PowerShell helper syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/firebase-pilot-controls.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
       - name: Build Vercel Next.js application
         run: npm run build
