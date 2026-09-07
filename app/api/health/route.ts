@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { realtimeDatabase, storageBucket } from '../../../lib/finclose-backend';
+import { inspectFirebaseServiceAccountEnvironment } from '../../../lib/firebase-environment';
 import { ensureFirebaseWebClientConfig } from '../../../lib/firebase-web-config-discovery';
 import { runtimeReadiness } from '../../../lib/runtime-mode';
 import { ledgerHealth } from '../../../lib/production-ledger';
@@ -15,7 +16,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const firebaseWebConfigDiscovery = await ensureFirebaseWebClientConfig();
   const readiness = runtimeReadiness();
-  const configured = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_STORAGE_BUCKET);
+  const credentialEnvironment = inspectFirebaseServiceAccountEnvironment();
+  const configured = credentialEnvironment.status === 'PRESENT' && Boolean(process.env.FIREBASE_STORAGE_BUCKET);
   const deep = req.nextUrl.searchParams.get('deep') === '1';
   if (!deep || !configured) {
     return NextResponse.json({
@@ -24,8 +26,10 @@ export async function GET(req: NextRequest) {
       database: 'firebase-realtime-database',
       storage: 'firebase-storage',
       runtime: readiness,
+      firebase_admin_credential_environment: credentialEnvironment.status,
       firebase_web_config_discovery: firebaseWebConfigDiscovery,
-      configured
+      configured,
+      configuration_error: credentialEnvironment.status === 'PRESENT' ? null : credentialEnvironment.error_code || null
     });
   }
 
@@ -67,6 +71,7 @@ export async function GET(req: NextRequest) {
     authoritative_ledger: 'firebase-firestore',
     storage: 'firebase-storage',
     runtime: readiness,
+    firebase_admin_credential_environment: credentialEnvironment.status,
     firebase_web_config_discovery: firebaseWebConfigDiscovery,
     configured,
     reachable,
