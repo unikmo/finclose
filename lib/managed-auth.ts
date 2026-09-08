@@ -3,6 +3,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { firebaseApp, realtimeDatabase } from './finclose-backend';
 import { assertCustomerOrLab as assertLegacyCustomerOrLab, currentUser as currentLegacyUser, logoutResponse as legacyLogoutResponse } from './lab-auth';
+import { assertRealDataReleaseCertified } from './pilot-release-gate';
 import { assertRealDataRuntimeReady, firebaseClientConfig, isRealDataMode } from './runtime-mode';
 
 const FIREBASE_SESSION_COOKIE = 'finclose_firebase_session';
@@ -106,6 +107,7 @@ async function sendVerificationEmail(idToken: string) {
 export async function requestPasswordReset(input: Record<string, unknown>) {
   if (!isRealDataMode()) throw httpError('managed password reset is only enabled in PILOT or PRODUCTION mode', 409);
   assertRealDataRuntimeReady();
+  await assertRealDataReleaseCertified();
   const email = normalizedEmail(input.email);
   await consumeAuthRateLimit('password-reset', email, 5);
   const { response, body } = await identityToolkitRequest({ requestType: 'PASSWORD_RESET', email });
@@ -121,6 +123,7 @@ export async function requestPasswordReset(input: Record<string, unknown>) {
 export async function resendVerification(input: Record<string, unknown>) {
   if (!isRealDataMode()) throw httpError('managed verification is only enabled in PILOT or PRODUCTION mode', 409);
   assertRealDataRuntimeReady();
+  await assertRealDataReleaseCertified();
   const email = normalizedEmail(input.email);
   const password = normalizedPassword(input.password);
   await consumeAuthRateLimit('verification-resend', email, 5);
@@ -157,6 +160,7 @@ async function firebasePasswordSignIn(email: string, password: string, rateLimit
 export async function createFirebaseSessionResponse(idToken: string) {
   if (!isRealDataMode()) throw httpError('Firebase session exchange is only enabled in PILOT or PRODUCTION mode', 409);
   assertRealDataRuntimeReady();
+  await assertRealDataReleaseCertified();
   if (!idToken) throw httpError('Firebase ID token is required', 400);
   const auth = getAuth(firebaseApp());
   const decoded = await auth.verifyIdToken(idToken, true);
@@ -188,6 +192,7 @@ export async function createFirebaseSessionResponse(idToken: string) {
 export async function registerManagedAccount(input: Record<string, unknown>) {
   if (!isRealDataMode()) throw httpError('managed registration is only enabled in PILOT or PRODUCTION mode', 409);
   assertRealDataRuntimeReady();
+  await assertRealDataReleaseCertified();
   const name = normalizedName(input.name);
   const email = normalizedEmail(input.email);
   const password = normalizedPassword(input.password);
@@ -209,6 +214,7 @@ export async function registerManagedAccount(input: Record<string, unknown>) {
 export async function loginManagedAccount(input: Record<string, unknown>) {
   if (!isRealDataMode()) throw httpError('managed login is only enabled in PILOT or PRODUCTION mode', 409);
   assertRealDataRuntimeReady();
+  await assertRealDataReleaseCertified();
   const email = normalizedEmail(input.email);
   const password = normalizedPassword(input.password);
   const idToken = await firebasePasswordSignIn(email, password);
@@ -243,6 +249,7 @@ export async function authenticateRequest(req: NextRequest): Promise<RequestIden
     };
   }
   assertRealDataRuntimeReady();
+  await assertRealDataReleaseCertified();
   const user = await currentManagedUser(req);
   if (!user) throw httpError('sign in is required', 401);
   if (!user.email_verified) throw httpError('verify your email before using real financial data in FinClose', 403);
