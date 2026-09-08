@@ -6,7 +6,7 @@ import {
   type StoredPilotCertificationLatest,
   type StoredPilotCertificationReport
 } from './pilot-release-evidence';
-import { FINCLOSE_RELEASE_VERSION, PILOT_CERTIFICATION_VERSION } from './release-version';
+import { FINCLOSE_RELEASE_VERSION, PILOT_CERTIFICATION_VERSION, releaseSourceSha } from './release-version';
 import { runtimeMode, runtimeReadiness } from './runtime-mode';
 
 export type { PilotReleaseEvidenceStatus } from './pilot-release-evidence';
@@ -19,6 +19,10 @@ export async function getPilotReleaseEvidenceStatus(): Promise<PilotReleaseEvide
   }
 
   try {
+    const sourceSha = releaseSourceSha();
+    if (!/^[a-f0-9]{40}$/.test(sourceSha)) {
+      return pilotReleaseEvidenceStatus({ required, ready: false, code: 'RELEASE_SOURCE_IDENTITY_NOT_CONFIGURED' });
+    }
     const db = realtimeDatabase();
     const latestSnap = await db.ref('finclose_pilot_certification_latest').once('value');
     if (!latestSnap.exists()) return pilotReleaseEvidenceStatus({ required, ready: false, code: 'PILOT_CERTIFICATION_MISSING' });
@@ -31,7 +35,8 @@ export async function getPilotReleaseEvidenceStatus(): Promise<PilotReleaseEvide
       latest,
       reportSnap.val() as StoredPilotCertificationReport,
       PILOT_CERTIFICATION_VERSION,
-      FINCLOSE_RELEASE_VERSION
+      FINCLOSE_RELEASE_VERSION,
+      sourceSha
     );
     return { ...validated, required };
   } catch {
