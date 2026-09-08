@@ -11,6 +11,8 @@ export type RuntimeReadiness = {
   firestore_ledger_configured: boolean;
   storage_ready: boolean;
   release_gate_approved: boolean;
+  pilot_release_gate_approved: boolean;
+  production_release_gate_approved: boolean;
   upload_quarantine_mode: UploadQuarantineMode;
   upload_scanner_verified: boolean;
   upload_quarantine_ready: boolean;
@@ -35,10 +37,18 @@ export function uploadQuarantineMode(): UploadQuarantineMode {
   return 'BLOCK';
 }
 
-function releaseGateApproved(mode: FinCloseRuntimeMode) {
-  if (mode === 'LAB') return true;
-  if (mode === 'PILOT') return String(process.env.FINCLOSE_PILOT_RELEASE_GATE || '').trim().toUpperCase() === 'APPROVED';
+function pilotReleaseGateApproved() {
+  return String(process.env.FINCLOSE_PILOT_RELEASE_GATE || '').trim().toUpperCase() === 'APPROVED';
+}
+
+function productionReleaseGateApproved() {
   return String(process.env.FINCLOSE_PRODUCTION_RELEASE_GATE || '').trim().toUpperCase() === 'APPROVED';
+}
+
+function releaseGateApproved(mode: FinCloseRuntimeMode) {
+  if (mode === 'PILOT') return pilotReleaseGateApproved();
+  if (mode === 'PRODUCTION') return productionReleaseGateApproved();
+  return false;
 }
 
 function firebaseProjectIdFromServiceAccount() {
@@ -67,6 +77,8 @@ export function runtimeReadiness(): RuntimeReadiness {
   const firebaseAuthClientReady = Boolean(client.apiKey && client.authDomain && client.projectId);
   const firestoreLedgerConfigured = firebaseAuthServerReady;
   const storageReady = Boolean(process.env.FIREBASE_STORAGE_BUCKET);
+  const pilotApproved = pilotReleaseGateApproved();
+  const productionApproved = productionReleaseGateApproved();
   const releaseApproved = releaseGateApproved(mode);
   const quarantineMode = uploadQuarantineMode();
   const uploadScannerVerified = String(process.env.FINCLOSE_UPLOAD_SCANNER_VERIFIED || '').trim().toUpperCase() === 'YES';
@@ -94,6 +106,8 @@ export function runtimeReadiness(): RuntimeReadiness {
     firestore_ledger_configured: firestoreLedgerConfigured,
     storage_ready: storageReady,
     release_gate_approved: releaseApproved,
+    pilot_release_gate_approved: pilotApproved,
+    production_release_gate_approved: productionApproved,
     upload_quarantine_mode: quarantineMode,
     upload_scanner_verified: uploadScannerVerified,
     upload_quarantine_ready: uploadQuarantineReady,
@@ -122,6 +136,8 @@ export function publicRuntimeProfile() {
     real_data_allowed_by_config: readiness.real_data_allowed_by_config,
     blockers: readiness.blockers,
     release_gate_approved: readiness.release_gate_approved,
+    pilot_release_gate_approved: readiness.pilot_release_gate_approved,
+    production_release_gate_approved: readiness.production_release_gate_approved,
     upload_quarantine_mode: readiness.upload_quarantine_mode,
     upload_scanner_verified: readiness.upload_scanner_verified,
     upload_quarantine_ready: readiness.upload_quarantine_ready,

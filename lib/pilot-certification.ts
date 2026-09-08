@@ -4,6 +4,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { firebaseApp, realtimeDatabase, storageBucket } from './finclose-backend';
 import { inspectFirebaseServiceAccountEnvironment } from './firebase-environment';
 import { waitForSessionRevocation } from './firebase-revocation-verification';
+import { FINCLOSE_RELEASE_VERSION, PILOT_CERTIFICATION_VERSION } from './release-version';
 import { firebaseClientConfig, runtimeMode, uploadQuarantineMode } from './runtime-mode';
 import { requireOrganizationRole, type OrganizationRole } from './tenancy';
 import { payrollEngineSelfTest } from './payroll-engine';
@@ -23,7 +24,8 @@ export type CertificationGate = {
 };
 
 export type PilotCertificationReport = {
-  certification_version: '0.35.0';
+  certification_version: typeof PILOT_CERTIFICATION_VERSION;
+  release_version: typeof FINCLOSE_RELEASE_VERSION;
   run_id: string;
   runtime_mode: string;
   started_at: number;
@@ -356,16 +358,39 @@ export async function runPilotCertification(): Promise<PilotCertificationReport>
   const completedAt = Date.now();
   const gateCounts = gates.reduce((acc, item) => { acc[item.status] += 1; return acc; }, { PASS: 0, FAIL: 0, BLOCKED: 0, WARN: 0 } as Record<CertificationGateStatus, number>);
   const blockers = mandatoryFailures.map(g => `${g.id}: ${g.evidence}`);
-  const evidenceHash = crypto.createHash('sha256').update(JSON.stringify({ certification_version: '0.35.0', run_id: runId, gates: gates.map(({ id, status, mandatory, evidence, detail }) => ({ id, status, mandatory, evidence, detail })) })).digest('hex');
+  const evidenceHash = crypto.createHash('sha256').update(JSON.stringify({
+    certification_version: PILOT_CERTIFICATION_VERSION,
+    release_version: FINCLOSE_RELEASE_VERSION,
+    run_id: runId,
+    gates: gates.map(({ id, status, mandatory, evidence, detail }) => ({ id, status, mandatory, evidence, detail }))
+  })).digest('hex');
   const report: PilotCertificationReport = {
-    certification_version: '0.35.0', run_id: runId, runtime_mode: runtimeMode(), started_at: startedAt, completed_at: completedAt,
-    release_ready: releaseReady, activation_allowed: activationAllowed, gate_counts: gateCounts, blockers, gates, evidence_hash: evidenceHash
+    certification_version: PILOT_CERTIFICATION_VERSION,
+    release_version: FINCLOSE_RELEASE_VERSION,
+    run_id: runId,
+    runtime_mode: runtimeMode(),
+    started_at: startedAt,
+    completed_at: completedAt,
+    release_ready: releaseReady,
+    activation_allowed: activationAllowed,
+    gate_counts: gateCounts,
+    blockers,
+    gates,
+    evidence_hash: evidenceHash
   };
 
   const db = realtimeDatabase();
   await db.ref().update({
     [`finclose_pilot_certification_runs/${runId}`]: report,
-    [`finclose_pilot_certification_latest`]: { run_id: runId, release_ready: releaseReady, activation_allowed: activationAllowed, evidence_hash: evidenceHash, completed_at: completedAt }
+    [`finclose_pilot_certification_latest`]: {
+      run_id: runId,
+      certification_version: PILOT_CERTIFICATION_VERSION,
+      release_version: FINCLOSE_RELEASE_VERSION,
+      release_ready: releaseReady,
+      activation_allowed: activationAllowed,
+      evidence_hash: evidenceHash,
+      completed_at: completedAt
+    }
   });
   return report;
 }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { realtimeDatabase, storageBucket } from '../../../lib/finclose-backend';
 import { inspectFirebaseServiceAccountEnvironment } from '../../../lib/firebase-environment';
 import { ensureFirebaseWebClientConfig } from '../../../lib/firebase-web-config-discovery';
+import { getPilotReleaseEvidenceStatus } from '../../../lib/pilot-release-gate';
+import { FINCLOSE_RELEASE_VERSION } from '../../../lib/release-version';
 import { runtimeReadiness } from '../../../lib/runtime-mode';
 import { ledgerHealth } from '../../../lib/production-ledger';
 import { FINANCIAL_UPLOAD_SECURITY } from '../../../lib/file-security';
@@ -21,7 +23,7 @@ export async function GET(req: NextRequest) {
   const deep = req.nextUrl.searchParams.get('deep') === '1';
   if (!deep || !configured) {
     return NextResponse.json({
-      version: '0.35.1',
+      version: FINCLOSE_RELEASE_VERSION,
       hosting: 'vercel',
       database: 'firebase-realtime-database',
       storage: 'firebase-storage',
@@ -50,6 +52,11 @@ export async function GET(req: NextRequest) {
   reachable.firestore = firestore.ready;
   if (readiness.real_data_mode && !firestore.ready) errors.push(`firestore-ledger: ${firestore.error || 'ledger not ready'}`);
 
+  const releaseEvidence = await getPilotReleaseEvidenceStatus();
+  if (readiness.real_data_mode && !releaseEvidence.ready) {
+    errors.push(`release-certification: ${releaseEvidence.code}`);
+  }
+
   const payroll = payrollEngineSelfTest();
   const bookkeeping = bookkeepingEngineSelfTest();
   const financeCycle = financeCycleSelfTest();
@@ -62,10 +69,10 @@ export async function GET(req: NextRequest) {
   const certification = await getLatestPilotCertification().catch(() => null);
   const engineOk = payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok;
   const infrastructureOk = reachable.database && reachable.storage && (!readiness.real_data_mode || firestore.ready);
-  const releaseOk = !readiness.real_data_mode || readiness.real_data_allowed_by_config;
+  const releaseOk = !readiness.real_data_mode || (readiness.real_data_allowed_by_config && releaseEvidence.ready);
 
   return NextResponse.json({
-    version: '0.35.1',
+    version: FINCLOSE_RELEASE_VERSION,
     hosting: 'vercel',
     database: 'firebase-realtime-database-control-plane',
     authoritative_ledger: 'firebase-firestore',
@@ -76,8 +83,10 @@ export async function GET(req: NextRequest) {
     configured,
     reachable,
     firestore,
+    real_data_release_evidence: releaseEvidence,
     pilot_certification: certification ? {
       certification_version: certification.certification_version,
+      release_version: certification.release_version,
       completed_at: certification.completed_at,
       release_ready: certification.release_ready,
       activation_allowed: certification.activation_allowed,
