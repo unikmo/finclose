@@ -242,6 +242,7 @@ export async function authenticateRequest(req: NextRequest): Promise<RequestIden
       user: { ...legacy.user, email_verified: false, auth_mode: 'LAB_ACCOUNT_SESSION' }
     };
   }
+  assertRealDataRuntimeReady();
   const user = await currentManagedUser(req);
   if (!user) throw httpError('sign in is required', 401);
   if (!user.email_verified) throw httpError('verify your email before using real financial data in FinClose', 403);
