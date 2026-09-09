@@ -4,6 +4,7 @@ set -euo pipefail
 STAGE="${1:-}"
 SOURCE_SHA="${2:-}"
 POLICY_FILE="ops/vercel-release-policy.json"
+VERCEL_CLI_VERSION="59.11.7"
 
 if [[ ! "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
   echo "invalid release source SHA" >&2
@@ -49,7 +50,7 @@ UPLOAD_OPERATOR_CHECKLIST_VERIFIED=$(runtime_value upload_operator_checklist_ver
 export VERCEL_ORG_ID="$TEAM_ID"
 export VERCEL_PROJECT_ID="$PROJECT_ID"
 
-npx --yes vercel@latest deploy \
+npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy \
   --prod \
   --yes \
   --token "$VERCEL_TOKEN" \
