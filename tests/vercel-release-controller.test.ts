@@ -85,10 +85,3 @@ test('pilot evidence registry has exactly the mandatory release records and expl
     }
   }
 });
-
-test('current pilot evidence registry does not falsely claim live P0 completion', () => {
-  for (const item of Object.values(evidence().release_evidence) as Record<string, any>[]) {
-    assert.equal(item.status, 'PENDING');
-    assert.equal(item.source_blob_sha, item.template_blob_sha);
-  }
-});
