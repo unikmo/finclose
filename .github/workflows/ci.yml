@@ -33,6 +33,8 @@ jobs:
           }
       - name: Validate Vercel release helper syntax
         shell: bash
-        run: bash -n scripts/vercel-release-deploy.sh
+        run: |
+          bash -n scripts/vercel-release-deploy.sh
+          bash -n scripts/vercel-release-verify.sh
       - name: Build Vercel Next.js application
         run: npm run build
