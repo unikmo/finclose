@@ -19,7 +19,7 @@ jobs:
     if: >-
       ${{
         (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') ||
-        (github.event_name == 'create' && github.event.ref_type == 'branch' &&
+        (github.event_name == 'create' && github.actor == github.repository_owner && github.event.ref_type == 'branch' &&
           (startsWith(github.event.ref, 'release/lab/') || startsWith(github.event.ref, 'release/certify/') || startsWith(github.event.ref, 'release/pilot/')))
       }}
     runs-on: ubuntu-latest
@@ -40,6 +40,7 @@ jobs:
             STAGE="LAB_SAFE"
             SOURCE_SHA='${{ github.event.workflow_run.head_sha }}'
           else
+            [[ "$GITHUB_ACTOR" == "$GITHUB_REPOSITORY_OWNER" ]] || { echo "::error::Controlled release refs may be created only by the repository owner"; exit 1; }
             [[ '${{ github.event.ref_type }}' == 'branch' ]] || { echo "::error::Release refs must be branches"; exit 1; }
             SOURCE_SHA="$GITHUB_SHA"
             RELEASE_REF='${{ github.event.ref }}'
@@ -119,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm test
           bash -n scripts/vercel-release-deploy.sh
           bash -n scripts/vercel-release-verify.sh
@@ -142,6 +143,19 @@ jobs:
           TOKEN=$(openssl rand -hex 32)
           echo "::add-mask::$TOKEN"
           echo "FINCLOSE_RELEASE_AUTOMATION_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Recheck current main before controlled release
+        if: steps.release.outputs.stage != 'LAB_SAFE'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          [[ "$SOURCE_SHA" == "$(git rev-parse origin/main)" ]] || {
+            echo "::error::main advanced after release validation; certification/PILOT is cancelled"
+            exit 1
+          }
 
       - name: Preflight existing certification for direct PILOT release
         if: steps.release.outputs.stage == 'PILOT'
@@ -261,6 +275,12 @@ jobs:
           SOURCE_SHA: ${{ steps.release.outputs.sha }}
         run: |
           set -euo pipefail
+          git fetch origin main --quiet
+          [[ "$SOURCE_SHA" == "$(git rev-parse origin/main)" ]] || {
+            echo "::error::main advanced during certification; PILOT activation cancelled and LAB retained"
+            exit 1
+          }
+
           bash scripts/vercel-release-deploy.sh PILOT "$SOURCE_SHA"
           set +e
           bash scripts/vercel-release-verify.sh PILOT "$SOURCE_SHA"
