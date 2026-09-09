@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "project": {
+    "team_id": "team_sVekjWxQpKBAOb3DWW89HdvK",
+    "project_id": "prj_fn9VRSUOqwpOHkXEuLDGHVvoMHSC",
+    "production_url": "https://finclose-lab-preview.vercel.app"
+  },
+  "stages": {
+    "LAB_SAFE": {
+      "runtime_mode": "LAB",
+      "pilot_release_gate": "BLOCKED",
+      "production_release_gate": "BLOCKED",
+      "upload_quarantine_mode": "BLOCK",
+      "upload_scanner_verified": "NO",
+      "backup_pitr_verified": "NO",
+      "security_review_approved": "NO",
+      "accounting_qa_approved": "NO",
+      "manual_upload_procedure_approved": "NO",
+      "auth_email_delivery_verified": "NO",
+      "upload_operator_checklist_verified": "NO"
+    },
+    "CERTIFY_LAB": {
+      "runtime_mode": "LAB",
+      "pilot_release_gate": "BLOCKED",
+      "production_release_gate": "BLOCKED",
+      "upload_quarantine_mode": "MANUAL_REVIEW",
+      "upload_scanner_verified": "NO",
+      "backup_pitr_verified": "YES",
+      "security_review_approved": "YES",
+      "accounting_qa_approved": "YES",
+      "manual_upload_procedure_approved": "YES",
+      "auth_email_delivery_verified": "YES",
+      "upload_operator_checklist_verified": "YES"
+    },
+    "PILOT": {
+      "runtime_mode": "PILOT",
+      "pilot_release_gate": "APPROVED",
+      "production_release_gate": "BLOCKED",
+      "upload_quarantine_mode": "MANUAL_REVIEW",
+      "upload_scanner_verified": "NO",
+      "backup_pitr_verified": "YES",
+      "security_review_approved": "YES",
+      "accounting_qa_approved": "YES",
+      "manual_upload_procedure_approved": "YES",
+      "auth_email_delivery_verified": "YES",
+      "upload_operator_checklist_verified": "YES"
+    }
+  }
+}
