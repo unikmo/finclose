@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project": {
     "team_id": "team_sVekjWxQpKBAOb3DWW89HdvK",
     "project_id": "prj_fn9VRSUOqwpOHkXEuLDGHVvoMHSC",
@@ -12,12 +12,7 @@
       "production_release_gate": "BLOCKED",
       "upload_quarantine_mode": "BLOCK",
       "upload_scanner_verified": "NO",
-      "backup_pitr_verified": "NO",
-      "security_review_approved": "NO",
-      "accounting_qa_approved": "NO",
-      "manual_upload_procedure_approved": "NO",
-      "auth_email_delivery_verified": "NO",
-      "upload_operator_checklist_verified": "NO"
+      "requires_pilot_evidence": false
     },
     "CERTIFY_LAB": {
       "runtime_mode": "LAB",
@@ -25,12 +20,7 @@
       "production_release_gate": "BLOCKED",
       "upload_quarantine_mode": "MANUAL_REVIEW",
       "upload_scanner_verified": "NO",
-      "backup_pitr_verified": "YES",
-      "security_review_approved": "YES",
-      "accounting_qa_approved": "YES",
-      "manual_upload_procedure_approved": "YES",
-      "auth_email_delivery_verified": "YES",
-      "upload_operator_checklist_verified": "YES"
+      "requires_pilot_evidence": true
     },
     "PILOT": {
       "runtime_mode": "PILOT",
@@ -38,12 +28,7 @@
       "production_release_gate": "BLOCKED",
       "upload_quarantine_mode": "MANUAL_REVIEW",
       "upload_scanner_verified": "NO",
-      "backup_pitr_verified": "YES",
-      "security_review_approved": "YES",
-      "accounting_qa_approved": "YES",
-      "manual_upload_procedure_approved": "YES",
-      "auth_email_delivery_verified": "YES",
-      "upload_operator_checklist_verified": "YES"
+      "requires_pilot_evidence": true
     }
   }
 }
