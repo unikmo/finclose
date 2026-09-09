@@ -41,6 +41,8 @@ UPLOAD_SCANNER_VERIFIED=$(runtime_value upload_scanner_verified)
 REQUIRES_EVIDENCE=$(runtime_value requires_pilot_evidence)
 RELEASE_AUTOMATION_TOKEN=""
 
+[[ "$TEAM_ID" == team_* ]] || { echo "invalid canonical Vercel team ID" >&2; exit 2; }
+[[ "$PROJECT_ID" == prj_* ]] || { echo "invalid canonical Vercel project ID" >&2; exit 2; }
 [[ "$PRODUCTION_GATE" == "BLOCKED" ]] || { echo "production release gate must remain BLOCKED" >&2; exit 2; }
 [[ "$RUNTIME_MODE" == "LAB" || "$RUNTIME_MODE" == "PILOT" ]] || { echo "controller does not support PRODUCTION runtime" >&2; exit 2; }
 
@@ -109,6 +111,8 @@ if [[ "$STAGE" == "CERTIFY_LAB" ]]; then
   [[ ${#RELEASE_AUTOMATION_TOKEN} -ge 32 ]] || { echo "CERTIFY_LAB requires an ephemeral release automation token" >&2; exit 2; }
 fi
 
+# Vercel officially supports targeting an unlinked project through these IDs.
+# This is intentional: FinClose release automation does not depend on a dashboard Git link.
 export VERCEL_ORG_ID="$TEAM_ID"
 export VERCEL_PROJECT_ID="$PROJECT_ID"
 
@@ -116,7 +120,6 @@ npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy \
   --prod \
   --yes \
   --token "$VERCEL_TOKEN" \
-  --project "$PROJECT_ID" \
   --env "FINCLOSE_RELEASE_SOURCE_SHA=$SOURCE_SHA" \
   --env "FINCLOSE_RELEASE_AUTOMATION_TOKEN=$RELEASE_AUTOMATION_TOKEN" \
   --env "FINCLOSE_RUNTIME_MODE=$RUNTIME_MODE" \
