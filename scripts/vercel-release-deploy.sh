@@ -39,6 +39,7 @@ PRODUCTION_GATE=$(runtime_value production_release_gate)
 UPLOAD_MODE=$(runtime_value upload_quarantine_mode)
 UPLOAD_SCANNER_VERIFIED=$(runtime_value upload_scanner_verified)
 REQUIRES_EVIDENCE=$(runtime_value requires_pilot_evidence)
+RELEASE_AUTOMATION_TOKEN=""
 
 [[ "$PRODUCTION_GATE" == "BLOCKED" ]] || { echo "production release gate must remain BLOCKED" >&2; exit 2; }
 [[ "$RUNTIME_MODE" == "LAB" || "$RUNTIME_MODE" == "PILOT" ]] || { echo "controller does not support PRODUCTION runtime" >&2; exit 2; }
@@ -103,6 +104,11 @@ else
   UPLOAD_OPERATOR_CHECKLIST_VERIFIED=NO
 fi
 
+if [[ "$STAGE" == "CERTIFY_LAB" ]]; then
+  RELEASE_AUTOMATION_TOKEN="${FINCLOSE_RELEASE_AUTOMATION_TOKEN:-}"
+  [[ ${#RELEASE_AUTOMATION_TOKEN} -ge 32 ]] || { echo "CERTIFY_LAB requires an ephemeral release automation token" >&2; exit 2; }
+fi
+
 export VERCEL_ORG_ID="$TEAM_ID"
 export VERCEL_PROJECT_ID="$PROJECT_ID"
 
@@ -112,6 +118,7 @@ npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy \
   --token "$VERCEL_TOKEN" \
   --project "$PROJECT_ID" \
   --env "FINCLOSE_RELEASE_SOURCE_SHA=$SOURCE_SHA" \
+  --env "FINCLOSE_RELEASE_AUTOMATION_TOKEN=$RELEASE_AUTOMATION_TOKEN" \
   --env "FINCLOSE_RUNTIME_MODE=$RUNTIME_MODE" \
   --env "FINCLOSE_PILOT_RELEASE_GATE=$PILOT_GATE" \
   --env "FINCLOSE_PRODUCTION_RELEASE_GATE=$PRODUCTION_GATE" \
