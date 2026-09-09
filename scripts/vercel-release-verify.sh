@@ -17,7 +17,6 @@ fi
 PRODUCTION_URL=$(jq -r '.project.production_url' "$POLICY_FILE")
 EXPECTED_VERSION=$(node -p "require('./package.json').version")
 EXPECTED_MODE=$(jq -r --arg stage "$STAGE" '.stages[$stage].runtime_mode' "$POLICY_FILE")
-EXPECTED_PILOT_GATE=$(jq -r --arg stage "$STAGE" '.stages[$stage].pilot_release_gate' "$POLICY_FILE")
 EXPECTED_UPLOAD_MODE=$(jq -r --arg stage "$STAGE" '.stages[$stage].upload_quarantine_mode' "$POLICY_FILE")
 HEALTH_URL="${PRODUCTION_URL}/api/health?deep=1"
 BODY=$(mktemp)
@@ -28,7 +27,8 @@ for attempt in $(seq 1 18); do
   if curl --silent --show-error --fail --max-time 20 "$HEALTH_URL" -o "$BODY"; then
     VERSION=$(jq -r '.version // ""' "$BODY")
     MODE=$(jq -r '.runtime.mode // ""' "$BODY")
-    if [[ "$VERSION" == "$EXPECTED_VERSION" && "$MODE" == "$EXPECTED_MODE" ]]; then
+    DEPLOYED_SHA=$(jq -r '.release_source.sha // ""' "$BODY")
+    if [[ "$VERSION" == "$EXPECTED_VERSION" && "$MODE" == "$EXPECTED_MODE" && "$DEPLOYED_SHA" == "$SOURCE_SHA" ]]; then
       MATCHED=1
       break
     fi
@@ -38,11 +38,12 @@ for attempt in $(seq 1 18); do
 done
 
 if [[ "$MATCHED" != "1" ]]; then
-  echo "canonical FinClose runtime did not converge to expected release" >&2
-  cat "$BODY" >&2 2>/dev/null || true
+  echo "canonical FinClose runtime did not converge to expected version/mode/source" >&2
+  jq '{version, release_source, runtime: .runtime.mode}' "$BODY" >&2 2>/dev/null || true
   exit 1
 fi
 
+jq -e '.release_source.ready == true' "$BODY" >/dev/null
 jq -e '.runtime.production_release_gate_approved == false' "$BODY" >/dev/null
 jq -e --arg expected "$EXPECTED_UPLOAD_MODE" '.runtime.upload_quarantine_mode == $expected' "$BODY" >/dev/null
 
@@ -74,6 +75,7 @@ case "$STAGE" in
       .real_data_release_evidence.ready == true and
       .real_data_release_evidence.code == "PILOT_CERTIFICATION_VERIFIED" and
       .real_data_release_evidence.release_source_sha == $sha and
+      .pilot_certification.release_source_sha == $sha and
       .pilot_certification.release_ready == true and
       .pilot_certification.activation_allowed == true and
       .ok == true
@@ -85,4 +87,4 @@ case "$STAGE" in
     ;;
 esac
 
-printf '%s\n' "$BODY"
+echo "verified FinClose ${STAGE} at ${PRODUCTION_URL}: version=${EXPECTED_VERSION} source=${SOURCE_SHA}"
