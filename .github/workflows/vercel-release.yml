@@ -4,11 +4,7 @@ on:
   workflow_run:
     workflows: ["FinClose CI"]
     types: [completed]
-  push:
-    branches:
-      - 'release/lab/**'
-      - 'release/certify/**'
-      - 'release/pilot/**'
+  create:
 
 permissions:
   contents: read
@@ -22,8 +18,9 @@ jobs:
   deploy:
     if: >-
       ${{
-        github.event_name == 'push' ||
-        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') ||
+        (github.event_name == 'create' && github.event.ref_type == 'branch' &&
+          (startsWith(github.event.ref, 'release/lab/') || startsWith(github.event.ref, 'release/certify/') || startsWith(github.event.ref, 'release/pilot/')))
       }}
     runs-on: ubuntu-latest
     env:
@@ -43,12 +40,14 @@ jobs:
             STAGE="LAB_SAFE"
             SOURCE_SHA='${{ github.event.workflow_run.head_sha }}'
           else
+            [[ '${{ github.event.ref_type }}' == 'branch' ]] || { echo "::error::Release refs must be branches"; exit 1; }
             SOURCE_SHA="$GITHUB_SHA"
-            case "$GITHUB_REF_NAME" in
+            RELEASE_REF='${{ github.event.ref }}'
+            case "$RELEASE_REF" in
               release/lab/*) STAGE="LAB_SAFE" ;;
               release/certify/*) STAGE="CERTIFY_LAB" ;;
               release/pilot/*) STAGE="PILOT" ;;
-              *) echo "::error::Unsupported release branch: $GITHUB_REF_NAME"; exit 1 ;;
+              *) echo "::error::Unsupported release branch: $RELEASE_REF"; exit 1 ;;
             esac
           fi
 
@@ -118,15 +117,17 @@ jobs:
           EXPECTED_VERSION=$(node -p "require('./package.json').version")
           jq -e --arg sha "$SOURCE_SHA" --arg version "$EXPECTED_VERSION" '
             .version == $version and
+            .release_source.sha == $sha and
             .runtime.mode == "LAB" and
             .real_data_release_evidence.ready == true and
             .real_data_release_evidence.code == "PILOT_CERTIFICATION_VERIFIED" and
             .real_data_release_evidence.release_source_sha == $sha and
+            .pilot_certification.release_source_sha == $sha and
             .pilot_certification.release_ready == true and
             .pilot_certification.activation_allowed == true
           ' "$BODY" >/dev/null || {
             echo "::error::Exact-source PILOT certification is not ready on the live LAB runtime"
-            jq '{version, runtime: .runtime.mode, real_data_release_evidence, pilot_certification}' "$BODY" >&2
+            jq '{version, release_source, runtime: .runtime.mode, real_data_release_evidence, pilot_certification}' "$BODY" >&2
             exit 1
           }
 
@@ -140,7 +141,6 @@ jobs:
           bash scripts/vercel-release-deploy.sh "$RELEASE_STAGE" "$SOURCE_SHA"
 
       - name: Verify requested live release stage
-        id: verify_initial
         shell: bash
         env:
           RELEASE_STAGE: ${{ steps.release.outputs.stage }}
@@ -218,9 +218,11 @@ jobs:
           curl --silent --show-error --fail --max-time 30 \
             "${VERCEL_PRODUCTION_URL}/api/health?deep=1" -o "$HEALTH"
           jq -e --arg sha "$SOURCE_SHA" '
+            .release_source.sha == $sha and
             .runtime.mode == "LAB" and
             .real_data_release_evidence.ready == true and
             .real_data_release_evidence.release_source_sha == $sha and
+            .pilot_certification.release_source_sha == $sha and
             .pilot_certification.release_ready == true and
             .pilot_certification.activation_allowed == true
           ' "$HEALTH" >/dev/null || {
