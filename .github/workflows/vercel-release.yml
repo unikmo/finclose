@@ -1,0 +1,206 @@
+name: FinClose Vercel Release
+
+on:
+  workflow_run:
+    workflows: ["FinClose CI"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finclose-vercel-production-release
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      ${ {
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      } }
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_sVekjWxQpKBAOb3DWW89HdvK
+      VERCEL_PROJECT_ID: prj_fn9VRSUOqwpOHkXEuLDGHVvoMHSC
+      VERCEL_PRODUCTION_URL: https://finclose-lab-preview.vercel.app
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Resolve certified source SHA
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            SOURCE_SHA='${{ github.event.workflow_run.head_sha }}'
+          else
+            SOURCE_SHA='${{ github.sha }}'
+          fi
+          if [[ ! "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::Invalid source SHA: $SOURCE_SHA"
+            exit 1
+          fi
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate release controller state
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATE=ops/vercel-release-state.json
+          test -f "$STATE"
+
+          TEAM_ID=$(jq -r '.project.team_id' "$STATE")
+          PROJECT_ID=$(jq -r '.project.project_id' "$STATE")
+          PRODUCTION_URL=$(jq -r '.project.production_url' "$STATE")
+          RUNTIME_MODE=$(jq -r '.release.runtime_mode' "$STATE")
+          PILOT_GATE=$(jq -r '.release.pilot_release_gate' "$STATE")
+          PRODUCTION_GATE=$(jq -r '.release.production_release_gate' "$STATE")
+          UPLOAD_MODE=$(jq -r '.release.upload_quarantine_mode' "$STATE")
+
+          [[ "$TEAM_ID" == "$VERCEL_ORG_ID" ]] || { echo "::error::Vercel team ID drift"; exit 1; }
+          [[ "$PROJECT_ID" == "$VERCEL_PROJECT_ID" ]] || { echo "::error::Vercel project ID drift"; exit 1; }
+          [[ "$PRODUCTION_URL" == "$VERCEL_PRODUCTION_URL" ]] || { echo "::error::Canonical production URL drift"; exit 1; }
+          [[ "$RUNTIME_MODE" == "LAB" || "$RUNTIME_MODE" == "PILOT" ]] || { echo "::error::Release controller supports only LAB or PILOT"; exit 1; }
+          [[ "$PRODUCTION_GATE" == "BLOCKED" ]] || { echo "::error::PRODUCTION release must remain BLOCKED in the controlled-pilot controller"; exit 1; }
+
+          if [[ "$RUNTIME_MODE" == "LAB" ]]; then
+            [[ "$PILOT_GATE" == "BLOCKED" ]] || { echo "::error::LAB requires pilot release gate BLOCKED"; exit 1; }
+            [[ "$UPLOAD_MODE" == "BLOCK" ]] || { echo "::error::LAB requires upload quarantine mode BLOCK"; exit 1; }
+          else
+            [[ "$PILOT_GATE" == "APPROVED" ]] || { echo "::error::PILOT requires pilot release gate APPROVED"; exit 1; }
+            [[ "$UPLOAD_MODE" == "MANUAL_REVIEW" || "$UPLOAD_MODE" == "SCANNER" ]] || { echo "::error::PILOT requires MANUAL_REVIEW or SCANNER upload quarantine"; exit 1; }
+          fi
+
+          for KEY in \
+            upload_scanner_verified \
+            backup_pitr_verified \
+            security_review_approved \
+            accounting_qa_approved \
+            manual_upload_procedure_approved \
+            auth_email_delivery_verified \
+            upload_operator_checklist_verified; do
+            VALUE=$(jq -r ".release.${KEY}" "$STATE")
+            [[ "$VALUE" == "YES" || "$VALUE" == "NO" ]] || { echo "::error::${KEY} must be YES or NO"; exit 1; }
+          done
+
+          echo "runtime_mode=$RUNTIME_MODE" >> "$GITHUB_OUTPUT"
+          echo "pilot_gate=$PILOT_GATE" >> "$GITHUB_OUTPUT"
+          echo "production_gate=$PRODUCTION_GATE" >> "$GITHUB_OUTPUT"
+          echo "upload_mode=$UPLOAD_MODE" >> "$GITHUB_OUTPUT"
+          echo "upload_scanner_verified=$(jq -r '.release.upload_scanner_verified' "$STATE")" >> "$GITHUB_OUTPUT"
+          echo "backup_pitr_verified=$(jq -r '.release.backup_pitr_verified' "$STATE")" >> "$GITHUB_OUTPUT"
+          echo "security_review_approved=$(jq -r '.release.security_review_approved' "$STATE")" >> "$GITHUB_OUTPUT"
+          echo "accounting_qa_approved=$(jq -r '.release.accounting_qa_approved' "$STATE")" >> "$GITHUB_OUTPUT"
+          echo "manual_upload_procedure_approved=$(jq -r '.release.manual_upload_procedure_approved' "$STATE")" >> "$GITHUB_OUTPUT"
+          echo "auth_email_delivery_verified=$(jq -r '.release.auth_email_delivery_verified' "$STATE")" >> "$GITHUB_OUTPUT"
+          echo "upload_operator_checklist_verified=$(jq -r '.release.upload_operator_checklist_verified' "$STATE")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Vercel automation credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${VERCEL_TOKEN:-}" ]]; then
+            echo "::error::FinClose release automation is BLOCKED because GitHub Actions secret VERCEL_TOKEN is not configured. This is the one-time automation bootstrap credential; do not paste it into source code or chat."
+            exit 78
+          fi
+
+      - name: Deploy exact source to canonical FinClose Vercel project
+        id: deploy
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          RUNTIME_MODE: ${{ steps.state.outputs.runtime_mode }}
+          PILOT_GATE: ${{ steps.state.outputs.pilot_gate }}
+          PRODUCTION_GATE: ${{ steps.state.outputs.production_gate }}
+          UPLOAD_MODE: ${{ steps.state.outputs.upload_mode }}
+          UPLOAD_SCANNER_VERIFIED: ${{ steps.state.outputs.upload_scanner_verified }}
+          BACKUP_PITR_VERIFIED: ${{ steps.state.outputs.backup_pitr_verified }}
+          SECURITY_REVIEW_APPROVED: ${{ steps.state.outputs.security_review_approved }}
+          ACCOUNTING_QA_APPROVED: ${{ steps.state.outputs.accounting_qa_approved }}
+          MANUAL_UPLOAD_PROCEDURE_APPROVED: ${{ steps.state.outputs.manual_upload_procedure_approved }}
+          AUTH_EMAIL_DELIVERY_VERIFIED: ${{ steps.state.outputs.auth_email_delivery_verified }}
+          UPLOAD_OPERATOR_CHECKLIST_VERIFIED: ${{ steps.state.outputs.upload_operator_checklist_verified }}
+        run: |
+          set -euo pipefail
+          npx --yes vercel@latest deploy \
+            --prod \
+            --yes \
+            --token "$VERCEL_TOKEN" \
+            --project "$VERCEL_PROJECT_ID" \
+            --env "FINCLOSE_RELEASE_SOURCE_SHA=$SOURCE_SHA" \
+            --env "FINCLOSE_RUNTIME_MODE=$RUNTIME_MODE" \
+            --env "FINCLOSE_PILOT_RELEASE_GATE=$PILOT_GATE" \
+            --env "FINCLOSE_PRODUCTION_RELEASE_GATE=$PRODUCTION_GATE" \
+            --env "FINCLOSE_UPLOAD_QUARANTINE_MODE=$UPLOAD_MODE" \
+            --env "FINCLOSE_UPLOAD_SCANNER_VERIFIED=$UPLOAD_SCANNER_VERIFIED" \
+            --env "FINCLOSE_BACKUP_PITR_VERIFIED=$BACKUP_PITR_VERIFIED" \
+            --env "FINCLOSE_SECURITY_REVIEW_APPROVED=$SECURITY_REVIEW_APPROVED" \
+            --env "FINCLOSE_ACCOUNTING_QA_APPROVED=$ACCOUNTING_QA_APPROVED" \
+            --env "FINCLOSE_MANUAL_UPLOAD_PROCEDURE_APPROVED=$MANUAL_UPLOAD_PROCEDURE_APPROVED" \
+            --env "FINCLOSE_AUTH_EMAIL_DELIVERY_VERIFIED=$AUTH_EMAIL_DELIVERY_VERIFIED" \
+            --env "FINCLOSE_UPLOAD_OPERATOR_CHECKLIST_VERIFIED=$UPLOAD_OPERATOR_CHECKLIST_VERIFIED" \
+            2>&1 | tee /tmp/finclose-vercel-deploy.log
+
+          DEPLOYMENT_URL=$(grep -Eo 'https://[^[:space:]]+\.vercel\.app' /tmp/finclose-vercel-deploy.log | tail -n 1 || true)
+          echo "deployment_url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Verify canonical live runtime after deployment
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.source.outputs.sha }}
+          EXPECTED_MODE: ${{ steps.state.outputs.runtime_mode }}
+        run: |
+          set -euo pipefail
+          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          HEALTH_URL="${VERCEL_PRODUCTION_URL}/api/health?deep=1"
+          BODY=/tmp/finclose-health.json
+          MATCHED=0
+
+          for attempt in $(seq 1 12); do
+            if curl --silent --show-error --fail --max-time 20 "$HEALTH_URL" -o "$BODY"; then
+              VERSION=$(jq -r '.version // ""' "$BODY")
+              MODE=$(jq -r '.runtime.mode // ""' "$BODY")
+              if [[ "$VERSION" == "$EXPECTED_VERSION" && "$MODE" == "$EXPECTED_MODE" ]]; then
+                MATCHED=1
+                break
+              fi
+            fi
+            echo "Waiting for canonical alias to serve expected release (attempt $attempt/12)..."
+            sleep 5
+          done
+
+          [[ "$MATCHED" == "1" ]] || { echo "::error::Canonical FinClose URL did not converge to expected version/mode"; cat "$BODY" 2>/dev/null || true; exit 1; }
+          jq -e '.runtime.production_release_gate_approved == false' "$BODY" >/dev/null
+
+          if [[ "$EXPECTED_MODE" == "LAB" ]]; then
+            jq -e '.runtime.real_data_mode == false and .runtime.pilot_release_gate_approved == false' "$BODY" >/dev/null
+          else
+            jq -e '
+              .runtime.real_data_mode == true and
+              .runtime.release_gate_approved == true and
+              .runtime.pilot_release_gate_approved == true and
+              .runtime.real_data_allowed_by_config == true and
+              .real_data_release_evidence.ready == true and
+              .pilot_certification.release_ready == true and
+              .pilot_certification.activation_allowed == true and
+              .ok == true
+            ' "$BODY" >/dev/null
+          fi
+
+          echo "### FinClose Vercel release verified" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: \`$EXPECTED_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: \`$EXPECTED_VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Runtime: \`$EXPECTED_MODE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Canonical URL: $VERCEL_PRODUCTION_URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Deployment URL: ${{ steps.deploy.outputs.deployment_url }}" >> "$GITHUB_STEP_SUMMARY"
