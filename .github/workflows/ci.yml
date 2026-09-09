@@ -5,6 +5,10 @@ on:
     branches: [main, vercel-firebase]
   pull_request:
 
+concurrency:
+  group: finclose-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
