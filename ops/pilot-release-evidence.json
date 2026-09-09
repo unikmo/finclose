@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "scope": "controlled-pilot",
+  "release_evidence": {
+    "backup_pitr": {
+      "environment_flag": "FINCLOSE_BACKUP_PITR_VERIFIED",
+      "status": "PENDING",
+      "source_path": "docs/BACKUP_RECOVERY_VERIFICATION_RECORD_V1.md",
+      "source_blob_sha": "ea4382feb66b77f319dd4cd586f8fb0fbbf4d9b6",
+      "verified_at": null
+    },
+    "security_review": {
+      "environment_flag": "FINCLOSE_SECURITY_REVIEW_APPROVED",
+      "status": "PENDING",
+      "source_path": "docs/SECURITY_RELEASE_EVIDENCE_V035.md",
+      "source_blob_sha": "9bd1ae7f471741e3b1f3c3a97155797614990e33",
+      "verified_at": null
+    },
+    "accounting_qa": {
+      "environment_flag": "FINCLOSE_ACCOUNTING_QA_APPROVED",
+      "status": "PENDING",
+      "source_path": "docs/ACCOUNTING_CONTROL_QA_V035.md",
+      "source_blob_sha": "b65aa0b5884ea55d2f0c9e8fc693ec213ff65245",
+      "verified_at": null
+    },
+    "manual_upload_procedure": {
+      "environment_flag": "FINCLOSE_MANUAL_UPLOAD_PROCEDURE_APPROVED",
+      "status": "PENDING",
+      "source_path": "docs/CONTROLLED_PILOT_UPLOAD_PROCEDURE_V1.md",
+      "source_blob_sha": "dcc6b2de865e68df5f615ee06783ecd28e75770a",
+      "verified_at": null
+    },
+    "auth_email_delivery": {
+      "environment_flag": "FINCLOSE_AUTH_EMAIL_DELIVERY_VERIFIED",
+      "status": "PENDING",
+      "source_path": "docs/AUTH_EMAIL_DELIVERY_VERIFICATION_V1.md",
+      "source_blob_sha": "4857df267f5622a20460f9d7e291b408db348607",
+      "verified_at": null
+    },
+    "upload_operator_checklist": {
+      "environment_flag": "FINCLOSE_UPLOAD_OPERATOR_CHECKLIST_VERIFIED",
+      "status": "PENDING",
+      "source_path": "docs/CONTROLLED_PILOT_UPLOAD_OPERATOR_CHECKLIST_V1.md",
+      "source_blob_sha": "74f77f72d77abc3f81858414758ea12e7ac22a65",
+      "verified_at": null
+    }
+  }
+}
