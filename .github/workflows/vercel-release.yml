@@ -103,6 +103,15 @@ jobs:
             exit 78
           fi
 
+      - name: Generate ephemeral certification credential
+        if: steps.release.outputs.stage == 'CERTIFY_LAB'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(openssl rand -hex 32)
+          echo "::add-mask::$TOKEN"
+          echo "FINCLOSE_RELEASE_AUTOMATION_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
       - name: Preflight existing certification for direct PILOT release
         if: steps.release.outputs.stage == 'PILOT'
         shell: bash
@@ -170,32 +179,13 @@ jobs:
           SOURCE_SHA: ${{ steps.release.outputs.sha }}
         run: |
           set -euo pipefail
-          ENV_JSON=$(mktemp)
+          [[ ${#FINCLOSE_RELEASE_AUTOMATION_TOKEN} -ge 32 ]] || { echo "::error::Ephemeral certification credential is unavailable"; exit 1; }
           CERT_JSON=$(mktemp)
-          trap 'rm -f "$ENV_JSON" "$CERT_JSON"' EXIT
-
-          curl --silent --show-error --fail \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?decrypt=true&source=vercel-cli%3Apull&teamId=${VERCEL_ORG_ID}" \
-            -o "$ENV_JSON"
-
-          LAB_TOKEN=$(jq -r '
-            [
-              .envs[]
-              | select(.key == "FINCLOSE_LAB_TOKEN")
-              | select(((.target // []) | index("production")) != null)
-            ][0].value // empty
-          ' "$ENV_JSON")
-          if [[ -z "$LAB_TOKEN" ]]; then
-            echo "::error::FINCLOSE_LAB_TOKEN could not be retrieved from the production Vercel environment"
-            exit 1
-          fi
-          echo "::add-mask::$LAB_TOKEN"
-          rm -f "$ENV_JSON"
+          trap 'rm -f "$CERT_JSON"' EXIT
 
           curl --silent --show-error --fail --max-time 240 \
             -X POST \
-            -H "x-finclose-lab-token: $LAB_TOKEN" \
+            -H "x-finclose-release-token: $FINCLOSE_RELEASE_AUTOMATION_TOKEN" \
             "${VERCEL_PRODUCTION_URL}/api/pilot-certification" \
             -o "$CERT_JSON"
 
