@@ -31,5 +31,8 @@ jobs:
             $errors | ForEach-Object { Write-Error $_.Message }
             exit 1
           }
+      - name: Validate Vercel release helper syntax
+        shell: bash
+        run: bash -n scripts/vercel-release-deploy.sh
       - name: Build Vercel Next.js application
         run: npm run build
