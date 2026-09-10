@@ -1,4 +1,4 @@
-export const FINCLOSE_RELEASE_VERSION = '0.35.2' as const;
+export const FINCLOSE_RELEASE_VERSION = '0.35.3' as const;
 export const PILOT_CERTIFICATION_VERSION = FINCLOSE_RELEASE_VERSION;
 
 export function releaseSourceSha() {
