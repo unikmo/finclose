@@ -58,8 +58,31 @@ export function pilotReleaseEvidenceStatus(
   };
 }
 
-export function computePilotCertificationEvidenceHash(report: StoredPilotCertificationReport) {
-  const payload = {
+/**
+ * Deterministic JSON serialization with recursively sorted object keys.
+ *
+ * The certification evidence hash is computed once when the report is written
+ * and recomputed when it is read back to verify integrity. Firebase Realtime
+ * Database does not preserve object key insertion order on read, so hashing a
+ * plain `JSON.stringify` of the report (whose gate `detail` objects are nested
+ * arbitrary shapes) produces a different digest after a write/read round-trip.
+ * Canonicalizing key order makes the digest stable across storage.
+ */
+export function canonicalJSONStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJSONStringify).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJSONStringify((value as Record<string, unknown>)[key])}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+export function pilotCertificationEvidencePayload(report: StoredPilotCertificationReport) {
+  return {
     certification_version: String(report.certification_version || '').trim(),
     release_version: String(report.release_version || '').trim(),
     release_source_sha: String(report.release_source_sha || '').trim().toLowerCase(),
@@ -68,7 +91,10 @@ export function computePilotCertificationEvidenceHash(report: StoredPilotCertifi
       ? report.gates.map(({ id, status, mandatory, evidence, detail }) => ({ id, status, mandatory, evidence, detail }))
       : []
   };
-  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+export function computePilotCertificationEvidenceHash(report: StoredPilotCertificationReport) {
+  return crypto.createHash('sha256').update(canonicalJSONStringify(pilotCertificationEvidencePayload(report))).digest('hex');
 }
 
 export function validatePilotCertificationEvidence(

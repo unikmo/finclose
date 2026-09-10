@@ -1,9 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computePilotCertificationEvidenceHash, validatePilotCertificationEvidence } from '../lib/pilot-release-evidence.ts';
+import { canonicalJSONStringify, computePilotCertificationEvidenceHash, validatePilotCertificationEvidence } from '../lib/pilot-release-evidence.ts';
 import { FINCLOSE_RELEASE_VERSION, PILOT_CERTIFICATION_VERSION } from '../lib/release-version.ts';
 
 const sourceSha = '1'.repeat(40);
+
+// Firebase Realtime Database returns object keys in sorted order on read; this
+// mimics that write/read round-trip so we can assert the evidence hash is stable.
+function firebaseReadRoundTrip<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(firebaseReadRoundTrip) as unknown as T;
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = firebaseReadRoundTrip((value as Record<string, unknown>)[key]);
+    }
+    return out as T;
+  }
+  return value;
+}
 
 function fixture() {
   const report = {
@@ -18,6 +32,13 @@ function fixture() {
     gates: [
       { id: 'auth', evidence: 'live auth passed', mandatory: true, status: 'PASS' },
       { id: 'rules', evidence: 'anonymous access denied', mandatory: true, status: 'PASS' },
+      {
+        id: 'ledger',
+        evidence: 'firestore ledger ready',
+        mandatory: true,
+        status: 'PASS',
+        detail: { configured: true, reachable: true, schema_version: 1, ready: true, backend: 'firebase-firestore' }
+      },
       { id: 'optional', evidence: 'directional warning', mandatory: false, status: 'WARN' }
     ],
     evidence_hash: '',
@@ -89,6 +110,27 @@ test('pilot release evidence independently rechecks mandatory gates and blockers
   const b = fixture();
   const blocked = { ...b.report, blockers: ['manual evidence missing'] };
   assert.equal(validate(b.latest, blocked).code, 'PILOT_CERTIFICATION_HAS_BLOCKERS');
+});
+
+test('canonicalJSONStringify is insensitive to object key order', () => {
+  assert.equal(
+    canonicalJSONStringify({ b: 1, a: { d: 4, c: 3 } }),
+    canonicalJSONStringify({ a: { c: 3, d: 4 }, b: 1 })
+  );
+});
+
+test('pilot release evidence still validates after a Firebase RTDB read round-trip', () => {
+  const { latest, report } = fixture();
+  // Sanity: gate detail objects are present, so key-order canonicalization matters.
+  assert.ok(report.gates.some(g => (g as { detail?: unknown }).detail));
+
+  const storedReport = firebaseReadRoundTrip(report);
+  const storedLatest = firebaseReadRoundTrip(latest);
+
+  assert.equal(computePilotCertificationEvidenceHash(storedReport), report.evidence_hash);
+  const result = validate(storedLatest, storedReport);
+  assert.equal(result.ready, true);
+  assert.equal(result.code, 'PILOT_CERTIFICATION_VERIFIED');
 });
 
 test('pilot release evidence must have been produced pre-activation and explicitly allow activation', () => {

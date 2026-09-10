@@ -12,6 +12,7 @@ import { bookkeepingEngineSelfTest } from './bookkeeping-engine';
 import { financeCycleSelfTest } from './finance-cycle-engine';
 import { closeGovernanceSelfTest } from './close-governance-engine';
 import { ledgerHealth } from './production-ledger';
+import { canonicalJSONStringify } from './pilot-release-evidence';
 
 export type CertificationGateStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'WARN';
 export type CertificationGate = {
@@ -358,7 +359,9 @@ export async function runPilotCertification(): Promise<PilotCertificationReport>
   const completedAt = Date.now();
   const gateCounts = gates.reduce((acc, item) => { acc[item.status] += 1; return acc; }, { PASS: 0, FAIL: 0, BLOCKED: 0, WARN: 0 } as Record<CertificationGateStatus, number>);
   const blockers = mandatoryFailures.map(g => `${g.id}: ${g.evidence}`);
-  const evidenceHash = crypto.createHash('sha256').update(JSON.stringify({
+  // Canonical (recursively key-sorted) serialization so the digest survives a
+  // Firebase RTDB write/read round-trip, which does not preserve key order.
+  const evidenceHash = crypto.createHash('sha256').update(canonicalJSONStringify({
     certification_version: PILOT_CERTIFICATION_VERSION,
     release_version: FINCLOSE_RELEASE_VERSION,
     run_id: runId,
