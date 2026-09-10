@@ -194,7 +194,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       setUser(result.user);
       setPassword('');
       if (result.verification_required) {
-        setNote('Check your email and verify the address. Real financial-data access stays locked until verification is complete and you sign in again.');
+        setNote('Almost there — click the link in the verification email we just sent, then sign back in to continue.');
       } else {
         setNote(authMode === 'register' ? 'Account created. Continue with the company setup this service requires.' : 'Signed in. Continue where you left off.');
       }
@@ -228,7 +228,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         body: JSON.stringify({ email: user.email, password: verificationPassword })
       });
       setVerificationPassword('');
-      setNote('Verification email sent. After verifying, sign out and sign in again so FinClose receives the verified Firebase identity.');
+      setNote('Verification email sent. Click the link, then sign out and back in to continue.');
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
@@ -407,7 +407,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         body: JSON.stringify({ filename: sourceFile.name, content_base64: await base64(sourceFile) })
       });
       setNote(result.status === 'QUARANTINED'
-        ? `Current source stored in security quarantine. FinClose will not process it until an authorized review clears it. SHA ${String(result.sha256).slice(0, 12)}…`
+        ? `File uploaded and held for review — a FinClose administrator checks it before it's processed. SHA ${String(result.sha256).slice(0, 12)}…`
         : `${result.status}: current source received. SHA ${String(result.sha256).slice(0, 12)}…`);
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
@@ -425,7 +425,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   const heroText = !user
     ? 'Start with your FinClose account. After that, we ask only for the company information this service actually needs.'
     : !accountComplete
-      ? 'Verify your Firebase email address before FinClose unlocks company or real financial-data access.'
+      ? 'Confirm the verification link in your email, then sign back in to continue setup.'
     : companyInitializationRequired && !companyComplete
       ? 'You are signed in. Next, connect an already initialized company or initialize a new one.'
       : !historyComplete
@@ -480,12 +480,12 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       {user && managedRealDataAccount && !user.email_verified && <section className="focus-panel auth-panel">
         <div className="focus-kicker">STEP 1</div>
         <h2>Verify your email</h2>
-        <p className="focus-lead">Firebase Authentication has created your account, but FinClose will not allow real financial-data operations until the email address is verified.</p>
+        <p className="focus-lead">Your account is created. Click the link in the verification email we sent you, then sign back in to continue.</p>
         <div className="setup-block account-form">
           <div className="completed-line"><span>✓</span> Account created · {user.email}</div>
           <label><span>Password</span><input type="password" value={verificationPassword} onChange={e => setVerificationPassword(e.target.value)} autoComplete="current-password" /></label>
           <button className="service-primary" onClick={resendVerification} disabled={busy || !verificationPassword}>Resend verification email</button>
-          <div className="field-hint">After verifying the email, sign out and sign in again to refresh the verified Firebase session.</div>
+          <div className="field-hint">Didn't get it? Enter your password and resend. After confirming the link, sign out and back in.</div>
           <button className="service-secondary" onClick={signOut} disabled={busy}>Sign out</button>
         </div>
       </section>}
