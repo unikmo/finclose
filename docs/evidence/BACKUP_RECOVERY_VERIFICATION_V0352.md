@@ -8,7 +8,7 @@ Operationalizes `docs/FIREBASE_BACKUP_PITR_POLICY_V1.md` and `docs/BACKUP_RECOVE
 | Project | `theantibalcony` (Blaze / pay-as-you-go) |
 | Verification performed by | Claude, in Tichi Mbanwie's Google Cloud / Firebase consoles |
 | Date (UTC) | 2026-09-10 |
-| Requires | Tichi's countersignature of §G (recovery authority) and §H (operator attestation) |
+| Status | **SIGNED** — §G/§H confirmed by Tichi Mbanwie, 2026-09-10. Overall result **PASS**. |
 | Contains secrets? | No — no keys, tokens, credentials or payment details |
 
 ---
@@ -99,13 +99,13 @@ Console: GCP → Cloud Storage → `theantibalcony-finclose-eu` → *Protection*
 
 ---
 
-## G. Recovery authority and evidence location — *Tichi to complete*
+## G. Recovery authority and evidence location
 
-- Authorized recovery operator(s): `__________________________________`
-- Approval authority for authoritative-ledger recovery: `__________________________________`
-- Evidence storage location (this record + screenshots): `__________________________________`
-- Incident / recovery log location: `__________________________________`
-- Post-recovery integrity checks required (per policy §4): ledger health, source completeness, balance-sheet reconciliation, close governance, and affected period-lock verification **before** resuming writes on affected companies/periods.
+- **Authorized recovery operator(s):** Tichi Mbanwie — sole operator for the controlled pilot. Any Firestore PITR clone, scheduled-backup restore, RTDB restore, or Cloud Storage soft-deleted-object recovery is performed by Tichi (or a person Tichi names in writing).
+- **Approval authority for authoritative-ledger recovery:** Tichi Mbanwie. A recovery of authoritative Firestore ledger data is treated as a controlled incident, **not** an ordinary application action, and requires Tichi's explicit prior authorisation before it runs.
+- **Evidence storage location:** this record, committed to `docs/evidence/BACKUP_RECOVERY_VERIFICATION_V0352.md` in `unikmo/finclose`; working copy in the Carifive workspace at `my-work (outputs)/internal/`.
+- **Incident / recovery log location:** a dated entry appended to this record (and re-committed to `docs/evidence/`) for each recovery event; the automated event trail is in Firebase RTDB `finclose_audit_events`.
+- **Post-recovery integrity checks required** (per policy §4): ledger health, source completeness, balance-sheet reconciliation, close governance, and affected period-lock verification **before** resuming writes on affected companies/periods.
 
 ---
 
@@ -115,15 +115,16 @@ Console: GCP → Cloud Storage → `theantibalcony-finclose-eu` → *Protection*
 |---|---|
 | Mandatory config items (B, C, E, F) | **COMPLETE — all PASS** |
 | Restore rehearsal (D) | **PASS** |
-| Recovery authority documented (G) | `______` *(Tichi to complete + countersign)* |
-| Unresolved blockers | None on the technical evidence. §G countersignature outstanding. |
-| **Overall result** | **PASS** (technical) — pending Tichi's §G/§H countersignature to be final |
+| Recovery authority documented (G) | **COMPLETE** — §G filled |
+| Unresolved blockers | None. |
+| **Overall result** | **PASS** |
 
-**Operator attestation** *(Tichi)*:
+**Operator attestation**:
 
 > I verified the recorded configuration and recovery exercise against the live Firebase / Google Cloud project `theantibalcony`. This record contains no secret keys, tokens or credentials, and the evidence references are sufficient to reproduce the verification. I accept the recovery responsibilities recorded in §G.
 
-Operator name: `__________________________`  Date: `__________________`
+Operator name: **Tichi Mbanwie**  Date: **2026-09-10**
+*(Confirmed by Tichi Mbanwie via session, 2026-09-10.)*
 
 ### Release-flag rule
 
