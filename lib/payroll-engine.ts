@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
 import { getServiceDeployment } from './service-deployments';
 import { assertDateRangeOpenForCompany } from './close-governance-engine';
+import { calculateGermanyPayroll, payrollEngineSelfTestDE, PAYROLL_RULE_PACK_DE } from './payroll-engine-de';
+import type { DePayrollRunInput, DePayrollRunResult } from './payroll-engine-de';
 
 export type PayrollEmployeeInput = {
   employee_id: string;
@@ -100,7 +102,11 @@ export const PAYROLL_RULE_PACKS = {
     ]
   },
   US: { id: 'US-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
-  DE: { id: 'DE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
+  // Real calculation logic exists (see payroll-engine-de.ts) but is DRAFT_NEEDS_LEGAL_REVIEW:
+  // preparePayrollRun below refuses to run real payroll on this pack until its
+  // status is changed to VERIFIED_BASIC_RULES by someone who has checked the
+  // figures against the current-year German statutory sources.
+  DE: PAYROLL_RULE_PACK_DE,
   GB: { id: 'GB-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
   EE: { id: 'EE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
   CM: { id: 'CM-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' }
@@ -252,22 +258,28 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
   };
 }
 
-function stablePayrollInput(input: PayrollRunInput) {
+function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput) {
   return JSON.stringify({
     pay_period_start: input.pay_period_start,
     pay_period_end: input.pay_period_end,
     pay_date: input.pay_date,
-    employees: input.employees.map(employee => ({
-      employee_id: String(employee.employee_id || '').trim(),
-      name: employee.name ? String(employee.name).trim() : '',
-      gross_pay: Number(employee.gross_pay),
-      pension_participant: employee.pension_participant,
-      ytd_taxable_salary_before: Number(employee.ytd_taxable_salary_before)
-    })).sort((a, b) => a.employee_id.localeCompare(b.employee_id))
+    // Sorted, JSON-stable serialization of whatever employee fields this
+    // country's input shape carries (Georgia and Germany differ), so the
+    // fingerprint stays deterministic per-country without a shared type.
+    employees: (input.employees as unknown as Record<string, unknown>[])
+      .map((employee: Record<string, unknown>) => {
+        const stable: Record<string, unknown> = {};
+        for (const key of Object.keys(employee).sort()) {
+          const value = employee[key];
+          stable[key] = typeof value === 'string' ? value.trim() : value;
+        }
+        return stable;
+      })
+      .sort((a: Record<string, unknown>, b: Record<string, unknown>) => String(a.employee_id).localeCompare(String(b.employee_id)))
   });
 }
 
-export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput) {
+export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   if (!['payroll', 'bookkeeping-payroll'].includes(String(deployment.service))) {
     const error = new Error('payroll engine is not enabled for this service');
@@ -288,13 +300,20 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
   await assertDateRangeOpenForCompany(String(deployment.company_id), String(input.pay_period_start), String(input.pay_period_end), 'payroll run');
 
   const countryCode = String(deployment.country_code || deployment.configuration?.country_code || '').toUpperCase();
-  if (countryCode !== 'GE') {
+  const rulePack = (PAYROLL_RULE_PACKS as Record<string, { id: string; status: string }>)[countryCode];
+  if (!rulePack || rulePack.status === 'NOT_IMPLEMENTED') {
     const error = new Error(`payroll calculation rule pack is not implemented for ${countryCode || 'this country'}`);
     (error as Error & { status?: number }).status = 409;
     throw error;
   }
+  if (rulePack.status !== 'VERIFIED_BASIC_RULES') {
+    const error = new Error(`payroll calculation rule pack for ${countryCode} is ${rulePack.status}, not yet enabled for real payroll runs`);
+    (error as Error & { status?: number }).status = 409;
+    throw error;
+  }
 
-  const result = calculateGeorgiaPayroll(input);
+  const result: PayrollRunResult | DePayrollRunResult =
+    countryCode === 'DE' ? calculateGermanyPayroll(input as DePayrollRunInput) : calculateGeorgiaPayroll(input as PayrollRunInput);
   if (!result.controls.journal_balanced) {
     const error = new Error('payroll journal failed balance control');
     (error as Error & { status?: number }).status = 500;
@@ -329,7 +348,7 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
       payroll_run_id: runId,
       deployment_id: deploymentId,
       company_id: deployment.company_id,
-      country_code: 'GE',
+      country_code: countryCode,
       rule_pack_id: result.rule_pack_id,
       input_fingerprint: fingerprint,
       created_at: now
@@ -384,4 +403,15 @@ export function payrollEngineSelfTest() {
       sample.controls.journal_balanced,
     sample
   };
+}
+
+// Runs both the Georgia (real, VERIFIED_BASIC_RULES) and Germany (draft,
+// pending legal review) engine self-tests. The Germany pack cannot serve a
+// real payroll run until its status is changed to VERIFIED_BASIC_RULES (see
+// preparePayrollRun), but its math still needs to pass regression here so it
+// can be reviewed against known-correct expected output before that happens.
+export function payrollEngineSelfTestAll() {
+  const ge = payrollEngineSelfTest();
+  const de = payrollEngineSelfTestDE();
+  return { ok: ge.ok && de.ok, georgia: ge, germany: de };
 }
