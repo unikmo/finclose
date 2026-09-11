@@ -2,10 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assertLabToken, statusFor } from '../../../lib/finclose-backend';
 import { ensureFirebaseWebClientConfig } from '../../../lib/firebase-web-config-discovery';
 import { getLatestReleaseBoundPilotCertification, runReleaseBoundPilotCertification } from '../../../lib/pilot-certification-release';
+import { secureReleaseTokenMatches } from '../../../lib/release-automation-auth';
 import { PILOT_CERTIFICATION_VERSION } from '../../../lib/release-version';
 import { runtimeMode } from '../../../lib/runtime-mode';
 
 export const dynamic = 'force-dynamic';
+
+function assertCertificationAccess(req: NextRequest) {
+  const supplied = req.headers.get('x-finclose-release-token');
+  if (secureReleaseTokenMatches(process.env.FINCLOSE_RELEASE_AUTOMATION_TOKEN, supplied)) return;
+  assertLabToken(req);
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,7 +26,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    assertLabToken(req);
+    assertCertificationAccess(req);
     if (runtimeMode() !== 'LAB') {
       return NextResponse.json({ detail: 'pilot certification must run while FinClose remains in LAB; do not use certification to justify an already-active real-data mode' }, { status: 409 });
     }
