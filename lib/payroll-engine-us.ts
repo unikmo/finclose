@@ -1,4 +1,4 @@
-// United States (US) payroll rule pack — v1: federal + California.
+// United States (US) payroll rule pack — v2: federal + California.
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -15,6 +15,30 @@
 // rate, FUTA credit reductions) finalized only late in the prior year or
 // even during the current year. This file uses figures sourced via AI web
 // research (not a professional review) as of September 2026.
+//
+// v2 change log (from v1, driven by review against two real-shaped sample
+// payslips — see the PR for details):
+//   - Pre-tax deductions are now modeled, with the two federally-distinct
+//     categories kept separate rather than lumped together, because they are
+//     NOT taxed the same way:
+//       * `pretax_401k_deferral` (traditional 401(k)/403(b) elective
+//         deferral): excluded from federal and CA INCOME tax wages, but
+//         still fully subject to FICA (Social Security + Medicare) and FUTA
+//         — per IRC §3121(a)(5)(D), elective deferrals are wages for FICA
+//         purposes even though they're excluded from income tax wages.
+//       * `pretax_section125_deduction` (cafeteria-plan health/dental/vision
+//         premiums, health/dependent-care FSA contributions): excluded from
+//         federal income tax wages, CA income tax wages, FICA wages, FUTA
+//         wages, AND CA SDI wages — per IRC §125, a properly-elected
+//         cafeteria-plan deduction is excluded from the FICA/FUTA wage base
+//         entirely, unlike a 401(k) deferral.
+//     Validated against a real-shaped sample payslip whose FICA figures
+//     matched this engine exactly on the FULL gross despite the payslip
+//     also showing 401(k) and health-insurance deductions — consistent with
+//     the 401(k)-only-reduces-income-tax-wages rule (that payslip's health
+//     deduction evidently wasn't also excluded from its own FICA
+//     calculation, which is a discrepancy in that sample, not in this
+//     engine's law-following behavior; see the PR for the full comparison).
 //
 // Scope, deliberately narrow (rejected, not approximated):
 //   - Only one state is supported: California. Every other US state
@@ -36,12 +60,17 @@
 //     compute/post that contribution outside this engine.
 //   - California Employment Training Tax (ETT) is NOT calculated — its
 //     current wage base was not independently reverified this pass.
-//   - Pre-tax deductions (401(k)/403(b) deferrals, cafeteria-plan health
-//     premiums, HSA/FSA contributions) are NOT modeled. `gross_pay` is
-//     treated as fully taxable for both federal and CA purposes. A payroll
-//     with pre-tax deductions must be rejected or handled by pre-reducing
-//     gross_pay/sv-equivalent wages outside this engine — this engine does
-//     not know the difference between gross pay and taxable wages.
+//   - Only two pre-tax deduction categories are modeled: traditional
+//     401(k)/403(b) elective deferrals and Section 125 cafeteria-plan
+//     deductions (see the v2 change log above for how each is taxed
+//     differently). Not modeled: Roth 401(k)/403(b) contributions (fully
+//     taxable, same as regular wages — caller should simply not pass them
+//     as a pretax field), HSA contributions (excluded like Section 125 in
+//     most cases, but with employer-vs-employee and state-conformity
+//     nuances not implemented here), and annual IRS contribution-limit
+//     enforcement for any of these (the caller is responsible for not
+//     passing an amount that would exceed the employee's actual annual
+//     limit; this engine does not track or cap it).
 //   - Supplemental wage flat-rate withholding (the 22%/37% optional/mandatory
 //     methods for bonuses, commissions, etc.) is not implemented. All pay is
 //     treated as regular wages through the annualized percentage method.
@@ -66,6 +95,8 @@ export type UsEmployeeInput = {
   employee_id: string;
   name?: string;
   gross_pay: number;
+  pretax_401k_deferral?: number;
+  pretax_section125_deduction?: number;
   pay_frequency: UsPayFrequency;
   federal_filing_status: UsFederalFilingStatus;
   federal_step2_checkbox: boolean;
@@ -99,7 +130,8 @@ export type UsJournalLine = {
     | 'FICA_PAYABLE'
     | 'FUTA_PAYABLE'
     | 'CA_INCOME_TAX_PAYABLE'
-    | 'CA_SDI_PAYABLE';
+    | 'CA_SDI_PAYABLE'
+    | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
 
@@ -107,6 +139,10 @@ export type UsEmployeeResult = {
   employee_id: string;
   name?: string;
   gross_pay: number;
+  pretax_401k_deferral: number;
+  pretax_section125_deduction: number;
+  federal_taxable_wages: number;
+  fica_and_futa_wages: number;
   federal_income_tax: number;
   employee_social_security: number;
   employer_social_security: number;
@@ -140,6 +176,7 @@ export type UsPayrollRunResult = {
     futa: number;
     ca_income_tax: number;
     ca_sdi: number;
+    pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
   };
@@ -154,7 +191,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-CA-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V1',
+  id: 'US-CA-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V2',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -261,7 +298,10 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Internal Revenue Service', instrument: 'Publication 926 / SSA 2026 wage base and Additional Medicare Tax rules (IRC 3102(f))', url: 'https://www.irs.gov/pub/irs-pdf/p926.pdf' },
     { authority: 'US Department of Labor / IRS Form 940 instructions', instrument: '2026 FUTA rate, wage base, and California credit-reduction status', url: 'https://www.irs.gov' },
     { authority: 'California Employment Development Department (EDD)', instrument: '2026 California Withholding Schedules — Method B, Exact Calculation Method', url: 'https://edd.ca.gov/siteassets/files/pdf_pub_ctr/26methb.pdf' },
-    { authority: 'California Employment Development Department (EDD)', instrument: '2026 California State Disability Insurance (SDI) employee contribution rate', url: 'https://edd.ca.gov' }
+    { authority: 'California Employment Development Department (EDD)', instrument: '2026 California State Disability Insurance (SDI) employee contribution rate', url: 'https://edd.ca.gov' },
+    { authority: 'Internal Revenue Code', instrument: '§3121(a)(5)(D) — traditional 401(k)/403(b) elective deferrals remain wages for FICA purposes despite being excluded from income tax wages', url: 'https://www.irs.gov/publications/p15b' },
+    { authority: 'Internal Revenue Code', instrument: '§125 — cafeteria-plan (Section 125) benefits properly elected are excluded from federal income tax wages, FICA wages, and FUTA wages', url: 'https://www.irs.gov/publications/p15b' },
+    { authority: 'California Employment Development Department (EDD)', instrument: 'DE 231 series — California\'s wage-exclusion treatment (Subject Wages vs. PIT Wages) for 401(k) deferrals and cafeteria-plan benefits generally follows the federal treatment', url: 'https://edd.ca.gov' }
   ],
   limitations: [
     'Only California is supported as a state. Every other state, including the nine with no state income tax, is rejected pending its own build and validation.',
@@ -269,7 +309,7 @@ export const PAYROLL_RULE_PACK_US = {
     'Only weekly, biweekly, semimonthly, and monthly pay frequencies are supported.',
     'State Unemployment Insurance (SUI) is not calculated — it uses an employer-specific experience rate assigned annually by the EDD, which this engine has no statutory default for. Callers must compute and post SUI separately.',
     'California Employment Training Tax (ETT) is not calculated.',
-    'Pre-tax deductions (401(k)/403(b), cafeteria-plan premiums, HSA/FSA) are not modeled. gross_pay is treated as fully taxable for both federal and CA withholding and for FICA.',
+    'Only two pre-tax deduction categories are modeled: traditional 401(k)/403(b) deferrals (excluded from federal/CA income tax wages only, still FICA/FUTA-taxable) and Section 125 cafeteria-plan deductions (excluded from income tax wages, FICA wages, FUTA wages, and CA SDI wages). Roth deferrals, HSA contributions, and IRS annual contribution-limit enforcement are not modeled — the caller must not pass amounts exceeding the employee\'s actual limit.',
     'Supplemental-wage flat-rate withholding methods (22% optional / 37% mandatory) are not implemented; all pay is run through the regular annualized percentage method.',
     'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official IRS Pub 15-T and EDD Method B publications before this pack is marked VERIFIED_BASIC_RULES.',
     'The FUTA net rate (including the California credit reduction) is finalized by the Department of Labor late in the calendar year; the 1.8% California figure used here is the best available 2026 estimate at the time of writing and must be reconfirmed once the year is final.',
@@ -352,6 +392,18 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     seen.add(employeeId);
 
     const grossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
+    const pretax401k = requireNonNegativeMoney(employee.pretax_401k_deferral ?? 0, `pretax_401k_deferral for ${employeeId}`);
+    const pretaxSection125 = requireNonNegativeMoney(employee.pretax_section125_deduction ?? 0, `pretax_section125_deduction for ${employeeId}`);
+    if (money(pretax401k + pretaxSection125) > grossPay) {
+      const error = new Error(`pretax_401k_deferral + pretax_section125_deduction cannot exceed gross_pay for ${employeeId}`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    // Traditional 401(k)/403(b) deferrals reduce income-tax wages only.
+    // Section 125 cafeteria-plan deductions reduce income-tax wages AND
+    // FICA/FUTA/SDI wages. See the v2 change log at the top of this file.
+    const federalTaxableWages = Math.max(0, money(grossPay - pretax401k - pretaxSection125));
+    const ficaAndFutaWages = Math.max(0, money(grossPay - pretaxSection125));
     const ytdSsBefore = requireNonNegativeMoney(employee.ytd_ss_wages_before, `ytd_ss_wages_before for ${employeeId}`);
     const ytdMedicareBefore = requireNonNegativeMoney(employee.ytd_medicare_wages_before, `ytd_medicare_wages_before for ${employeeId}`);
     const ytdFutaBefore = requireNonNegativeMoney(employee.ytd_futa_wages_before, `ytd_futa_wages_before for ${employeeId}`);
@@ -395,18 +447,18 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
 
     const periodsPerYear = p.federal_income_tax.periods_per_year[employee.pay_frequency];
 
-    // --- FICA ---
-    const employeeSocialSecurity = ceilingContribution(ytdSsBefore, grossPay, p.fica.social_security_wage_base_annual, p.fica.social_security_rate);
+    // --- FICA (on ficaAndFutaWages: gross minus Section 125 only — 401(k) stays FICA-taxable) ---
+    const employeeSocialSecurity = ceilingContribution(ytdSsBefore, ficaAndFutaWages, p.fica.social_security_wage_base_annual, p.fica.social_security_rate);
     const employerSocialSecurity = employeeSocialSecurity; // same ceiling, same rate, employer matches
-    const employeeMedicare = money(grossPay * p.fica.medicare_rate);
+    const employeeMedicare = money(ficaAndFutaWages * p.fica.medicare_rate);
     const employerMedicare = employeeMedicare;
-    const medicareYtdAfter = money(ytdMedicareBefore + grossPay);
+    const medicareYtdAfter = money(ytdMedicareBefore + ficaAndFutaWages);
     const additionalMedicareWagesThisPeriod = Math.max(0, medicareYtdAfter - Math.max(p.fica.additional_medicare_threshold_annual, ytdMedicareBefore));
     const employeeAdditionalMedicare = money(additionalMedicareWagesThisPeriod * p.fica.additional_medicare_rate);
 
-    // --- FUTA (employer only) ---
+    // --- FUTA (employer only, same wage base as FICA) ---
     const futaNetRate = p.futa.net_rate_by_state[employee.state] ?? p.futa.net_rate_default;
-    const employerFuta = ceilingContribution(ytdFutaBefore, grossPay, p.futa.wage_base_annual, futaNetRate);
+    const employerFuta = ceilingContribution(ytdFutaBefore, ficaAndFutaWages, p.futa.wage_base_annual, futaNetRate);
 
     // --- Federal income tax withholding (Worksheet 1A, annualized percentage method) ---
     const step3AnnualCredits = employee.federal_step3_annual_credits ?? 0;
@@ -414,7 +466,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     const step4bAnnualDeductions = employee.federal_step4b_annual_deductions ?? 0;
     const step4cExtraPerPeriod = employee.federal_step4c_extra_per_period ?? 0;
 
-    const annualizedWage = money(grossPay * periodsPerYear);
+    const annualizedWage = money(federalTaxableWages * periodsPerYear);
     const adjustedAnnualWageBeforeStandardDeduction = money(annualizedWage + step4aAnnualOtherIncome);
     const step2NotCheckedDeduction = employee.federal_step2_checkbox
       ? 0
@@ -436,9 +488,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     // --- California state income tax withholding (Method B, exact calculation) ---
     const lowIncomeExemption = p.california.low_income_exemption[employee.pay_frequency][employee.ca_filing_status];
     let caIncomeTax = 0;
-    if (grossPay > lowIncomeExemption) {
+    if (federalTaxableWages > lowIncomeExemption) {
       const estimatedDeduction = money(caEstimatedDeductionAllowances * p.california.estimated_deduction_per_allowance[employee.pay_frequency]);
-      const wagesSubjectToWithholding = Math.max(0, money(grossPay - estimatedDeduction));
+      const wagesSubjectToWithholding = Math.max(0, money(federalTaxableWages - estimatedDeduction));
       const standardDeduction = p.california.standard_deduction[employee.pay_frequency][employee.ca_filing_status];
       const caTaxableIncome = Math.max(0, money(wagesSubjectToWithholding - standardDeduction));
       const rateTableKey: 'SINGLE' | 'MARRIED' | 'HEAD_OF_HOUSEHOLD' =
@@ -452,19 +504,23 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       caIncomeTax = Math.max(0, money(computedTax - exemptionCredit));
     }
 
-    // --- California SDI (employee only, uncapped) ---
-    const caSdi = money(grossPay * p.california.sdi_rate);
+    // --- California SDI (employee only, uncapped, same wage base as FICA) ---
+    const caSdi = money(ficaAndFutaWages * p.california.sdi_rate);
 
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare + caIncomeTax + caSdi
     );
-    const netPay = money(grossPay - employeeTaxTotal);
+    const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
 
     return {
       employee_id: employeeId,
       name: employee.name ? String(employee.name).trim() : undefined,
       gross_pay: grossPay,
+      pretax_401k_deferral: pretax401k,
+      pretax_section125_deduction: pretaxSection125,
+      federal_taxable_wages: federalTaxableWages,
+      fica_and_futa_wages: ficaAndFutaWages,
       federal_income_tax: federalIncomeTax,
       employee_social_security: employeeSocialSecurity,
       employer_social_security: employerSocialSecurity,
@@ -476,9 +532,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ca_sdi: caSdi,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
-      ytd_ss_wages_after: money(ytdSsBefore + Math.min(grossPay, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
+      ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
       ytd_medicare_wages_after: medicareYtdAfter,
-      ytd_futa_wages_after: money(ytdFutaBefore + Math.min(grossPay, Math.max(0, p.futa.wage_base_annual - ytdFutaBefore)))
+      ytd_futa_wages_after: money(ytdFutaBefore + Math.min(ficaAndFutaWages, Math.max(0, p.futa.wage_base_annual - ytdFutaBefore)))
     };
   });
 
@@ -490,6 +546,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     futa: sum(employees.map(e => e.employer_futa)),
     ca_income_tax: sum(employees.map(e => e.ca_income_tax)),
     ca_sdi: sum(employees.map(e => e.ca_sdi)),
+    pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
   };
@@ -502,7 +559,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'FICA_PAYABLE', amount: money(totals.fica_employee + totals.fica_employer) },
     { side: 'CREDIT', account_role: 'FUTA_PAYABLE', amount: totals.futa },
     { side: 'CREDIT', account_role: 'CA_INCOME_TAX_PAYABLE', amount: totals.ca_income_tax },
-    { side: 'CREDIT', account_role: 'CA_SDI_PAYABLE', amount: totals.ca_sdi }
+    { side: 'CREDIT', account_role: 'CA_SDI_PAYABLE', amount: totals.ca_sdi },
+    { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
   const journalDebits = sum(journal.filter(l => l.side === 'DEBIT').map(l => l.amount));
@@ -625,6 +683,37 @@ export function payrollEngineSelfTestUS() {
   const expectedAddlMedicare3 = money(15000 * 0.009);
   // SS already at/above ceiling (200000 >= 184500) -> $0 employee/employer SS this period.
 
+  // Case 4: pre-tax 401(k) + Section 125 split. Gross 5000, 401k 300 (reduces
+  // income-tax wages only), Section 125 200 (reduces income-tax AND FICA/SDI wages).
+  // federalTaxableWages = 5000-300-200 = 4500; ficaAndFutaWages = 5000-200 = 4800.
+  const pretaxCase = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [
+      {
+        employee_id: 'E004',
+        gross_pay: 5000,
+        pretax_401k_deferral: 300,
+        pretax_section125_deduction: 200,
+        pay_frequency: 'MONTHLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'CA',
+        ca_filing_status: 'SINGLE',
+        ca_regular_allowances: 0
+      }
+    ]
+  });
+  const s4 = pretaxCase.employees[0];
+  const expectedFicaWages4 = 4800; // 5000 - 200 (401k stays FICA-taxable, Section 125 doesn't)
+  const expectedFederalTaxableWages4 = 4500; // 5000 - 300 - 200
+  const expectedSs4 = money(4800 * 0.062);
+  const expectedMedicare4 = money(4800 * 0.0145);
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -641,13 +730,24 @@ export function payrollEngineSelfTestUS() {
     s3.employee_social_security === 0 &&
     s3.employer_social_security === 0 &&
     s3.employee_additional_medicare === expectedAddlMedicare3 &&
-    addlMedicareCase.controls.journal_balanced;
+    addlMedicareCase.controls.journal_balanced &&
+    s4.fica_and_futa_wages === expectedFicaWages4 &&
+    s4.federal_taxable_wages === expectedFederalTaxableWages4 &&
+    s4.employee_social_security === expectedSs4 &&
+    s4.employer_social_security === expectedSs4 &&
+    s4.employee_medicare === expectedMedicare4 &&
+    pretaxCase.controls.journal_balanced;
 
   return {
     ok,
     sample,
     ssCase,
     addlMedicareCase,
-    expected: { expectedSs, expectedMedicare, expectedFuta, expectedFederal, expectedCa, expectedSdi, expectedSsRoom, expectedAdditionalMedicare, expectedAddlMedicare3 }
+    pretaxCase,
+    expected: {
+      expectedSs, expectedMedicare, expectedFuta, expectedFederal, expectedCa, expectedSdi,
+      expectedSsRoom, expectedAdditionalMedicare, expectedAddlMedicare3,
+      expectedFicaWages4, expectedFederalTaxableWages4, expectedSs4, expectedMedicare4
+    }
   };
 }
