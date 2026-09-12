@@ -1,4 +1,4 @@
-// Germany (DE) payroll rule pack — v3.
+// Germany (DE) payroll rule pack — v4.
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -8,9 +8,15 @@
 //   2. the social-insurance rates and contribution ceilings against the
 //      current-year Sozialversicherungs-Rechengrößenverordnung, and
 //   3. the Solidaritätszuschlag Freigrenze against the current-year SolZG.
-// These figures change most years. This file uses 2025 published values as
-// the most recent available; they are NOT guaranteed correct for the year
-// in which a real payroll run would execute.
+// These figures change most years. AI research is not a substitute for that
+// review — it lowers the odds of an outdated number, not to zero.
+//
+// v4 change log: updated all rates/thresholds from 2025 to 2026 figures
+// (income tax brackets and Grundfreibetrag from the current §32a EStG text
+// at gesetze-im-internet.de; contribution ceilings, SV rates and the Soli
+// Freigrenze from GKV-Spitzenverband/Deutsche Rentenversicherung sources
+// current as of September 2026 — see the evidence list below). No formula
+// or scope changes from v3.
 //
 // v3 change log (from v2, driven by real payslip review):
 //   - Fixed a real bug in the Soli calculation: v2 compared a mixed
@@ -164,23 +170,23 @@ export type DePayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_DE = {
-  id: 'DE-2025-GRUNDTARIF-KLASSE-I-DRAFT-V3',
+  id: 'DE-2026-GRUNDTARIF-KLASSE-I-DRAFT-V4',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'EUR',
   income_tax: {
-    grundfreibetrag: 12096,
-    zone2_upper: 17443,
-    zone2_a: 932.3,
+    grundfreibetrag: 12348,
+    zone2_upper: 17799,
+    zone2_a: 914.51,
     zone2_b: 1400,
-    zone3_upper: 68480,
-    zone3_a: 176.64,
+    zone3_upper: 69878,
+    zone3_a: 173.10,
     zone3_b: 2397,
-    zone3_c: 1015.13,
+    zone3_c: 1034.87,
     zone4_upper: 277825,
     zone4_rate: 0.42,
-    zone4_subtract: 10911.92,
+    zone4_subtract: 11135.63,
     zone5_rate: 0.45,
-    zone5_subtract: 19246.67
+    zone5_subtract: 19470.38
   },
   solidarity_surcharge: {
     rate: 0.055,
@@ -188,15 +194,15 @@ export const PAYROLL_RULE_PACK_DE = {
     // Monthly-equivalent Freigrenze for Steuerklasse I, 2025 published value
     // (applied on an annualized basis — see annualSoli). NEEDS VERIFICATION
     // against the current-year SolZG before production use.
-    monthly_freigrenze: 1510.83
+    monthly_freigrenze: 1695.83
   },
   social_insurance: {
     pension_rate_total: 0.186,
-    pension_ceiling_annual: 96600,
+    pension_ceiling_annual: 101400,
     unemployment_rate_total: 0.026,
     health_general_rate_total: 0.146,
-    health_avg_zusatzbeitrag_total: 0.025,
-    health_ceiling_annual: 66150,
+    health_avg_zusatzbeitrag_total: 0.029,
+    health_ceiling_annual: 69750,
     care_rate_total: 0.036,
     care_childless_surcharge_employee: 0.006
   },
@@ -210,7 +216,9 @@ export const PAYROLL_RULE_PACK_DE = {
     { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialgesetzbuch VI (SGB VI) §168', url: 'https://www.gesetze-im-internet.de/sgb_6/__168.html' },
     { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialgesetzbuch III (SGB III) §341', url: 'https://www.gesetze-im-internet.de/sgb_3/__341.html' },
     { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialgesetzbuch V (SGB V) §241 (statutory health insurance rate)', url: 'https://www.gesetze-im-internet.de/sgb_5/__241.html' },
-    { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialgesetzbuch XI (SGB XI) §55 (statutory care insurance rate)', url: 'https://www.gesetze-im-internet.de/sgb_11/__55.html' }
+    { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialgesetzbuch XI (SGB XI) §55 (statutory care insurance rate)', url: 'https://www.gesetze-im-internet.de/sgb_11/__55.html' },
+    { authority: 'Bundesregierung', instrument: '2026 contribution ceilings (Beitragsbemessungsgrenzen): RV/ALV €101,400/yr, KV/PV €69,750/yr', url: 'https://www.bundesregierung.de/breg-de/aktuelles/beitragsgemessungsgrenzen-2386514' },
+    { authority: 'GKV-Spitzenverband', instrument: '2026 Rechengrößen factsheet (SV rates, incl. 2.9% average Zusatzbeitrag)', url: 'https://www.gkv-spitzenverband.de/media/dokumente/presse/zahlen_und_grafiken/20260101_Faktenblatt_Rechengroessen_Beitragsrecht.pdf' }
   ],
   limitations: [
     'Tax class I (single, no children, standard case) only. Tax classes II–VI are rejected, not approximated.',
@@ -220,7 +228,7 @@ export const PAYROLL_RULE_PACK_DE = {
     'One-time payments (Einmalzahlung) are taxed via the §39b(3) EStG Differenzmethode. This does not implement the elective §34 Fünftelregelung used for certain severance/multi-year payments.',
     'Long-term care insurance uses the standard (non-Sachsen) employer/employee split. Sachsen’s different split is not implemented; Sachsen employees are rejected.',
     'The statutory health-insurance employee/employer split uses a published national average additional contribution (Zusatzbeitrag), not the employee’s actual fund rate. (The private-insurance employer subsidy formula does not use the Zusatzbeitrag average at all, per statute — validated against real payslips.)',
-    'Figures are 2025 published values and must be reverified against the current-year BMF Programmablaufplan, Sozialversicherungs-Rechengrößenverordnung and SolZG before this pack is marked VERIFIED_BASIC_RULES.',
+    'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official BMF Programmablaufplan, Sozialversicherungs-Rechengrößenverordnung and SolZG before this pack is marked VERIFIED_BASIC_RULES.',
     'This engine prepares payroll and accounting outputs only. It does not submit tax or social-insurance filings and does not initiate payments.'
   ]
 };
@@ -565,11 +573,11 @@ export function payrollEngineSelfTestDE() {
     pay_period_end: '2026-08-31',
     pay_date: '2026-08-31',
     employees: [
-      { employee_id: 'E003', taxable_gross_pay: 9000, sv_gross_pay: 9000, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: false, ytd_sv_gross_before: 93000, insurance_type: 'STATUTORY' }
+      { employee_id: 'E003', taxable_gross_pay: 9000, sv_gross_pay: 9000, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: false, ytd_sv_gross_before: 97400, insurance_type: 'STATUTORY' }
     ]
   });
   const c1 = pensionCeilingCase.employees[0];
-  const expectedRoomToPensionCeiling = money(96600 - 93000);
+  const expectedRoomToPensionCeiling = money(sv.pension_ceiling_annual - 97400);
   const expectedCeilingPension = money(expectedRoomToPensionCeiling * (sv.pension_rate_total / 2));
 
   // Case 4: health/care ceiling crossed mid-period, plus childless surcharge.
@@ -578,11 +586,11 @@ export function payrollEngineSelfTestDE() {
     pay_period_end: '2026-08-31',
     pay_date: '2026-08-31',
     employees: [
-      { employee_id: 'E004', taxable_gross_pay: 9000, sv_gross_pay: 9000, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: true, ytd_sv_gross_before: 60000, insurance_type: 'STATUTORY' }
+      { employee_id: 'E004', taxable_gross_pay: 9000, sv_gross_pay: 9000, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: true, ytd_sv_gross_before: 65000, insurance_type: 'STATUTORY' }
     ]
   });
   const c2 = healthCeilingCase.employees[0];
-  const expectedRoomToHealthCeiling = money(66150 - 60000);
+  const expectedRoomToHealthCeiling = money(sv.health_ceiling_annual - 65000);
   const expectedCeilingCare = money(
     expectedRoomToHealthCeiling * (sv.care_rate_total / 2) + expectedRoomToHealthCeiling * sv.care_childless_surcharge_employee
   );
@@ -656,10 +664,10 @@ export function payrollEngineSelfTestDE() {
 
   // Case 8: private health insurance, validated exactly against real
   // payslip figures (Dec 2023 Ford payslip: KV-Brutto 4,987.50 -> AG-Zuschuss
-  // KV 364.09; PV -> AG-Zuschuss 84.79, using 2025's 3.6% care rate here so
-  // the expected value is derived from this pack's own rate, not the 2023
-  // one, while confirming the *formula* against the real-world figures in
-  // the PR description).
+  // KV 364.09, which also happens to match this pack's 2026 14.6% general
+  // rate exactly, since that rate hasn't changed since 2023; PV ->
+  // AG-Zuschuss 84.79 at 2023's 3.4% care rate, vs. 2026's 3.6% used below —
+  // see the PR description for the full real-payslip comparison).
   const privateCase = calculateGermanyPayroll({
     pay_period_start: '2026-08-01',
     pay_period_end: '2026-08-31',
@@ -680,8 +688,8 @@ export function payrollEngineSelfTestDE() {
     ]
   });
   const pv = privateCase.employees[0];
-  const expectedPrivateHealthSubsidy = money((4987.5 * sv.health_general_rate_total) / 2); // = 364.09 with 2025's 14.6% rate too
-  const expectedPrivateCareSubsidy = money((4987.5 * sv.care_rate_total) / 2); // = 89.78 at 2025's 3.6%
+  const expectedPrivateHealthSubsidy = money((4987.5 * sv.health_general_rate_total) / 2); // = 364.09, same as the real 2023 figure
+  const expectedPrivateCareSubsidy = money((4987.5 * sv.care_rate_total) / 2); // = 89.78 at 2026's 3.6% (real 2023 figure was 84.79 at 3.4%)
 
   return {
     ok:
