@@ -4,6 +4,8 @@ import { getServiceDeployment } from './service-deployments';
 import { assertDateRangeOpenForCompany } from './close-governance-engine';
 import { calculateGermanyPayroll, payrollEngineSelfTestDE, PAYROLL_RULE_PACK_DE } from './payroll-engine-de';
 import type { DePayrollRunInput, DePayrollRunResult } from './payroll-engine-de';
+import { calculateUsPayroll, payrollEngineSelfTestUS, PAYROLL_RULE_PACK_US } from './payroll-engine-us';
+import type { UsPayrollRunInput, UsPayrollRunResult } from './payroll-engine-us';
 
 export type PayrollEmployeeInput = {
   employee_id: string;
@@ -101,12 +103,12 @@ export const PAYROLL_RULE_PACKS = {
       'This engine prepares payroll and accounting outputs only. It does not submit tax or pension declarations and does not initiate payments.'
     ]
   },
-  US: { id: 'US-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
-  // Real calculation logic exists (see payroll-engine-de.ts) but is DRAFT_NEEDS_LEGAL_REVIEW:
-  // preparePayrollRun below refuses to run real payroll on this pack until its
-  // status is changed to VERIFIED_BASIC_RULES by someone who has checked the
-  // figures against the current-year German statutory sources.
+  // Real calculation logic exists (see payroll-engine-de.ts / payroll-engine-us.ts)
+  // but both are DRAFT_NEEDS_LEGAL_REVIEW: preparePayrollRun below refuses to
+  // run real payroll on either pack until someone with current local
+  // payroll/tax expertise has checked the figures and flips the status.
   DE: PAYROLL_RULE_PACK_DE,
+  US: PAYROLL_RULE_PACK_US,
   GB: { id: 'GB-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
   EE: { id: 'EE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
   CM: { id: 'CM-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' }
@@ -258,7 +260,7 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
   };
 }
 
-function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput) {
+function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput) {
   return JSON.stringify({
     pay_period_start: input.pay_period_start,
     pay_period_end: input.pay_period_end,
@@ -279,7 +281,7 @@ function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput) {
   });
 }
 
-export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput) {
+export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   if (!['payroll', 'bookkeeping-payroll'].includes(String(deployment.service))) {
     const error = new Error('payroll engine is not enabled for this service');
@@ -312,8 +314,12 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
     throw error;
   }
 
-  const result: PayrollRunResult | DePayrollRunResult =
-    countryCode === 'DE' ? calculateGermanyPayroll(input as DePayrollRunInput) : calculateGeorgiaPayroll(input as PayrollRunInput);
+  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult =
+    countryCode === 'DE'
+      ? calculateGermanyPayroll(input as DePayrollRunInput)
+      : countryCode === 'US'
+        ? calculateUsPayroll(input as UsPayrollRunInput)
+        : calculateGeorgiaPayroll(input as PayrollRunInput);
   if (!result.controls.journal_balanced) {
     const error = new Error('payroll journal failed balance control');
     (error as Error & { status?: number }).status = 500;
@@ -413,5 +419,6 @@ export function payrollEngineSelfTest() {
 export function payrollEngineSelfTestAll() {
   const ge = payrollEngineSelfTest();
   const de = payrollEngineSelfTestDE();
-  return { ok: ge.ok && de.ok, georgia: ge, germany: de };
+  const us = payrollEngineSelfTestUS();
+  return { ok: ge.ok && de.ok && us.ok, georgia: ge, germany: de, unitedStates: us };
 }
