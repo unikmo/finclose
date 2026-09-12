@@ -7,7 +7,7 @@ import { waitForSessionRevocation } from './firebase-revocation-verification';
 import { FINCLOSE_RELEASE_VERSION, PILOT_CERTIFICATION_VERSION } from './release-version';
 import { firebaseClientConfig, runtimeMode, uploadQuarantineMode } from './runtime-mode';
 import { requireOrganizationRole, type OrganizationRole } from './tenancy';
-import { payrollEngineSelfTest } from './payroll-engine';
+import { payrollEngineSelfTestAll } from './payroll-engine';
 import { bookkeepingEngineSelfTest } from './bookkeeping-engine';
 import { financeCycleSelfTest } from './finance-cycle-engine';
 import { closeGovernanceSelfTest } from './close-governance-engine';
@@ -314,12 +314,12 @@ async function uploadReviewConcurrencyGate(runId: string) {
 }
 
 function engineGate() {
-  const payroll = payrollEngineSelfTest();
+  const payroll = payrollEngineSelfTestAll();
   const bookkeeping = bookkeepingEngineSelfTest();
   const finance = financeCycleSelfTest();
   const close = closeGovernanceSelfTest();
   const ok = payroll.ok && bookkeeping.ok && finance.ok && close.ok;
-  return gate('deterministic_financial_engines', 'Deterministic payroll/bookkeeping/close regression suite', ok ? 'PASS' : 'FAIL', ok ? 'All deterministic engine self-tests passed.' : 'One or more deterministic financial engine self-tests failed.', true, { payroll: payroll.ok, bookkeeping: bookkeeping.ok, finance_cycle: finance.ok, close_governance: close.ok });
+  return gate('deterministic_financial_engines', 'Deterministic payroll/bookkeeping/close regression suite', ok ? 'PASS' : 'FAIL', ok ? 'All deterministic engine self-tests passed.' : 'One or more deterministic financial engine self-tests failed.', true, { payroll_georgia: payroll.georgia.ok, payroll_germany_draft: payroll.germany.ok, bookkeeping: bookkeeping.ok, finance_cycle: finance.ok, close_governance: close.ok });
 }
 
 function manualGates() {
