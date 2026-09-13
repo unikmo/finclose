@@ -714,6 +714,176 @@ export function payrollEngineSelfTestUS() {
   const expectedSs4 = money(4800 * 0.062);
   const expectedMedicare4 = money(4800 * 0.0145);
 
+  // Case 5: Married Filing Jointly, weekly, CA MARRIED_2_OR_MORE with 2 allowances.
+  // Federal: annualized 1500*52=78000, minus MFJ step2-not-checked 12900 -> 65100.
+  // MFJ bracket [44100,2480,12%]: 2480+0.12*(65100-44100)=5000.00 annual -> /52=96.1538->96.15.
+  // CA: weekly low-income exemption (married 2+) 727 < 1500, taxable. Standard deduction
+  // (weekly) 219 -> 1500-219=1281. MARRIED bracket [1010,17.54,4.4%]: 17.54+0.044*(1281-1010)=29.46.
+  // Credit: 2 * 3.24 = 6.48 -> 29.46-6.48=22.98.
+  const mfjCase = calculateUsPayroll({
+    pay_period_start: '2026-08-03',
+    pay_period_end: '2026-08-09',
+    pay_date: '2026-08-09',
+    employees: [
+      {
+        employee_id: 'E005',
+        gross_pay: 1500,
+        pay_frequency: 'WEEKLY',
+        federal_filing_status: 'MFJ',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'CA',
+        ca_filing_status: 'MARRIED_2_OR_MORE',
+        ca_regular_allowances: 2
+      }
+    ]
+  });
+  const s5 = mfjCase.employees[0];
+  const expectedFederal5 = 96.15;
+  const expectedCa5 = 22.98;
+
+  // Case 6: Head of Household, semimonthly, CA HEAD_OF_HOUSEHOLD with 1 allowance.
+  // Federal: annualized 3000*24=72000, minus HOH step2-not-checked "other" 8600 -> 63400.
+  // HOH bracket [33250,1770,12%]: 1770+0.12*(63400-33250)=5388.00 annual -> /24=224.50.
+  // CA: semimonthly low-income exemption (HOH) 1575 < 3000, taxable. Standard deduction
+  // (semimonthly) 476 -> 3000-476=2524. HEAD_OF_HOUSEHOLD bracket [2189,37.99,4.4%]:
+  // 37.99+0.044*(2524-2189)=52.73. Credit: 1 * 7.01 -> 52.73-7.01=45.72.
+  const hohCase = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-15',
+    pay_date: '2026-08-15',
+    employees: [
+      {
+        employee_id: 'E006',
+        gross_pay: 3000,
+        pay_frequency: 'SEMIMONTHLY',
+        federal_filing_status: 'HOH',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'CA',
+        ca_filing_status: 'HEAD_OF_HOUSEHOLD',
+        ca_regular_allowances: 1
+      }
+    ]
+  });
+  const s6 = hohCase.employees[0];
+  const expectedFederal6 = 224.5;
+  const expectedCa6 = 45.72;
+
+  // Case 7: multi-employee run — verifies totals aggregate linearly across two
+  // employees with different pay frequencies, filing statuses, and CA statuses,
+  // by comparing the combined run's totals against the same two employees run
+  // individually and summed by hand.
+  const multiA = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [
+      {
+        employee_id: 'E007A',
+        gross_pay: 1200,
+        pay_frequency: 'WEEKLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'CA',
+        ca_filing_status: 'SINGLE',
+        ca_regular_allowances: 0
+      }
+    ]
+  });
+  const multiB = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [
+      {
+        employee_id: 'E007B',
+        gross_pay: 2600,
+        pay_frequency: 'BIWEEKLY',
+        federal_filing_status: 'MFJ',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'CA',
+        ca_filing_status: 'MARRIED_0_OR_1',
+        ca_regular_allowances: 1
+      }
+    ]
+  });
+  const multiAB = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [{
+      employee_id: 'E007A',
+      gross_pay: 1200,
+      pay_frequency: 'WEEKLY',
+      federal_filing_status: 'SINGLE_MFS',
+      federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0,
+      ytd_medicare_wages_before: 0,
+      ytd_futa_wages_before: 0,
+      state: 'CA',
+      ca_filing_status: 'SINGLE',
+      ca_regular_allowances: 0
+    }, {
+      employee_id: 'E007B',
+      gross_pay: 2600,
+      pay_frequency: 'BIWEEKLY',
+      federal_filing_status: 'MFJ',
+      federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0,
+      ytd_medicare_wages_before: 0,
+      ytd_futa_wages_before: 0,
+      state: 'CA',
+      ca_filing_status: 'MARRIED_0_OR_1',
+      ca_regular_allowances: 1
+    }]
+  });
+  const expectedCombinedGross = money(multiA.totals.gross_pay + multiB.totals.gross_pay);
+  const expectedCombinedFederal = money(multiA.totals.federal_income_tax + multiB.totals.federal_income_tax);
+  const expectedCombinedCa = money(multiA.totals.ca_income_tax + multiB.totals.ca_income_tax);
+  const expectedCombinedNet = money(multiA.totals.net_pay + multiB.totals.net_pay);
+
+  // Case 8: Worksheet 1A Step 3/4(a)/4(b) fields (credits, other income, extra
+  // deductions) all non-zero, single filer, monthly.
+  // annualized 6000*12=72000, +step4a 2400=74400, -(step4b 3000 + 8600)=62800.
+  // SINGLE_MFS bracket [57900,5800,22%]: 5800+0.22*(62800-57900)=6878.00 annual.
+  // /12=573.17 tentative. Credits 1200/12=100.00 -> 573.17-100.00=473.17.
+  const creditsCase = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [
+      {
+        employee_id: 'E008',
+        gross_pay: 6000,
+        pay_frequency: 'MONTHLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        federal_step3_annual_credits: 1200,
+        federal_step4a_annual_other_income: 2400,
+        federal_step4b_annual_deductions: 3000,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'CA',
+        ca_filing_status: 'SINGLE',
+        ca_regular_allowances: 0
+      }
+    ]
+  });
+  const s8 = creditsCase.employees[0];
+  const expectedFederal8 = 473.17;
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -736,7 +906,21 @@ export function payrollEngineSelfTestUS() {
     s4.employee_social_security === expectedSs4 &&
     s4.employer_social_security === expectedSs4 &&
     s4.employee_medicare === expectedMedicare4 &&
-    pretaxCase.controls.journal_balanced;
+    pretaxCase.controls.journal_balanced &&
+    s5.federal_income_tax === expectedFederal5 &&
+    s5.ca_income_tax === expectedCa5 &&
+    mfjCase.controls.journal_balanced &&
+    s6.federal_income_tax === expectedFederal6 &&
+    s6.ca_income_tax === expectedCa6 &&
+    hohCase.controls.journal_balanced &&
+    multiAB.controls.employee_count === 2 &&
+    multiAB.controls.journal_balanced &&
+    multiAB.totals.gross_pay === expectedCombinedGross &&
+    multiAB.totals.federal_income_tax === expectedCombinedFederal &&
+    multiAB.totals.ca_income_tax === expectedCombinedCa &&
+    multiAB.totals.net_pay === expectedCombinedNet &&
+    s8.federal_income_tax === expectedFederal8 &&
+    creditsCase.controls.journal_balanced;
 
   return {
     ok,
@@ -744,9 +928,16 @@ export function payrollEngineSelfTestUS() {
     ssCase,
     addlMedicareCase,
     pretaxCase,
+    mfjCase,
+    hohCase,
+    multiAB,
+    creditsCase,
     expected: {
       expectedSs, expectedMedicare, expectedFuta, expectedFederal, expectedCa, expectedSdi,
       expectedSsRoom, expectedAdditionalMedicare, expectedAddlMedicare3,
+      expectedFederal5, expectedCa5, expectedFederal6, expectedCa6,
+      expectedCombinedGross, expectedCombinedFederal, expectedCombinedCa, expectedCombinedNet,
+      expectedFederal8,
       expectedFicaWages4, expectedFederalTaxableWages4, expectedSs4, expectedMedicare4
     }
   };
