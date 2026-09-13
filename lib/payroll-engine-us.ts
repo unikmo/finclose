@@ -1,4 +1,4 @@
-// United States (US) payroll rule pack — v2: federal + California.
+// United States (US) payroll rule pack — v3: federal + California + New Jersey.
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -10,11 +10,33 @@
 //   3. the FUTA net rate (including any state credit-reduction) against the
 //      current-year Department of Labor credit-reduction-state list,
 //   4. the California withholding schedule (EDD DE 44 Method B) and SDI rate
-//      against the current-year EDD publication.
+//      against the current-year EDD publication,
+//   5. the New Jersey withholding rate tables (NJ-WT) and the UI/Workforce
+//      Development/SWF, TDI, and FLI employee rates against the current-year
+//      NJ Division of Taxation and NJDOL publications.
 // These figures change every year, several of them (SS wage base, CA SDI
-// rate, FUTA credit reductions) finalized only late in the prior year or
-// even during the current year. This file uses figures sourced via AI web
-// research (not a professional review) as of September 2026.
+// rate, FUTA credit reductions, NJ's UI/TDI/FLI rates) finalized only late
+// in the prior year or even during the current year. This file uses figures
+// sourced via AI web research (not a professional review) as of September
+// 2026.
+//
+// v3 change log (from v2): adds New Jersey as a second supported state.
+// Scoped narrowly and deliberately behind CA in market priority — the
+// NY-Newark-Jersey City metro area is the single largest concentration of
+// small businesses of any US metro, and NJ has no jurisdiction-lookup
+// complexity (unlike the NY and MD builds planned next: NY layers NYC and
+// Yonkers local taxes on top of state tax, MD requires a 24-county rate
+// lookup by employee residence). NJ instead layers FOUR separate withholding
+// lines on top of federal: its own state income tax (NJ-W4 Rate Tables A/B,
+// not the federal W-4 shape — NJ never adopted the federal form), plus three
+// employee-paid statutory contributions with their own rates and wage bases
+// (UI/Workforce Development/Supplemental Workforce Fund, Temporary
+// Disability Insurance, Family Leave Insurance). Pre-tax deduction handling
+// (401(k)/Section 125) was NOT extended to NJ this pass — NJ's treatment of
+// those wage bases wasn't independently verified, so NJ employees with
+// either pretax field set are rejected rather than silently computed on the
+// wrong wage base. See limitations for what else is explicitly out of scope
+// (Rate Tables C/D/E, the Newark employer payroll tax, NJ/PA reciprocity).
 //
 // v2 change log (from v1, driven by review against two real-shaped sample
 // payslips — see the PR for details):
@@ -41,10 +63,11 @@
 //     engine's law-following behavior; see the PR for the full comparison).
 //
 // Scope, deliberately narrow (rejected, not approximated):
-//   - Only one state is supported: California. Every other US state
-//     (including the nine with no state income tax, which would otherwise be
-//     "free" additions) is rejected until built and validated individually —
-//     "no income tax" still leaves SUI/SDI/local nuances unverified here.
+//   - Only two states are supported: California and New Jersey. Every other
+//     US state (including the nine with no state income tax, which would
+//     otherwise be "free" additions) is rejected until built and validated
+//     individually — "no income tax" still leaves SUI/SDI/local nuances
+//     unverified here.
 //   - Federal Form W-4 (2020 or later revision) only. Pre-2020 W-4s
 //     (allowances-based) are rejected — the IRS's own "computational bridge"
 //     could approximate them, but that's out of scope for v1.
@@ -83,13 +106,17 @@
 //     simplification.
 //
 // Self-test validated against the exact IRS Pub 15-T 2026 Percentage Method
-// Table figures and EDD 2026 Method B table figures cited in evidence below,
-// not against independent real-world payslips (none were available for this
-// pass, unlike the German pack).
+// Table, EDD 2026 Method B, and NJ-WT rate table figures cited in evidence
+// below. CA is additionally validated against two real-shaped sample
+// payslips (see the v2 change log and the PR history). NJ has not yet been
+// checked against any real payslip — flagged explicitly as a gap, the same
+// way CA's v1 lacked real-payslip validation before its own review pass.
 
 export type UsPayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
 export type UsFederalFilingStatus = 'SINGLE_MFS' | 'MFJ' | 'HOH';
 export type UsCaFilingStatus = 'SINGLE' | 'MARRIED_0_OR_1' | 'MARRIED_2_OR_MORE' | 'HEAD_OF_HOUSEHOLD';
+export type UsState = 'CA' | 'NJ';
+export type NjRateTable = 'A' | 'B';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -107,10 +134,16 @@ export type UsEmployeeInput = {
   ytd_ss_wages_before: number;
   ytd_medicare_wages_before: number;
   ytd_futa_wages_before: number;
-  state: 'CA';
-  ca_filing_status: UsCaFilingStatus;
-  ca_regular_allowances: number;
+  state: UsState;
+  // CA fields — required when state === 'CA'.
+  ca_filing_status?: UsCaFilingStatus;
+  ca_regular_allowances?: number;
   ca_estimated_deduction_allowances?: number;
+  // NJ fields — required when state === 'NJ'.
+  nj_rate_table?: NjRateTable;
+  nj_allowances?: number;
+  ytd_nj_ui_wf_wages_before?: number;
+  ytd_nj_tdi_fli_wages_before?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -131,6 +164,10 @@ export type UsJournalLine = {
     | 'FUTA_PAYABLE'
     | 'CA_INCOME_TAX_PAYABLE'
     | 'CA_SDI_PAYABLE'
+    | 'NJ_INCOME_TAX_PAYABLE'
+    | 'NJ_UI_WF_SWF_PAYABLE'
+    | 'NJ_TDI_PAYABLE'
+    | 'NJ_FLI_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -152,11 +189,17 @@ export type UsEmployeeResult = {
   employer_futa: number;
   ca_income_tax: number;
   ca_sdi: number;
+  nj_income_tax: number;
+  nj_ui_wf_swf: number;
+  nj_tdi: number;
+  nj_fli: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
   ytd_medicare_wages_after: number;
   ytd_futa_wages_after: number;
+  ytd_nj_ui_wf_wages_after: number;
+  ytd_nj_tdi_fli_wages_after: number;
 };
 
 export type UsPayrollRunResult = {
@@ -176,6 +219,10 @@ export type UsPayrollRunResult = {
     futa: number;
     ca_income_tax: number;
     ca_sdi: number;
+    nj_income_tax: number;
+    nj_ui_wf_swf: number;
+    nj_tdi: number;
+    nj_fli: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -191,7 +238,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-CA-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V2',
+  id: 'US-CA-NJ-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V3',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -293,6 +340,48 @@ export const PAYROLL_RULE_PACK_US = {
       }
     } as Record<UsPayFrequency, Record<'SINGLE' | 'MARRIED' | 'HEAD_OF_HOUSEHOLD', Array<[number, number, number]>>>
   },
+  new_jersey: {
+    // Employee-paid statutory deductions, 2026 rates (NJDOL benefit-rate
+    // announcement, Dec 2025). Unemployment Insurance and Workforce/
+    // Supplemental Workforce Fund share one combined rate and wage base;
+    // Temporary Disability Insurance and Family Leave Insurance share a
+    // separate, higher wage base.
+    ui_wf_swf_rate: 0.00425,
+    ui_wf_swf_wage_base_annual: 44800,
+    tdi_rate: 0.0019,
+    fli_rate: 0.0023,
+    tdi_fli_wage_base_annual: 171100,
+    // NJ-W4 Withholding Allowance Value Table (per payroll period), unchanged
+    // since the NJ-WT percentage-method tables took effect Oct 1, 2020 — NJ's
+    // brackets and allowance values are set by statute, not annually
+    // inflation-indexed like federal/CA, so this remains the current figure.
+    allowance_value_per_period: { WEEKLY: 19.2, BIWEEKLY: 38.4, SEMIMONTHLY: 41.6, MONTHLY: 83.3 } as Record<UsPayFrequency, number>,
+    // NJ-WT Rate Tables A and B (percentage method), by payroll period.
+    // Brackets: [over, base, rate]. Rate A: NJ-W4 filing status Single or
+    // Married/CU Partner Separate (box 1 or 3). Rate B: Married/CU Couple
+    // Joint, Head of Household, or Qualifying Widow(er) (box 2, 4, or 5)
+    // when the employee has not elected a different table on line 3.
+    // Rate Tables C, D, and E (elective, chosen via the NJ-W4 wage chart for
+    // dual-income households) are NOT implemented — see limitations.
+    rate_tables: {
+      WEEKLY: {
+        A: [[0, 0, 0.015], [385, 5.77, 0.02], [673, 11.54, 0.039], [769, 15.29, 0.061], [1442, 56.35, 0.07], [9615, 628.46, 0.099], [19231, 1580.38, 0.118]],
+        B: [[0, 0, 0.015], [385, 5.77, 0.02], [962, 17.31, 0.027], [1346, 27.69, 0.039], [1538, 35.19, 0.061], [2885, 117.31, 0.07], [9615, 588.46, 0.099], [19231, 1540.38, 0.118]]
+      },
+      BIWEEKLY: {
+        A: [[0, 0, 0.015], [769, 12.0, 0.02], [1346, 23.0, 0.039], [1538, 31.0, 0.061], [2885, 113.0, 0.07], [19231, 1257.0, 0.099], [38462, 3161.0, 0.118]],
+        B: [[0, 0, 0.015], [769, 12.0, 0.02], [1923, 35.0, 0.027], [2692, 55.0, 0.039], [3077, 70.0, 0.061], [5769, 235.0, 0.07], [19231, 1177.0, 0.099], [38462, 3081.0, 0.118]]
+      },
+      SEMIMONTHLY: {
+        A: [[0, 0, 0.015], [833, 13.0, 0.02], [1458, 25.0, 0.039], [1667, 33.0, 0.061], [3125, 122.0, 0.07], [20833, 1362.0, 0.099], [41667, 3424.0, 0.118]],
+        B: [[0, 0, 0.015], [833, 12.5, 0.02], [2083, 37.5, 0.027], [2917, 59.99, 0.039], [3333, 76.25, 0.061], [6250, 254.19, 0.07], [20833, 1275.0, 0.099], [41667, 3338.0, 0.118]]
+      },
+      MONTHLY: {
+        A: [[0, 0, 0.015], [1667, 25.0, 0.02], [2917, 50.0, 0.039], [3333, 66.0, 0.061], [6250, 244.0, 0.07], [41667, 2723.0, 0.099], [83333, 6848.0, 0.118]],
+        B: [[0, 0, 0.015], [1667, 25.0, 0.02], [4167, 75.0, 0.027], [5833, 120.0, 0.039], [6667, 153.0, 0.061], [12500, 508.0, 0.07], [41667, 2550.0, 0.099], [83333, 6675.0, 0.118]]
+      }
+    } as Record<UsPayFrequency, Record<NjRateTable, Array<[number, number, number]>>>
+  },
   evidence: [
     { authority: 'Internal Revenue Service', instrument: 'Publication 15-T (2026), Federal Income Tax Withholding Methods, Section 1 — Percentage Method Tables for Automated Payroll Systems', url: 'https://www.irs.gov/pub/irs-pdf/p15t.pdf' },
     { authority: 'Internal Revenue Service', instrument: 'Publication 926 / SSA 2026 wage base and Additional Medicare Tax rules (IRC 3102(f))', url: 'https://www.irs.gov/pub/irs-pdf/p926.pdf' },
@@ -301,19 +390,25 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'California Employment Development Department (EDD)', instrument: '2026 California State Disability Insurance (SDI) employee contribution rate', url: 'https://edd.ca.gov' },
     { authority: 'Internal Revenue Code', instrument: '§3121(a)(5)(D) — traditional 401(k)/403(b) elective deferrals remain wages for FICA purposes despite being excluded from income tax wages', url: 'https://www.irs.gov/publications/p15b' },
     { authority: 'Internal Revenue Code', instrument: '§125 — cafeteria-plan (Section 125) benefits properly elected are excluded from federal income tax wages, FICA wages, and FUTA wages', url: 'https://www.irs.gov/publications/p15b' },
-    { authority: 'California Employment Development Department (EDD)', instrument: 'DE 231 series — California\'s wage-exclusion treatment (Subject Wages vs. PIT Wages) for 401(k) deferrals and cafeteria-plan benefits generally follows the federal treatment', url: 'https://edd.ca.gov' }
+    { authority: 'California Employment Development Department (EDD)', instrument: 'DE 231 series — California\'s wage-exclusion treatment (Subject Wages vs. PIT Wages) for 401(k) deferrals and cafeteria-plan benefits generally follows the federal treatment', url: 'https://edd.ca.gov' },
+    { authority: 'New Jersey Division of Taxation', instrument: 'NJ-WT — New Jersey Income Tax Withholding Instructions and Rate Tables (percentage method, effective Oct 1, 2020, still current)', url: 'https://www.nj.gov/treasury/taxation/pdf/current/njwt.pdf' },
+    { authority: 'New Jersey Department of Labor and Workforce Development', instrument: '2026 UI/Workforce Development/Supplemental Workforce Fund, Temporary Disability Insurance, and Family Leave Insurance employee rates and wage bases', url: 'https://www.nj.gov/labor/lwdhome/press/2025/20251229_newbenefitrates2026.shtml' }
   ],
   limitations: [
-    'Only California is supported as a state. Every other state, including the nine with no state income tax, is rejected pending its own build and validation.',
-    'Only 2020-or-later Form W-4 revisions are supported (Steps 1-4). Pre-2020 allowances-based W-4s are rejected, not approximated via the IRS computational bridge.',
+    'Only California and New Jersey are supported as states. Every other state, including New York and Maryland (both explicitly planned next), is rejected pending its own build and validation.',
+    'Only 2020-or-later Form W-4 revisions are supported (Steps 1-4) for federal withholding. Pre-2020 allowances-based W-4s are rejected, not approximated via the IRS computational bridge.',
     'Only weekly, biweekly, semimonthly, and monthly pay frequencies are supported.',
-    'State Unemployment Insurance (SUI) is not calculated — it uses an employer-specific experience rate assigned annually by the EDD, which this engine has no statutory default for. Callers must compute and post SUI separately.',
+    'State Unemployment Insurance (SUI) is not calculated for either state — both California (EDD) and New Jersey (NJDOL) assign each employer an individual experience rate, which this engine has no statutory default for. Callers must compute and post employer-side SUI/UI separately. (New Jersey\'s EMPLOYEE-side UI/Workforce Development contribution, which does have a flat statutory rate, IS calculated — see nj_ui_wf_swf below.)',
     'California Employment Training Tax (ETT) is not calculated.',
-    'Only two pre-tax deduction categories are modeled: traditional 401(k)/403(b) deferrals (excluded from federal/CA income tax wages only, still FICA/FUTA-taxable) and Section 125 cafeteria-plan deductions (excluded from income tax wages, FICA wages, FUTA wages, and CA SDI wages). Roth deferrals, HSA contributions, and IRS annual contribution-limit enforcement are not modeled — the caller must not pass amounts exceeding the employee\'s actual limit.',
-    'Supplemental-wage flat-rate withholding methods (22% optional / 37% mandatory) are not implemented; all pay is run through the regular annualized percentage method.',
-    'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official IRS Pub 15-T and EDD Method B publications before this pack is marked VERIFIED_BASIC_RULES.',
-    'The FUTA net rate (including the California credit reduction) is finalized by the Department of Labor late in the calendar year; the 1.8% California figure used here is the best available 2026 estimate at the time of writing and must be reconfirmed once the year is final.',
-    'This engine prepares payroll and accounting outputs only. It does not submit tax filings (e.g. Form 940/941/DE 9) and does not initiate payments.'
+    'New Jersey: only NJ-W4 Rate Tables A and B are implemented (the two most common cases — see the file for which NJ-W4 filing-status boxes map to each). Rate Tables C, D, and E, which an employee may elect via the NJ-W4 wage chart in dual-income or multi-job households, are not implemented and are rejected if requested.',
+    'New Jersey: the Newark payroll tax (an employer-paid 1% tax on total payroll for businesses with 50+ employees working in Newark) is NOT calculated — directly relevant to this pack\'s ~50-employee target segment if any client has a Newark work location, and flagged here rather than silently ignored.',
+    'New Jersey: the NJ/PA reciprocal agreement (no NJ withholding for PA-resident employees who file Form NJ-165) is not modeled; all NJ employees are withheld as NJ-taxable.',
+    'New Jersey: pretax_401k_deferral and pretax_section125_deduction are NOT applied to NJ state income tax, UI/WF/SWF, TDI, or FLI wages — NJ employees with either pretax field non-zero are rejected rather than silently taxed on the wrong base, since NJ\'s treatment of these wage bases was not independently verified this pass (unlike the federal/CA treatment, which was).',
+    'Only two pre-tax deduction categories are modeled for CA: traditional 401(k)/403(b) deferrals (excluded from federal/CA income tax wages only, still FICA/FUTA-taxable) and Section 125 cafeteria-plan deductions (excluded from income tax wages, FICA wages, FUTA wages, and CA SDI wages). Roth deferrals, HSA contributions, and IRS annual contribution-limit enforcement are not modeled — the caller must not pass amounts exceeding the employee\'s actual limit.',
+    'Supplemental-wage flat-rate withholding methods (22% optional / 37% mandatory federal; NJ\'s own supplemental-wage combining rule) are not implemented; all pay is run through the regular annualized/percentage method.',
+    'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official IRS Pub 15-T, EDD Method B, and NJ-WT publications before this pack is marked VERIFIED_BASIC_RULES.',
+    'The FUTA net rate (including the California credit reduction) is finalized by the Department of Labor late in the calendar year; the 1.8% California figure used here is the best available 2026 estimate at the time of writing and must be reconfirmed once the year is final. New Jersey is not currently a FUTA credit-reduction state and uses the standard 0.6% net rate.',
+    'This engine prepares payroll and accounting outputs only. It does not submit tax filings (e.g. Form 940/941/DE 9, NJ-927) and does not initiate payments.'
   ]
 };
 
@@ -423,26 +518,46 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    if (employee.state !== 'CA') {
-      const error = new Error(`state for ${employeeId} is not supported — only CA is implemented in this rule pack`);
+    if (employee.state !== 'CA' && employee.state !== 'NJ') {
+      const error = new Error(`state for ${employeeId} is not supported — only CA and NJ are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
       throw error;
     }
-    if (!['SINGLE', 'MARRIED_0_OR_1', 'MARRIED_2_OR_MORE', 'HEAD_OF_HOUSEHOLD'].includes(employee.ca_filing_status)) {
-      const error = new Error(`ca_filing_status for ${employeeId} must be SINGLE, MARRIED_0_OR_1, MARRIED_2_OR_MORE, or HEAD_OF_HOUSEHOLD`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
+    let caEstimatedDeductionAllowances = 0;
+    if (employee.state === 'CA') {
+      if (!['SINGLE', 'MARRIED_0_OR_1', 'MARRIED_2_OR_MORE', 'HEAD_OF_HOUSEHOLD'].includes(employee.ca_filing_status as string)) {
+        const error = new Error(`ca_filing_status for ${employeeId} must be SINGLE, MARRIED_0_OR_1, MARRIED_2_OR_MORE, or HEAD_OF_HOUSEHOLD`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.ca_regular_allowances) || (employee.ca_regular_allowances as number) < 0) {
+        const error = new Error(`ca_regular_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      caEstimatedDeductionAllowances = employee.ca_estimated_deduction_allowances ?? 0;
+      if (!Number.isInteger(caEstimatedDeductionAllowances) || caEstimatedDeductionAllowances < 0) {
+        const error = new Error(`ca_estimated_deduction_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
     }
-    if (!Number.isInteger(employee.ca_regular_allowances) || employee.ca_regular_allowances < 0) {
-      const error = new Error(`ca_regular_allowances for ${employeeId} must be a non-negative integer`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
-    }
-    const caEstimatedDeductionAllowances = employee.ca_estimated_deduction_allowances ?? 0;
-    if (!Number.isInteger(caEstimatedDeductionAllowances) || caEstimatedDeductionAllowances < 0) {
-      const error = new Error(`ca_estimated_deduction_allowances for ${employeeId} must be a non-negative integer`);
-      (error as Error & { status?: number }).status = 400;
-      throw error;
+    if (employee.state === 'NJ') {
+      if (pretax401k > 0 || pretaxSection125 > 0) {
+        const error = new Error(`pretax_401k_deferral and pretax_section125_deduction are not supported for NJ employees (${employeeId}) in this rule pack — see limitations`);
+        (error as Error & { status?: number }).status = 409;
+        throw error;
+      }
+      if (employee.nj_rate_table !== 'A' && employee.nj_rate_table !== 'B') {
+        const error = new Error(`nj_rate_table for ${employeeId} must be 'A' or 'B' (Rate Tables C, D, E are not implemented)`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.nj_allowances) || (employee.nj_allowances as number) < 0) {
+        const error = new Error(`nj_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
     }
 
     const periodsPerYear = p.federal_income_tax.periods_per_year[employee.pay_frequency];
@@ -486,29 +601,46 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     const federalIncomeTax = money(afterCredits + step4cExtraPerPeriod);
 
     // --- California state income tax withholding (Method B, exact calculation) ---
-    const lowIncomeExemption = p.california.low_income_exemption[employee.pay_frequency][employee.ca_filing_status];
     let caIncomeTax = 0;
-    if (federalTaxableWages > lowIncomeExemption) {
-      const estimatedDeduction = money(caEstimatedDeductionAllowances * p.california.estimated_deduction_per_allowance[employee.pay_frequency]);
-      const wagesSubjectToWithholding = Math.max(0, money(federalTaxableWages - estimatedDeduction));
-      const standardDeduction = p.california.standard_deduction[employee.pay_frequency][employee.ca_filing_status];
-      const caTaxableIncome = Math.max(0, money(wagesSubjectToWithholding - standardDeduction));
-      const rateTableKey: 'SINGLE' | 'MARRIED' | 'HEAD_OF_HOUSEHOLD' =
-        employee.ca_filing_status === 'HEAD_OF_HOUSEHOLD'
-          ? 'HEAD_OF_HOUSEHOLD'
-          : employee.ca_filing_status === 'SINGLE'
-            ? 'SINGLE'
-            : 'MARRIED';
-      const computedTax = bracketLookup(caTaxableIncome, p.california.rate_tables[employee.pay_frequency][rateTableKey]);
-      const exemptionCredit = money(employee.ca_regular_allowances * p.california.exemption_allowance_credit_per_allowance[employee.pay_frequency]);
-      caIncomeTax = Math.max(0, money(computedTax - exemptionCredit));
+    let caSdi = 0;
+    if (employee.state === 'CA') {
+      const caFilingStatus = employee.ca_filing_status as UsCaFilingStatus;
+      const lowIncomeExemption = p.california.low_income_exemption[employee.pay_frequency][caFilingStatus];
+      if (federalTaxableWages > lowIncomeExemption) {
+        const estimatedDeduction = money(caEstimatedDeductionAllowances * p.california.estimated_deduction_per_allowance[employee.pay_frequency]);
+        const wagesSubjectToWithholding = Math.max(0, money(federalTaxableWages - estimatedDeduction));
+        const standardDeduction = p.california.standard_deduction[employee.pay_frequency][caFilingStatus];
+        const caTaxableIncome = Math.max(0, money(wagesSubjectToWithholding - standardDeduction));
+        const rateTableKey: 'SINGLE' | 'MARRIED' | 'HEAD_OF_HOUSEHOLD' =
+          caFilingStatus === 'HEAD_OF_HOUSEHOLD' ? 'HEAD_OF_HOUSEHOLD' : caFilingStatus === 'SINGLE' ? 'SINGLE' : 'MARRIED';
+        const computedTax = bracketLookup(caTaxableIncome, p.california.rate_tables[employee.pay_frequency][rateTableKey]);
+        const exemptionCredit = money((employee.ca_regular_allowances as number) * p.california.exemption_allowance_credit_per_allowance[employee.pay_frequency]);
+        caIncomeTax = Math.max(0, money(computedTax - exemptionCredit));
+      }
+      // California SDI (employee only, uncapped, same wage base as FICA).
+      caSdi = money(ficaAndFutaWages * p.california.sdi_rate);
     }
 
-    // --- California SDI (employee only, uncapped, same wage base as FICA) ---
-    const caSdi = money(ficaAndFutaWages * p.california.sdi_rate);
+    // --- New Jersey state income tax withholding (NJ-WT percentage method, Rate Table A or B) ---
+    const ytdNjUiWfBefore = requireNonNegativeMoney(employee.ytd_nj_ui_wf_wages_before ?? 0, `ytd_nj_ui_wf_wages_before for ${employeeId}`);
+    const ytdNjTdiFliBefore = requireNonNegativeMoney(employee.ytd_nj_tdi_fli_wages_before ?? 0, `ytd_nj_tdi_fli_wages_before for ${employeeId}`);
+    let njIncomeTax = 0;
+    let njUiWfSwf = 0;
+    let njTdi = 0;
+    let njFli = 0;
+    if (employee.state === 'NJ') {
+      const njTable = employee.nj_rate_table as NjRateTable;
+      const allowanceValue = money((employee.nj_allowances as number) * p.new_jersey.allowance_value_per_period[employee.pay_frequency]);
+      const njWagesSubjectToWithholding = Math.max(0, money(grossPay - allowanceValue));
+      njIncomeTax = bracketLookup(njWagesSubjectToWithholding, p.new_jersey.rate_tables[employee.pay_frequency][njTable]);
+      njUiWfSwf = ceilingContribution(ytdNjUiWfBefore, grossPay, p.new_jersey.ui_wf_swf_wage_base_annual, p.new_jersey.ui_wf_swf_rate);
+      njTdi = ceilingContribution(ytdNjTdiFliBefore, grossPay, p.new_jersey.tdi_fli_wage_base_annual, p.new_jersey.tdi_rate);
+      njFli = ceilingContribution(ytdNjTdiFliBefore, grossPay, p.new_jersey.tdi_fli_wage_base_annual, p.new_jersey.fli_rate);
+    }
 
     const employeeTaxTotal = money(
-      federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare + caIncomeTax + caSdi
+      federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
+      caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -530,11 +662,17 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       employer_futa: employerFuta,
       ca_income_tax: caIncomeTax,
       ca_sdi: caSdi,
+      nj_income_tax: njIncomeTax,
+      nj_ui_wf_swf: njUiWfSwf,
+      nj_tdi: njTdi,
+      nj_fli: njFli,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
       ytd_medicare_wages_after: medicareYtdAfter,
-      ytd_futa_wages_after: money(ytdFutaBefore + Math.min(ficaAndFutaWages, Math.max(0, p.futa.wage_base_annual - ytdFutaBefore)))
+      ytd_futa_wages_after: money(ytdFutaBefore + Math.min(ficaAndFutaWages, Math.max(0, p.futa.wage_base_annual - ytdFutaBefore))),
+      ytd_nj_ui_wf_wages_after: money(ytdNjUiWfBefore + Math.min(grossPay, Math.max(0, p.new_jersey.ui_wf_swf_wage_base_annual - ytdNjUiWfBefore))),
+      ytd_nj_tdi_fli_wages_after: money(ytdNjTdiFliBefore + Math.min(grossPay, Math.max(0, p.new_jersey.tdi_fli_wage_base_annual - ytdNjTdiFliBefore)))
     };
   });
 
@@ -546,6 +684,10 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     futa: sum(employees.map(e => e.employer_futa)),
     ca_income_tax: sum(employees.map(e => e.ca_income_tax)),
     ca_sdi: sum(employees.map(e => e.ca_sdi)),
+    nj_income_tax: sum(employees.map(e => e.nj_income_tax)),
+    nj_ui_wf_swf: sum(employees.map(e => e.nj_ui_wf_swf)),
+    nj_tdi: sum(employees.map(e => e.nj_tdi)),
+    nj_fli: sum(employees.map(e => e.nj_fli)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -560,6 +702,10 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'FUTA_PAYABLE', amount: totals.futa },
     { side: 'CREDIT', account_role: 'CA_INCOME_TAX_PAYABLE', amount: totals.ca_income_tax },
     { side: 'CREDIT', account_role: 'CA_SDI_PAYABLE', amount: totals.ca_sdi },
+    { side: 'CREDIT', account_role: 'NJ_INCOME_TAX_PAYABLE', amount: totals.nj_income_tax },
+    { side: 'CREDIT', account_role: 'NJ_UI_WF_SWF_PAYABLE', amount: totals.nj_ui_wf_swf },
+    { side: 'CREDIT', account_role: 'NJ_TDI_PAYABLE', amount: totals.nj_tdi },
+    { side: 'CREDIT', account_role: 'NJ_FLI_PAYABLE', amount: totals.nj_fli },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -884,6 +1030,91 @@ export function payrollEngineSelfTestUS() {
   const s8 = creditsCase.employees[0];
   const expectedFederal8 = 473.17;
 
+  // Case 9: New Jersey, Rate Table A (Single), weekly, 1 allowance.
+  // Allowance value weekly = 19.20 -> subject = 1000-19.20 = 980.80.
+  // Rate A weekly bracket [769,15.29,6.1%]: 15.29+0.061*(980.80-769)=28.21.
+  const njCaseA = calculateUsPayroll({
+    pay_period_start: '2026-08-03',
+    pay_period_end: '2026-08-09',
+    pay_date: '2026-08-09',
+    employees: [
+      {
+        employee_id: 'E009',
+        gross_pay: 1000,
+        pay_frequency: 'WEEKLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'NJ',
+        nj_rate_table: 'A',
+        nj_allowances: 1
+      }
+    ]
+  });
+  const s9 = njCaseA.employees[0];
+  const expectedNjIncomeTax9 = 28.21;
+  const expectedNjUiWfSwf9 = money(1000 * 0.00425);
+  const expectedNjTdi9 = money(1000 * 0.0019);
+  const expectedNjFli9 = money(1000 * 0.0023);
+
+  // Case 10: New Jersey, Rate Table B (Married/CU Couple Joint), biweekly, 2 allowances.
+  // Allowance value biweekly = 38.40*2 = 76.80 -> subject = 3000-76.80 = 2923.20.
+  // Rate B biweekly bracket [2692,55,3.9%]: 55+0.039*(2923.20-2692)=64.02.
+  const njCaseB = calculateUsPayroll({
+    pay_period_start: '2026-08-03',
+    pay_period_end: '2026-08-16',
+    pay_date: '2026-08-16',
+    employees: [
+      {
+        employee_id: 'E010',
+        gross_pay: 3000,
+        pay_frequency: 'BIWEEKLY',
+        federal_filing_status: 'MFJ',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'NJ',
+        nj_rate_table: 'B',
+        nj_allowances: 2
+      }
+    ]
+  });
+  const s10 = njCaseB.employees[0];
+  const expectedNjIncomeTax10 = 64.02;
+
+  // Case 11: NJ UI/WF/SWF and TDI/FLI wage-base ceilings crossed mid-period.
+  // UI/WF room = 44800-40000=4800 (< gross 10000) -> 4800*0.00425=20.40.
+  // TDI/FLI room = 171100-165000=6100 -> TDI 6100*0.0019=11.59, FLI 6100*0.0023=14.03.
+  const njCeilingCase = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [
+      {
+        employee_id: 'E011',
+        gross_pay: 10000,
+        pay_frequency: 'MONTHLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'NJ',
+        nj_rate_table: 'A',
+        nj_allowances: 0,
+        ytd_nj_ui_wf_wages_before: 40000,
+        ytd_nj_tdi_fli_wages_before: 165000
+      }
+    ]
+  });
+  const s11 = njCeilingCase.employees[0];
+  const expectedNjUiWfSwf11 = money(4800 * 0.00425);
+  const expectedNjTdi11 = money(6100 * 0.0019);
+  const expectedNjFli11 = money(6100 * 0.0023);
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -920,7 +1151,18 @@ export function payrollEngineSelfTestUS() {
     multiAB.totals.ca_income_tax === expectedCombinedCa &&
     multiAB.totals.net_pay === expectedCombinedNet &&
     s8.federal_income_tax === expectedFederal8 &&
-    creditsCase.controls.journal_balanced;
+    creditsCase.controls.journal_balanced &&
+    s9.nj_income_tax === expectedNjIncomeTax9 &&
+    s9.nj_ui_wf_swf === expectedNjUiWfSwf9 &&
+    s9.nj_tdi === expectedNjTdi9 &&
+    s9.nj_fli === expectedNjFli9 &&
+    njCaseA.controls.journal_balanced &&
+    s10.nj_income_tax === expectedNjIncomeTax10 &&
+    njCaseB.controls.journal_balanced &&
+    s11.nj_ui_wf_swf === expectedNjUiWfSwf11 &&
+    s11.nj_tdi === expectedNjTdi11 &&
+    s11.nj_fli === expectedNjFli11 &&
+    njCeilingCase.controls.journal_balanced;
 
   return {
     ok,
@@ -928,6 +1170,9 @@ export function payrollEngineSelfTestUS() {
     ssCase,
     addlMedicareCase,
     pretaxCase,
+    njCaseA,
+    njCaseB,
+    njCeilingCase,
     mfjCase,
     hohCase,
     multiAB,
@@ -938,7 +1183,9 @@ export function payrollEngineSelfTestUS() {
       expectedFederal5, expectedCa5, expectedFederal6, expectedCa6,
       expectedCombinedGross, expectedCombinedFederal, expectedCombinedCa, expectedCombinedNet,
       expectedFederal8,
-      expectedFicaWages4, expectedFederalTaxableWages4, expectedSs4, expectedMedicare4
+      expectedFicaWages4, expectedFederalTaxableWages4, expectedSs4, expectedMedicare4,
+      expectedNjIncomeTax9, expectedNjUiWfSwf9, expectedNjTdi9, expectedNjFli9,
+      expectedNjIncomeTax10, expectedNjUiWfSwf11, expectedNjTdi11, expectedNjFli11
     }
   };
 }
