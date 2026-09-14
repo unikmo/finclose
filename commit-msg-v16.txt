@@ -1,0 +1,33 @@
+payroll(us): add DC -- 49/50 states plus DC (v16)
+
+DC's bracket table is high confidence: two independent sources (DC
+OTR's own current "DC Individual and Fiduciary Income Tax Rates" page,
+and a separately-fetched 2022 USDA NFC bulletin TAXES 22-28) landed on
+the identical 7-row table. The NFC bulletin additionally supplied the
+S/M/N/H filing-status categories and the $4,300-per-dependent
+allowance. That allowance figure is only as current as its 2022
+source -- no more recent DC bulletin was located -- flagged in
+limitations for reconfirmation before real 2026 payroll runs, same
+caveat pattern already used for VA/KS/ID/VT's dated bulletins. No
+separate DC standard-deduction figure beyond the dependent allowance
+was found in the sources obtained, so taxable wages here are annual
+wages minus only the dependent allowance -- flagged as a possible gap
+rather than assumed complete.
+
+Wisconsin was investigated further this pass and deliberately NOT
+closed. Its 2025 Form 1 annual-return instructions give the exact
+top-bracket (5.3%/7.65%) formula and thresholds for taxable income at
+or above $100,000, and its standard-deduction phase-out formula was
+already confirmed self-consistent. But that worksheet is the ANNUAL
+RETURN's own computation, not the payroll WITHHOLDING formula, and
+gives no percentage-method formula for the lower two brackets (only a
+$100-wide wage-bracket lookup table). Mixing annual-return constants
+into a withholding calculation without confirming they apply the same
+way was judged too risky to ship -- left unbuilt rather than guessed.
+
+Full self-test suite (all v1-v16 cases) passes, including a new
+hand-verified DC case (annual wages $120,000, 1 dependent, filing
+status S: taxable $115,700 falls in the 8.5% bracket, annual tax
+$8,234.50, monthly $686.21).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

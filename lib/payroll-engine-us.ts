@@ -414,7 +414,7 @@ export type UsState =
   | 'AK' | 'WA' | 'OR' | 'IN' | 'NC'
   | 'GA' | 'KY' | 'MS' | 'UT' | 'MN' | 'MT' | 'ND' | 'OK' | 'RI' | 'VA'
   | 'MA' | 'MO' | 'NE' | 'SC' | 'VT' | 'WV' | 'KS' | 'ID' | 'NM' | 'AR' | 'HI'
-  | 'OH' | 'LA' | 'IA' | 'AL' | 'MD' | 'CT' | 'DE'
+  | 'OH' | 'LA' | 'IA' | 'AL' | 'MD' | 'CT' | 'DE' | 'DC'
   | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
@@ -443,6 +443,9 @@ export type AlFilingStatus = 'SINGLE' | 'MARRIED_FILING_JOINTLY' | 'MARRIED_FILI
 export type MdFilingStatus = 'SINGLE' | 'MARRIED';
 export type CtWithholdingCode = 'A_OR_D';
 export type DeFilingStatus = 'SINGLE_OR_MFS' | 'MARRIED_FILING_JOINTLY';
+// DC withholding filing-status categories per the 2022 NFC bulletin (TAXES 22-28):
+// S=Single, M=Married Filing Jointly, N=Married Filing Separately, H=Head of Household.
+export type DcFilingStatus = 'S' | 'M' | 'N' | 'H';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -643,6 +646,10 @@ export type UsEmployeeInput = {
   // differs (de_filing_status covers that split).
   de_filing_status?: DeFilingStatus;
   de_exemptions?: number;
+  // DC fields — required when state === 'DC'. dc_dependents feeds the
+  // $4,300-per-dependent allowance (2022 NFC bulletin figure).
+  dc_filing_status?: DcFilingStatus;
+  dc_dependents?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -719,6 +726,7 @@ export type UsJournalLine = {
     | 'MD_COUNTY_TAX_PAYABLE'
     | 'CT_INCOME_TAX_PAYABLE'
     | 'DE_INCOME_TAX_PAYABLE'
+    | 'DC_INCOME_TAX_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -796,6 +804,7 @@ export type UsEmployeeResult = {
   md_county_tax: number;
   ct_income_tax: number;
   de_income_tax: number;
+  dc_income_tax: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -883,6 +892,7 @@ export type UsPayrollRunResult = {
     md_county_tax: number;
     ct_income_tax: number;
     de_income_tax: number;
+    dc_income_tax: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -898,7 +908,9 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-48-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V15',
+  // v16: added DC (49/50 -- see limitations for the one remaining gap,
+  // Wisconsin, and why it was deliberately NOT closed this pass).
+  id: 'US-49-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V16',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -1783,6 +1795,27 @@ export const PAYROLL_RULE_PACK_US = {
       [20000, 741, 0.052], [25000, 1001, 0.0555], [60000, 2943.5, 0.066]
     ] as Array<[number, number, number]>
   },
+  district_of_columbia: {
+    // Two independent sources cross-confirmed on the same 7-row bracket
+    // table, fetched 2026-09-15:
+    //  (1) DC OTR's own current "DC Individual and Fiduciary Income Tax
+    //      Rates" page (bracket boundaries/rates match exactly).
+    //  (2) USDA NFC bulletin TAXES 22-28 "District of Columbia Income Tax
+    //      Withholding" (effective Pay Period 22, 2022), which also gives
+    //      the filing-status categories (S/M/N/H) and the per-dependent
+    //      allowance figure. DC applies ONE bracket table to all filing
+    //      statuses (unlike most states) — status only matters for the
+    //      allowance/dependent computation upstream, not the brackets.
+    // CAUTION: the $4,300/dependent allowance is the 2022 NFC figure — no
+    // more recent DC bulletin was located, so this may be stale by 2026
+    // (same caveat pattern as VA/KS/ID/VT's dated-bulletin flags).
+    dependent_allowance_annual: 4300,
+    brackets: [
+      [0, 0, 0.04], [10000, 400, 0.06], [40000, 2200, 0.065],
+      [60000, 3500, 0.085], [250000, 19650, 0.0925], [500000, 42775, 0.0975],
+      [1000000, 91525, 0.1075]
+    ] as Array<[number, number, number]>
+  },
   // States with genuinely no individual wage income tax AND no statewide
   // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
   // compute for the employee beyond the state-agnostic federal FICA/FUTA
@@ -1826,11 +1859,13 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'USDA National Finance Center / secondary corroboration', instrument: 'Ohio (NFC-25-1758202227, most recent available, PP20 2025) and Louisiana (NFC-26-1767639939, PP15 2026, corroborated by a second web search confirming Louisiana\'s 2025 Act 11 tax reform eliminated the per-dependent exemption entirely — so unlike most gaps in this file, there is genuinely nothing left to model for LA dependents).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
     { authority: 'USDA National Finance Center', instrument: 'Maryland (NFC-26-1783003892), re-fetched with a targeted follow-up prompt to get the complete county-by-county rate table (all 23 counties plus Baltimore City, including the full graduated bracket tables for Anne Arundel and Frederick — the only two MD counties that don\'t use a flat rate) rather than a partial/summarized list.', url: 'https://help.nfc.usda.gov/bulletins/2026/1783003892.htm' },
     { authority: 'USDA National Finance Center (via text-extraction proxy)', instrument: 'Connecticut (NFC-24-1712697342) — the direct WebFetch of this bulletin repeatedly truncated the phase-out add-back and recapture step tables (each has ~10-50 rows); re-fetched via the same proxy workaround used for Oregon in v9 (oregon.gov and this NFC page both proved directly unreachable/unreliable to summarize fully), which returned the complete tables for withholding code A/D verbatim.', url: 'https://help.nfc.usda.gov/bulletins/2024/1712697342.htm' },
-    { authority: 'Delaware Division of Revenue', instrument: '"Employer\'s Guide (Withholding Regulations and Employer\'s Duties)" — fetched and read directly 2026-09-15, effective 2025-01-01. Every bracket boundary hand-verified for internal consistency (each row\'s base tax figure exactly reproduces the previous row\'s formula extrapolated to that threshold).', url: 'https://revenue.delaware.gov/employers-guide-withholding-regulations-employers-duties/' }
+    { authority: 'Delaware Division of Revenue', instrument: '"Employer\'s Guide (Withholding Regulations and Employer\'s Duties)" — fetched and read directly 2026-09-15, effective 2025-01-01. Every bracket boundary hand-verified for internal consistency (each row\'s base tax figure exactly reproduces the previous row\'s formula extrapolated to that threshold).', url: 'https://revenue.delaware.gov/employers-guide-withholding-regulations-employers-duties/' },
+    { authority: 'DC Office of Tax and Revenue (OTR) / USDA National Finance Center', instrument: 'DC\'s own current "DC Individual and Fiduciary Income Tax Rates" page (fetched directly 2026-09-15) gave a 7-row bracket table that exactly cross-confirmed a separately-fetched 2022 USDA NFC bulletin (TAXES 22-28, "District of Columbia Income Tax Withholding", effective Pay Period 22, 2022), which additionally gave the S/M/N/H filing-status categories and the $4,300-per-dependent allowance figure. Two independent sources landing on identical bracket numbers gives high confidence in the bracket table; the $4,300 allowance is only as current as its 2022 source (no more recent DC bulletin was located) — flagged in limitations.', url: 'https://otr.cfo.dc.gov/page/individual-income-tax-rates-district-columbia' }
   ],
   limitations: [
-    'Supported states (v15): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, DE, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 48 states total. Only Wisconsin and DC remain unbuilt (see below). Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
-    'Wisconsin and DC remain unbuilt, each for a specific, narrower reason than earlier passes found (not simply "no source reached"): Wisconsin\'s standard-deduction phase-out formula IS confirmed (both floor thresholds compute to zero exactly as the source states), but its actual current tax RATE brackets could not be confirmed from a primary source — Wisconsin\'s own official withholding guide documents wage-bracket lookup tables and a deduction-only "Alternate Method," not a standalone percentage-method rate schedule, and the AI-search-synthesized bracket figures found elsewhere (same untrustworthy-alone category as the discarded Oregon "$8,500" figure) were not trusted alone. DC: a real, current 7-bracket rate table was fetched directly from DC OTR\'s own rates page, and the filing-status/allowance STRUCTURE (four categories, exemption-based not standard-deduction-based) came from an official but dated (2018) FR-230 publication — but only a stale 2018 exemption dollar value was found, not a current one, and no more recent FR-230 could be located. Both gaps are now narrow and specifically named rather than wholesale unreached — a future pass knows exactly what single figure/table would unblock each.',
+    'Supported states (v16): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, DE, DC, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 49/50 states plus DC. Only Wisconsin remains unbuilt (see below). Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'DC (v16): the bracket table is high-confidence — two independent sources (DC OTR\'s own current rates page + a 2022 USDA NFC bulletin) landed on the identical 7-row table. However, the $4,300-per-dependent allowance is ONLY as current as its 2022 source; no more recent DC bulletin was located, so this figure should be reconfirmed before real 2026 payroll runs (same dated-source caveat pattern as VA/KS/ID/VT). Also, no separate DC standard-deduction figure (beyond the dependent allowance) was captured in the sources obtained — taxable wages here are annual wages minus only the dependent allowance; if DC withholding in fact also subtracts a base standard deduction independent of dependents, this would overstate DC withholding for employees with few/no dependents. Flagged rather than guessed.',
+    'Wisconsin remains unbuilt, for a specific, narrow reason (not "no source reached"): Wisconsin\'s standard-deduction phase-out formula IS confirmed (both floor thresholds compute to zero exactly as the source states), and this pass additionally obtained WI\'s real 2025 Form 1 annual-return "Tax Computation Worksheet," which gives the exact TOP-bracket (5.3%/7.65%) formula and thresholds for taxable income at or above $100,000 by filing status. But that worksheet is the ANNUAL RETURN\'s formula, not the payroll WITHHOLDING formula, and does not give the lower two brackets (below $100,000) as a percentage-method formula at all — only as a $100-wide wage-bracket lookup table. Mixing annual-return constants into a withholding calculation without independently confirming they apply the same way to payroll withholding was judged too risky to ship; deliberately left unbuilt rather than guessed. A future pass should look specifically for Wisconsin\'s own payroll withholding percentage-method formula (distinct from the Form 1 instructions), if one exists.',
     'Connecticut (v14): only withholding code A/D is implemented. Codes B, C, and F use their own separate base bracket tables and/or phase-out/recapture schedules that were not captured this pass — employees on those codes are REJECTED with an explicit error rather than approximated using the A/D tables.',
     'Maryland (v14): county tax is MANDATORY and this engine requires md_county to be set to one of Maryland\'s 23 counties or Baltimore City rather than silently omitting it (the same required-not-skipped pattern established for Indiana\'s county tax in v10). Anne Arundel and Frederick\'s own graduated county bracket tables are fully implemented (not simplified to a flat rate); their bracket "base" dollar amounts for Frederick were computed by this engine from the source\'s rate-and-threshold data (not directly quoted in the source), then verified for internal consistency at every bracket boundary.',
     'Iowa (v13): the ONE state in the v11-v13 batches sourced with the same rigor as CA/NJ/NY/OR/IN/NC — the actual Iowa DOR current-year formula publication, with all 6 relevant worked examples reproduced exactly. Treat as high confidence, not the weaker single-NFC-bulletin tier the rest of this batch carries.',
@@ -2010,7 +2045,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', 'OH', 'LA', 'IA', 'AL', 'MD', 'CT', 'DE', ...p.no_tax_no_employee_levy_states];
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', 'OH', 'LA', 'IA', 'AL', 'MD', 'CT', 'DE', 'DC', ...p.no_tax_no_employee_levy_states];
     if (!supportedStates.includes(employee.state)) {
       const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
@@ -2408,6 +2443,18 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       }
       if (!Number.isInteger(employee.de_exemptions) || (employee.de_exemptions as number) < 0) {
         const error = new Error(`de_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'DC') {
+      if (!['S', 'M', 'N', 'H'].includes(employee.dc_filing_status as string)) {
+        const error = new Error(`dc_filing_status for ${employeeId} must be 'S', 'M', 'N', or 'H'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.dc_dependents) || (employee.dc_dependents as number) < 0) {
+        const error = new Error(`dc_dependents for ${employeeId} must be a non-negative integer`);
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
@@ -2978,6 +3025,19 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       deIncomeTax = money(annualTax / periodsPerYear);
     }
 
+    let dcIncomeTax = 0;
+    if (employee.state === 'DC') {
+      // Per the 2022 NFC bulletin (TAXES 22-28): taxable wages = annual
+      // wages minus the dependent allowance ($4,300 x number of
+      // dependents). No separate standard-deduction figure was captured
+      // for DC withholding in the sources obtained this session — only
+      // the dependent allowance and the bracket table were confirmed.
+      const dependentAllowance = (employee.dc_dependents as number) * p.district_of_columbia.dependent_allowance_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - dependentAllowance));
+      const annualTax = bracketLookup(taxable, p.district_of_columbia.brackets);
+      dcIncomeTax = money(annualTax / periodsPerYear);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
@@ -2990,7 +3050,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       maIncomeTax + moIncomeTax + neIncomeTax + scIncomeTax + vtIncomeTax +
       wvIncomeTax + ksIncomeTax + idIncomeTax + nmIncomeTax + arIncomeTax + hiIncomeTax +
       ohIncomeTax + laIncomeTax + iaIncomeTax + alIncomeTax +
-      mdIncomeTax + mdCountyTax + ctIncomeTax + deIncomeTax
+      mdIncomeTax + mdCountyTax + ctIncomeTax + deIncomeTax + dcIncomeTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -3068,6 +3128,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       md_county_tax: mdCountyTax,
       ct_income_tax: ctIncomeTax,
       de_income_tax: deIncomeTax,
+      dc_income_tax: dcIncomeTax,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -3147,6 +3208,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     md_county_tax: sum(employees.map(e => e.md_county_tax)),
     ct_income_tax: sum(employees.map(e => e.ct_income_tax)),
     de_income_tax: sum(employees.map(e => e.de_income_tax)),
+    dc_income_tax: sum(employees.map(e => e.dc_income_tax)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -3217,6 +3279,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'MD_COUNTY_TAX_PAYABLE', amount: totals.md_county_tax },
     { side: 'CREDIT', account_role: 'CT_INCOME_TAX_PAYABLE', amount: totals.ct_income_tax },
     { side: 'CREDIT', account_role: 'DE_INCOME_TAX_PAYABLE', amount: totals.de_income_tax },
+    { side: 'CREDIT', account_role: 'DC_INCOME_TAX_PAYABLE', amount: totals.dc_income_tax },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -4048,6 +4111,17 @@ export function payrollEngineSelfTestUS() {
   const sDe1 = deCase.employees[0];
   const expectedDe1 = 548.25;
 
+  // v16: DC, hand-verified against bracket-math computed by hand.
+  // annual wages 120000; dependent allowance 1*4300=4300; taxable 115700
+  // falls in the [60000,3500,0.085] bracket: 3500+0.085*(115700-60000)
+  // = 3500+4734.5 = 8234.5 annual; /12 = 686.2083... -> 686.21
+  const dcCase = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{ employee_id: 'DC1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'DC', dc_filing_status: 'S', dc_dependents: 1 }]
+  });
+  const sDc1 = dcCase.employees[0];
+  const expectedDc1 = 686.21;
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -4156,7 +4230,8 @@ export function payrollEngineSelfTestUS() {
     sMd1.md_income_tax === expectedMd1State && sMd1.md_county_tax === expectedMd1County &&
     sMd2.md_county_tax === expectedMd2County && sCt1.ct_income_tax === expectedCt1 &&
     v14Case.controls.journal_balanced &&
-    sDe1.de_income_tax === expectedDe1 && deCase.controls.journal_balanced;
+    sDe1.de_income_tax === expectedDe1 && deCase.controls.journal_balanced &&
+    sDc1.dc_income_tax === expectedDc1 && dcCase.controls.journal_balanced;
 
   return {
     ok,
@@ -4168,7 +4243,7 @@ export function payrollEngineSelfTestUS() {
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
-    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case, v14Case, deCase,
+    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case, v14Case, deCase, dcCase,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,

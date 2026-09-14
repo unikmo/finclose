@@ -1,0 +1,31 @@
+payroll(us): add Delaware -- 48/50 states, narrow the two remaining gaps (v15)
+
+Delaware fetched directly from the Delaware Division of Revenue's own
+current Employer's Guide. One unified bracket table applies regardless
+of filing status (only the standard deduction differs by status); every
+bracket boundary was hand-verified for internal consistency (each row's
+base tax figure exactly reproduces the previous row's formula
+extrapolated to that threshold). Dated effective 2025-01-01 -- no 2026
+update found, treated as low-risk given Delaware's historical bracket
+stability but not yet reconfirmed for 2026.
+
+Wisconsin and DC were both investigated further this pass and narrowed
+to a single specific missing piece each, rather than being wholesale
+unreached:
+
+- Wisconsin: confirmed its standard-deduction phase-out formula exactly
+  (both floor thresholds compute to zero precisely as the source
+  states), but its actual current tax RATE brackets could not be
+  confirmed from a primary source -- the official withholding guide
+  documents wage-bracket lookup tables and a deduction-only "Alternate
+  Method," not a standalone percentage-method rate schedule.
+- DC: got a real, current 7-bracket rate table directly from DC OTR's
+  own rates page, and the filing-status/allowance structure (four
+  categories, exemption-based) from an official but dated (2018)
+  FR-230 -- but only a stale 2018 exemption dollar value, not a
+  current one, and no more recent FR-230 could be located.
+
+Full self-test suite (all v1-v15 cases) passes, including hand-verified
+Delaware bracket math.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
