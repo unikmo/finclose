@@ -1,7 +1,7 @@
-// United States (US) payroll rule pack — v12: federal + 41 states (CA, NJ,
+// United States (US) payroll rule pack — v13: federal + 45 states (CA, NJ,
 // NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS,
 // UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI,
-// FL, NV, NH, SD, TN, TX, WY).
+// OH, LA, IA, AL, FL, NV, NH, SD, TN, TX, WY).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -30,6 +30,29 @@
 // in the prior year or even during the current year. This file uses figures
 // sourced via AI web research (not a professional review) as of September
 // 2026.
+//
+// v13 change log (from v12): adds four more states on the same "keep
+// going" instruction — OH, LA, IA, AL — reaching 45/50 states. Notably
+// higher confidence than v11/v12 for two of the four: Iowa was fetched
+// directly from the Iowa Department of Revenue's own current-year formula
+// publication (revenue.iowa.gov), which includes 10 fully worked
+// examples — this engine's implementation reproduces all 6 of the
+// examples relevant to the marital-status categories this engine supports
+// exactly to the cent, the SAME confidence tier as CA/NJ/NY/OR/IN/NC, the
+// strongest in this file. Louisiana was corroborated by a second source
+// confirming Louisiana's 2025 tax reform (Act 11) eliminated the
+// per-dependent exemption entirely, which actually REMOVED a gap this
+// file would otherwise have needed to flag (there's no dependent-credit
+// dollar amount to be missing, because the credit itself no longer
+// exists). Ohio is single-NFC-source (same tier as v11/v12). Alabama
+// blends a stable-but-aged (2022) NFC bulletin for tax brackets/
+// exemptions with a genuinely current (tax-year-2025) official Alabama
+// Department of Revenue standard-deduction table fetched directly —
+// but that table's income-phased deduction schedule (which phases DOWN
+// in $25 steps below a wage threshold) was not fully transcribed, so
+// this engine only implements the FLOOR deduction value and REJECTS
+// employees below the floor threshold ($35,500 single/MFJ/HOF, $17,750
+// MFS) rather than approximating the phase-out.
 //
 // v12 change log (from v11): adds eleven more states on the same
 // "keep going" instruction — MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI —
@@ -353,6 +376,7 @@ export type UsState =
   | 'AK' | 'WA' | 'OR' | 'IN' | 'NC'
   | 'GA' | 'KY' | 'MS' | 'UT' | 'MN' | 'MT' | 'ND' | 'OK' | 'RI' | 'VA'
   | 'MA' | 'MO' | 'NE' | 'SC' | 'VT' | 'WV' | 'KS' | 'ID' | 'NM' | 'AR' | 'HI'
+  | 'OH' | 'LA' | 'IA' | 'AL'
   | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
@@ -375,6 +399,9 @@ export type KsFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
 export type IdFilingStatus = 'SINGLE' | 'MARRIED';
 export type NmFilingStatus = 'SINGLE' | 'MARRIED' | 'HEAD_OF_HOUSEHOLD';
 export type HiFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
+export type LaFilingStatus = 'SINGLE_OR_MFS' | 'MARRIED_OR_HOH';
+export type IaMaritalStatus = 'OTHER_OR_MFJ_SPOUSE_WORKS' | 'HEAD_OF_HOUSEHOLD' | 'MFJ_SPOUSE_NO_EARNED_INCOME';
+export type AlFilingStatus = 'SINGLE' | 'MARRIED_FILING_JOINTLY' | 'MARRIED_FILING_SEPARATELY' | 'HEAD_OF_FAMILY';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -535,6 +562,29 @@ export type UsEmployeeInput = {
   // HI fields — required when state === 'HI'.
   hi_filing_status?: HiFilingStatus;
   hi_exemptions?: number;
+  // OH fields — required when state === 'OH'.
+  oh_exemptions?: number;
+  // LA fields — required when state === 'LA'. Dependent exemptions were
+  // eliminated by Louisiana's 2025 tax reform, so only the filing-status-
+  // based standard deduction remains — no la_dependents field exists.
+  la_filing_status?: LaFilingStatus;
+  // IA fields — required when state === 'IA'. ia_marital_status mirrors
+  // the exact three categories on the 2024+ IA W-4 (Iowa's own bulletin
+  // explicitly notes this deduction is NOT the same as the federal
+  // standard deduction). ia_allowance_amount is the total dollar
+  // allowance amount reported directly on the IA W-4 (Iowa's 2024+ form
+  // reports a dollar figure, not an allowance count).
+  ia_marital_status?: IaMaritalStatus;
+  ia_allowance_amount?: number;
+  // AL fields — required when state === 'AL'. This engine only supports
+  // annual wages at or above the floor-deduction threshold for the
+  // employee's filing status ($35,500 for Single/MFJ/HOF, $17,750 for
+  // MFS) — Alabama's real standard deduction phases DOWN in $25
+  // increments below that threshold, which this engine does not model
+  // (see limitations); lower earners are rejected rather than
+  // approximated.
+  al_filing_status?: AlFilingStatus;
+  al_dependents?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -603,6 +653,10 @@ export type UsJournalLine = {
     | 'NM_INCOME_TAX_PAYABLE'
     | 'AR_INCOME_TAX_PAYABLE'
     | 'HI_INCOME_TAX_PAYABLE'
+    | 'OH_INCOME_TAX_PAYABLE'
+    | 'LA_INCOME_TAX_PAYABLE'
+    | 'IA_INCOME_TAX_PAYABLE'
+    | 'AL_INCOME_TAX_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -672,6 +726,10 @@ export type UsEmployeeResult = {
   nm_income_tax: number;
   ar_income_tax: number;
   hi_income_tax: number;
+  oh_income_tax: number;
+  la_income_tax: number;
+  ia_income_tax: number;
+  al_income_tax: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -751,6 +809,10 @@ export type UsPayrollRunResult = {
     nm_income_tax: number;
     ar_income_tax: number;
     hi_income_tax: number;
+    oh_income_tax: number;
+    la_income_tax: number;
+    ia_income_tax: number;
+    al_income_tax: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -766,7 +828,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-41-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V12',
+  id: 'US-45-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V13',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -1505,6 +1567,72 @@ export const PAYROLL_RULE_PACK_US = {
       ]
     } as Record<HiFilingStatus, Array<[number, number, number]>>
   },
+  ohio: {
+    // NFC bulletin (most recent available, PP20 2025 — no 2026 bulletin
+    // found, should be reconfirmed). Three brackets, flat per-exemption
+    // allowance.
+    exemption_value_annual: 650,
+    brackets: [[0, 0, 0.01775], [26050, 462.39, 0.0299], [100000, 2673.5, 0.0364]] as Array<[number, number, number]>
+  },
+  louisiana: {
+    // NFC bulletin, confirmed via a second independent source (secondary
+    // web search corroborating Louisiana's 2025 Act 11 tax reform, which
+    // ELIMINATED the per-dependent personal exemption for withholding
+    // purposes — so unlike most states here, LA genuinely has no
+    // dependent-credit gap; there's nothing left to model). Flat 3.09%
+    // after a standard deduction by a two-way filing-status split.
+    rate: 0.0309,
+    standard_deduction: { SINGLE_OR_MFS: 12875, MARRIED_OR_HOH: 25750 } as Record<LaFilingStatus, number>
+  },
+  iowa: {
+    // Iowa Department of Revenue's own "Iowa Individual Income Tax
+    // Withholding Formula, Effective January 1, 2026" (released November
+    // 2025) — fetched and read directly, the strongest source tier this
+    // file has (matches CA/NJ/NY/OR/IN/NC), including 10 fully worked
+    // examples this engine's implementation reproduces exactly. Applied
+    // PER PAY PERIOD directly (not annualized): flat 3.80% rate on
+    // (gross pay minus a per-period deduction that varies by the
+    // employee's IA W-4 marital-status category), minus a per-period
+    // share of a caller-supplied total dollar allowance amount (the
+    // 2024+ IA W-4 reports a dollar figure directly, not an allowance
+    // count).
+    rate: 0.038,
+    deduction_per_period: {
+      WEEKLY: { OTHER_OR_MFJ_SPOUSE_WORKS: 250, HEAD_OF_HOUSEHOLD: 375, MFJ_SPOUSE_NO_EARNED_INCOME: 500 },
+      BIWEEKLY: { OTHER_OR_MFJ_SPOUSE_WORKS: 500, HEAD_OF_HOUSEHOLD: 750, MFJ_SPOUSE_NO_EARNED_INCOME: 1000 },
+      SEMIMONTHLY: { OTHER_OR_MFJ_SPOUSE_WORKS: 541.67, HEAD_OF_HOUSEHOLD: 812.5, MFJ_SPOUSE_NO_EARNED_INCOME: 1083.33 },
+      MONTHLY: { OTHER_OR_MFJ_SPOUSE_WORKS: 1083.33, HEAD_OF_HOUSEHOLD: 1625, MFJ_SPOUSE_NO_EARNED_INCOME: 2166.67 }
+    } as Record<UsPayFrequency, Record<IaMaritalStatus, number>>
+  },
+  alabama: {
+    // Two sources: the 2022 NFC bulletin for tax brackets and exemption
+    // amounts (Alabama's brackets have been unchanged for decades — 2%/
+    // 4%/5% at these exact thresholds — so treated as still reliable
+    // despite the bulletin's age), and the Alabama Department of
+    // Revenue's own official 2025-tax-year standard deduction table
+    // (25stddeduction40a.pdf, fetched and read directly 2026-09-15) for
+    // the income-phased standard deduction. That table phases the
+    // deduction DOWN in $25 steps for every $500 of income between a
+    // low-income maximum and a floor value reached at $35,500 (Single/
+    // MFJ/Head of Family) or $17,750 (MFS) — this engine only implements
+    // the FLOOR value and REJECTS employees below that wage threshold,
+    // since the phase-out steps were not transcribed (see limitations).
+    // Personal exemption and the three-tier income-based dependent
+    // exemption amount are also from the 2022 bulletin.
+    floor_deduction_threshold_annual: {
+      SINGLE: 35500, MARRIED_FILING_JOINTLY: 35500, MARRIED_FILING_SEPARATELY: 17750, HEAD_OF_FAMILY: 35500
+    } as Record<AlFilingStatus, number>,
+    floor_deduction_annual: {
+      SINGLE: 2500, MARRIED_FILING_JOINTLY: 5000, MARRIED_FILING_SEPARATELY: 2500, HEAD_OF_FAMILY: 2500
+    } as Record<AlFilingStatus, number>,
+    personal_exemption_annual: {
+      SINGLE: 1500, MARRIED_FILING_SEPARATELY: 1500, MARRIED_FILING_JOINTLY: 3000, HEAD_OF_FAMILY: 3000
+    } as Record<AlFilingStatus, number>,
+    // Dependent exemption tiers by annual wages: [wagesAtLeast, amount].
+    dependent_exemption_tiers: [[0, 1000], [50000, 500], [100000, 300]] as Array<[number, number]>,
+    brackets_single_mfs_hof: [[0, 0, 0.02], [500, 10, 0.04], [3000, 110, 0.05]] as Array<[number, number, number]>,
+    brackets_mfj: [[0, 0, 0.02], [1000, 20, 0.04], [6000, 220, 0.05]] as Array<[number, number, number]>
+  },
   // States with genuinely no individual wage income tax AND no statewide
   // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
   // compute for the employee beyond the state-agnostic federal FICA/FUTA
@@ -1542,10 +1670,15 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Indiana Department of Revenue', instrument: 'Departmental Notice #1 (R46 / 01-26), "How to Compute Withholding for State and County Income Tax", effective 2026-01-01 — fetched and read directly 2026-09-14 (the actual official document, not a secondary summary). Gives the 2.95% flat state rate, the $1,000/$1,500/$3,000 personal/dependent/adopted-child annual exemption amounts (Tables A/B/C), a fully worked example matching this engine\'s implementation exactly, and the complete 2026 county income tax rate table for all 92 Indiana counties.', url: 'https://www.in.gov/dor/files/dn01.pdf' },
     { authority: 'North Carolina Department of Revenue', instrument: 'Form NC-30 (Web 11-25), "2026 Income Tax Withholding Tables and Instructions for Employers" — fetched and read directly 2026-09-14 (the actual official document). Gives the 4.09% withholding rate (3.99% statutory rate + NC\'s own built-in 0.1% adjustment, per the document\'s own text), the $12,750 (Single/Married/Surviving Spouse) and $19,125 (Head of Household) standard deductions, the $2,500 allowance value, the nearest-whole-dollar final rounding rule, and a fully worked example matching this engine\'s implementation exactly.', url: 'https://www.ncdor.gov/income-tax-withholding-tables-and-instructions-employers/open' },
     { authority: 'USDA National Finance Center', instrument: 'Ten separate current 2026 (or most-recent-available) state withholding bulletins, each fetched 2026-09-14, used as the SOLE source for that state (same single-source tier as the v5 batch): Georgia (NFC-26-1784643404, PP13 2026), Kentucky (NFC-26-1770145550, PP02 2026), Mississippi (NFC-26-1768327516, PP09 2026), Utah (NFC-26-1782763921, PP12 2026), Minnesota (NFC-26-1782924992), Montana (NFC-26-1767632355), North Dakota (NFC-26-1767646699), Oklahoma (NFC-26-1773324603), Rhode Island (NFC-26-1772030778, PP03 2026), and Virginia (NFC-25-1750694986, PP14 2025 — the most recent available; no 2026 Virginia bulletin was found). No official worked example was available for any of these ten, unlike OR/IN/NC — see limitations.', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
-    { authority: 'USDA National Finance Center', instrument: 'Eleven more state withholding bulletins, each fetched 2026-09-15, same single-source-per-state tier as the v11 batch: Massachusetts (NFC-26-1769797447), Missouri (NFC-26-1773783048), Nebraska (NFC-26-1774374744), South Carolina (NFC-26-1773173131), Vermont (NFC-24-1707500661 — most recent available), West Virginia (NFC-26-1786455448), Kansas (NFC-24-1722617728 — most recent available), Idaho (NFC-25-1747930413 — most recent available), New Mexico (NFC-26-1776874663), Arkansas (NFC-26-1781190112, re-fetched with a follow-up prompt to get the complete bracket structure), Hawaii (NFC-26-1768321238, re-fetched with a follow-up prompt to get the complete 8-bracket tables for both filing statuses after an initial partial extraction).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' }
+    { authority: 'USDA National Finance Center', instrument: 'Eleven more state withholding bulletins, each fetched 2026-09-15, same single-source-per-state tier as the v11 batch: Massachusetts (NFC-26-1769797447), Missouri (NFC-26-1773783048), Nebraska (NFC-26-1774374744), South Carolina (NFC-26-1773173131), Vermont (NFC-24-1707500661 — most recent available), West Virginia (NFC-26-1786455448), Kansas (NFC-24-1722617728 — most recent available), Idaho (NFC-25-1747930413 — most recent available), New Mexico (NFC-26-1776874663), Arkansas (NFC-26-1781190112, re-fetched with a follow-up prompt to get the complete bracket structure), Hawaii (NFC-26-1768321238, re-fetched with a follow-up prompt to get the complete 8-bracket tables for both filing statuses after an initial partial extraction).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
+    { authority: 'Iowa Department of Revenue', instrument: '"Iowa Individual Income Tax Withholding Formula, Effective January 1, 2026" (released November 2025) — fetched and read directly 2026-09-15, the actual official current-year document with 10 fully worked examples. This engine\'s implementation reproduces all 6 of the examples covering the marital-status categories this engine supports (biweekly and monthly, all three IA W-4 marital-status categories) exactly to the cent.', url: 'https://revenue.iowa.gov/media/53/download?inline=' },
+    { authority: 'Alabama Department of Revenue', instrument: '2025-tax-year (TY 2025) official standard deduction table by filing status (25stddeduction40a.pdf, "40A Booklet") — fetched and read directly 2026-09-15, giving the income-phased deduction schedule this engine partially implements (floor value and floor threshold only — see limitations). Combined with the 2022 NFC bulletin for Alabama\'s tax brackets, personal exemption, and dependent exemption tiers (Alabama\'s 2%/4%/5% brackets have been stable for decades, so the bulletin\'s age is treated as low-risk for those specific figures).', url: 'https://www.revenue.alabama.gov/wp-content/uploads/2026/01/25stddeduction40a.pdf' },
+    { authority: 'USDA National Finance Center / secondary corroboration', instrument: 'Ohio (NFC-25-1758202227, most recent available, PP20 2025) and Louisiana (NFC-26-1767639939, PP15 2026, corroborated by a second web search confirming Louisiana\'s 2025 Act 11 tax reform eliminated the per-dependent exemption entirely — so unlike most gaps in this file, there is genuinely nothing left to model for LA dependents).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' }
   ],
   limitations: [
-    'Supported states (v12): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 41 states total. 9 states plus DC remain unbuilt: AL, CT, DE, IA, LA, MD, OH, WI, DC. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Supported states (v13): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 45 states total. Only 5 states plus DC remain unbuilt: CT, DE, MD, WI, DC. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Iowa (v13): the ONE state in the v11-v13 batches sourced with the same rigor as CA/NJ/NY/OR/IN/NC — the actual Iowa DOR current-year formula publication, with all 6 relevant worked examples reproduced exactly. Treat as high confidence, not the weaker single-NFC-bulletin tier the rest of this batch carries.',
+    'Alabama (v13): only wages at or above the FLOOR standard-deduction threshold are supported ($35,500/year Single/MFJ/Head of Family, $17,750/year MFS) — Alabama\'s real standard deduction phases DOWN in $25 increments for every $500 of income below that threshold (confirmed via Alabama\'s own official TY2025 deduction table), which this engine does not model. Employees below the threshold are REJECTED with an explicit error rather than approximated. Alabama\'s tax brackets, personal exemption, and dependent exemption tiers are sourced from a 2022 NFC bulletin (not reconfirmed for 2026) — treated as low-risk given AL\'s historical rate stability, but should be reconfirmed before real payroll runs. The Alabama standard deduction table itself is dated tax-year 2025, not yet confirmed for 2026.',
     'v12 eleven-state batch (MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI): same single-NFC-source confidence tier as v11. Only 4 (MO, HI, SC, AR) were hand-verified against manual bracket arithmetic; the rest (MA, NE, VT, WV, KS, ID, NM) checked only for journal-balance/positive-tax sanity — a real, explicitly-flagged verification gap.',
     'Arkansas (v12): the real top bracket smooths across 28 narrow $100-wide rows between $94,701 and $97,601 annualized taxable income to avoid a hard rate cliff; this engine could not obtain that full 28-row table and REJECTS (with an explicit error) any employee whose annualized taxable income falls in that band, rather than approximating across it. Also does not model Arkansas\'s separate low-income tax credit for married filers in a specific income band.',
     'New Mexico (v12): implemented with ZERO standard deduction or exemption subtracted before the bracket lookup, because the only source found gave no such structure at all — the bracket table itself IS complete and internally verified (an initial fetch had only captured the first and last of 10 rows per filing status, silently producing $0 tax at $120,000/year single income; caught by this file\'s own self-test suite and fixed by re-fetching for the full table, cross-checked row-by-row by hand). The missing-deduction question is still flagged as possibly reflecting an incomplete source extraction rather than a confirmed absence of any NM deduction — worth re-verifying against NM\'s own withholding formula publication before this state is trusted for real payroll.',
@@ -1721,7 +1854,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', ...p.no_tax_no_employee_levy_states];
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', 'OH', 'LA', 'IA', 'AL', ...p.no_tax_no_employee_levy_states];
     if (!supportedStates.includes(employee.state)) {
       const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
@@ -2048,6 +2181,40 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       }
       if (!Number.isInteger(employee.hi_exemptions) || (employee.hi_exemptions as number) < 0) {
         const error = new Error(`hi_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'OH' && (!Number.isInteger(employee.oh_exemptions) || (employee.oh_exemptions as number) < 0)) {
+      const error = new Error(`oh_exemptions for ${employeeId} must be a non-negative integer`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.state === 'LA' && employee.la_filing_status !== 'SINGLE_OR_MFS' && employee.la_filing_status !== 'MARRIED_OR_HOH') {
+      const error = new Error(`la_filing_status for ${employeeId} must be 'SINGLE_OR_MFS' or 'MARRIED_OR_HOH'`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.state === 'IA') {
+      if (!['OTHER_OR_MFJ_SPOUSE_WORKS', 'HEAD_OF_HOUSEHOLD', 'MFJ_SPOUSE_NO_EARNED_INCOME'].includes(employee.ia_marital_status as string)) {
+        const error = new Error(`ia_marital_status for ${employeeId} must be 'OTHER_OR_MFJ_SPOUSE_WORKS', 'HEAD_OF_HOUSEHOLD', or 'MFJ_SPOUSE_NO_EARNED_INCOME'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (employee.ia_allowance_amount !== undefined && (typeof employee.ia_allowance_amount !== 'number' || employee.ia_allowance_amount < 0)) {
+        const error = new Error(`ia_allowance_amount for ${employeeId} must be a non-negative number if provided`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'AL') {
+      if (!['SINGLE', 'MARRIED_FILING_JOINTLY', 'MARRIED_FILING_SEPARATELY', 'HEAD_OF_FAMILY'].includes(employee.al_filing_status as string)) {
+        const error = new Error(`al_filing_status for ${employeeId} must be 'SINGLE', 'MARRIED_FILING_JOINTLY', 'MARRIED_FILING_SEPARATELY', or 'HEAD_OF_FAMILY'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.al_dependents) || (employee.al_dependents as number) < 0) {
+        const error = new Error(`al_dependents for ${employeeId} must be a non-negative integer`);
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
@@ -2532,6 +2699,54 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       hiIncomeTax = money(annualTax / periodsPerYear);
     }
 
+    // --- v13 states ---
+    let ohIncomeTax = 0;
+    if (employee.state === 'OH') {
+      const ded = (employee.oh_exemptions as number) * p.ohio.exemption_value_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.ohio.brackets);
+      ohIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let laIncomeTax = 0;
+    if (employee.state === 'LA') {
+      const status = employee.la_filing_status as LaFilingStatus;
+      const ded = p.louisiana.standard_deduction[status];
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      laIncomeTax = money((taxable * p.louisiana.rate) / periodsPerYear);
+    }
+
+    let iaIncomeTax = 0;
+    if (employee.state === 'IA') {
+      const maritalStatus = employee.ia_marital_status as IaMaritalStatus;
+      const periodDeduction = p.iowa.deduction_per_period[employee.pay_frequency][maritalStatus];
+      const t1 = Math.max(0, money(grossPay - periodDeduction));
+      const t2 = money(t1 * p.iowa.rate);
+      const allowancePerPeriod = money((employee.ia_allowance_amount ?? 0) / periodsPerYear);
+      iaIncomeTax = Math.max(0, money(t2 - allowancePerPeriod));
+    }
+
+    let alIncomeTax = 0;
+    if (employee.state === 'AL') {
+      const status = employee.al_filing_status as AlFilingStatus;
+      const floorThreshold = p.alabama.floor_deduction_threshold_annual[status];
+      if (annualWagesV11 < floorThreshold) {
+        const error = new Error(`AL employee ${employeeId} has annualized wages below $${floorThreshold} for filing status ${status} — this engine only implements Alabama's FLOOR standard deduction value and does not model the income-phased deduction schedule below that threshold, so it's rejected rather than approximated`);
+        (error as Error & { status?: number }).status = 409;
+        throw error;
+      }
+      const dependents = employee.al_dependents as number;
+      let dependentRate = 300;
+      for (const [atLeast, amount] of p.alabama.dependent_exemption_tiers) {
+        if (annualWagesV11 >= atLeast) dependentRate = amount; else break;
+      }
+      const ded = p.alabama.floor_deduction_annual[status] + p.alabama.personal_exemption_annual[status] + dependents * dependentRate;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const brackets = status === 'MARRIED_FILING_JOINTLY' ? p.alabama.brackets_mfj : p.alabama.brackets_single_mfs_hof;
+      const annualTax = bracketLookup(taxable, brackets);
+      alIncomeTax = money(annualTax / periodsPerYear);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
@@ -2542,7 +2757,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       gaIncomeTax + kyIncomeTax + msIncomeTax + utIncomeTax + mnIncomeTax +
       mtIncomeTax + ndIncomeTax + okIncomeTax + riIncomeTax + vaIncomeTax +
       maIncomeTax + moIncomeTax + neIncomeTax + scIncomeTax + vtIncomeTax +
-      wvIncomeTax + ksIncomeTax + idIncomeTax + nmIncomeTax + arIncomeTax + hiIncomeTax
+      wvIncomeTax + ksIncomeTax + idIncomeTax + nmIncomeTax + arIncomeTax + hiIncomeTax +
+      ohIncomeTax + laIncomeTax + iaIncomeTax + alIncomeTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -2612,6 +2828,10 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       nm_income_tax: nmIncomeTax,
       ar_income_tax: arIncomeTax,
       hi_income_tax: hiIncomeTax,
+      oh_income_tax: ohIncomeTax,
+      la_income_tax: laIncomeTax,
+      ia_income_tax: iaIncomeTax,
+      al_income_tax: alIncomeTax,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -2683,6 +2903,10 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     nm_income_tax: sum(employees.map(e => e.nm_income_tax)),
     ar_income_tax: sum(employees.map(e => e.ar_income_tax)),
     hi_income_tax: sum(employees.map(e => e.hi_income_tax)),
+    oh_income_tax: sum(employees.map(e => e.oh_income_tax)),
+    la_income_tax: sum(employees.map(e => e.la_income_tax)),
+    ia_income_tax: sum(employees.map(e => e.ia_income_tax)),
+    al_income_tax: sum(employees.map(e => e.al_income_tax)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -2745,6 +2969,10 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'NM_INCOME_TAX_PAYABLE', amount: totals.nm_income_tax },
     { side: 'CREDIT', account_role: 'AR_INCOME_TAX_PAYABLE', amount: totals.ar_income_tax },
     { side: 'CREDIT', account_role: 'HI_INCOME_TAX_PAYABLE', amount: totals.hi_income_tax },
+    { side: 'CREDIT', account_role: 'OH_INCOME_TAX_PAYABLE', amount: totals.oh_income_tax },
+    { side: 'CREDIT', account_role: 'LA_INCOME_TAX_PAYABLE', amount: totals.la_income_tax },
+    { side: 'CREDIT', account_role: 'IA_INCOME_TAX_PAYABLE', amount: totals.ia_income_tax },
+    { side: 'CREDIT', account_role: 'AL_INCOME_TAX_PAYABLE', amount: totals.al_income_tax },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -3527,6 +3755,30 @@ export function payrollEngineSelfTestUS() {
   const expectedAr1 = 355.73;
   const expectedHi1 = 640.03;
 
+  // v13: Ohio, Louisiana, Iowa, Alabama. Iowa is checked against ALL 6 of
+  // its own official worked examples (from Iowa DOR's own formula
+  // publication, the same confidence tier as OR/IN/NC); OH/LA/AL are
+  // hand-verified bracket-math checks.
+  const iaEx1 = calculateUsPayroll({ pay_period_start: '2026-09-01', pay_period_end: '2026-09-14', pay_date: '2026-09-14', employees: [{ employee_id: 'IA1', gross_pay: 2100, pay_frequency: 'BIWEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'IA', ia_marital_status: 'OTHER_OR_MFJ_SPOUSE_WORKS', ia_allowance_amount: 40 }] });
+  const iaEx2 = calculateUsPayroll({ pay_period_start: '2026-09-01', pay_period_end: '2026-09-14', pay_date: '2026-09-14', employees: [{ employee_id: 'IA2', gross_pay: 2100, pay_frequency: 'BIWEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'IA', ia_marital_status: 'MFJ_SPOUSE_NO_EARNED_INCOME', ia_allowance_amount: 80 }] });
+  const iaEx3 = calculateUsPayroll({ pay_period_start: '2026-09-01', pay_period_end: '2026-09-14', pay_date: '2026-09-14', employees: [{ employee_id: 'IA3', gross_pay: 2100, pay_frequency: 'BIWEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'IA', ia_marital_status: 'HEAD_OF_HOUSEHOLD', ia_allowance_amount: 160 }] });
+  const iaEx4 = calculateUsPayroll({ pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30', employees: [{ employee_id: 'IA4', gross_pay: 5000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'IA', ia_marital_status: 'OTHER_OR_MFJ_SPOUSE_WORKS', ia_allowance_amount: 40 }] });
+  const iaEx5 = calculateUsPayroll({ pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30', employees: [{ employee_id: 'IA5', gross_pay: 5000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'IA', ia_marital_status: 'MFJ_SPOUSE_NO_EARNED_INCOME', ia_allowance_amount: 80 }] });
+  const iaEx6 = calculateUsPayroll({ pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30', employees: [{ employee_id: 'IA6', gross_pay: 5000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'IA', ia_marital_status: 'HEAD_OF_HOUSEHOLD', ia_allowance_amount: 160 }] });
+
+  const v13Case = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [
+      { employee_id: 'OH1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'OH', oh_exemptions: 0 },
+      { employee_id: 'LA1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'LA', la_filing_status: 'SINGLE_OR_MFS' },
+      { employee_id: 'AL1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'AL', al_filing_status: 'SINGLE', al_dependents: 0 }
+    ]
+  });
+  const [sOh1, sLa1, sAl1] = v13Case.employees;
+  const expectedOh1 = 283.46;
+  const expectedLa1 = 275.85;
+  const expectedAl1 = 480;
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -3626,7 +3878,12 @@ export function payrollEngineSelfTestUS() {
     sAr1.ar_income_tax === expectedAr1 && sHi1.hi_income_tax === expectedHi1 &&
     v12Case.controls.employee_count === 11 && v12Case.controls.journal_balanced &&
     sMa1.ma_income_tax > 0 && sNe1.ne_income_tax > 0 && sVt1.vt_income_tax > 0 &&
-    sWv1.wv_income_tax > 0 && sKs1.ks_income_tax > 0 && sId1.id_income_tax > 0 && sNm1.nm_income_tax > 0;
+    sWv1.wv_income_tax > 0 && sKs1.ks_income_tax > 0 && sId1.id_income_tax > 0 && sNm1.nm_income_tax > 0 &&
+    iaEx1.employees[0].ia_income_tax === 59.26 && iaEx2.employees[0].ia_income_tax === 38.72 &&
+    iaEx3.employees[0].ia_income_tax === 45.15 && iaEx4.employees[0].ia_income_tax === 145.5 &&
+    iaEx5.employees[0].ia_income_tax === 101 && iaEx6.employees[0].ia_income_tax === 114.92 &&
+    sOh1.oh_income_tax === expectedOh1 && sLa1.la_income_tax === expectedLa1 && sAl1.al_income_tax === expectedAl1 &&
+    v13Case.controls.journal_balanced;
 
   return {
     ok,
@@ -3638,7 +3895,7 @@ export function payrollEngineSelfTestUS() {
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
-    inWorkedExample, ncWorkedExample, v11Case, v12Case,
+    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
