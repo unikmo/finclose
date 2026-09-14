@@ -1,4 +1,4 @@
-// United States (US) payroll rule pack — v3: federal + California + New Jersey.
+// United States (US) payroll rule pack — v4: federal + California + New Jersey + New York (incl. NYC + Yonkers).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -13,19 +13,44 @@
 //      against the current-year EDD publication,
 //   5. the New Jersey withholding rate tables (NJ-WT) and the UI/Workforce
 //      Development/SWF, TDI, and FLI employee rates against the current-year
-//      NJ Division of Taxation and NJDOL publications.
+//      NJ Division of Taxation and NJDOL publications,
+//   6. the New York, NYC, and Yonkers withholding rate tables (NYS-50-T-NYS/
+//      NYC/Y) against the current-year NYS Department of Taxation and
+//      Finance publications.
 // These figures change every year, several of them (SS wage base, CA SDI
 // rate, FUTA credit reductions, NJ's UI/TDI/FLI rates) finalized only late
 // in the prior year or even during the current year. This file uses figures
 // sourced via AI web research (not a professional review) as of September
 // 2026.
 //
+// v4 change log (from v3): adds New York (state income tax, NYC resident
+// tax, Yonkers resident surcharge / nonresident earnings tax) as a third
+// supported state — the most structurally complex of the three states
+// scoped after CA, built last of the three deliberately (see v3's own note
+// below on why NJ went first). NY layers up to three separate income-tax
+// withholding lines on top of federal, each with its own deduction table
+// and bracket schedule: NY State tax (always), NYC resident tax (opt-in via
+// ny_nyc_resident), and either the Yonkers RESIDENT surcharge (opt-in via
+// ny_yonkers_resident — computed as 16.75% of the NY State tax amount per
+// NYS-50-T-Y's own published method) or the Yonkers NONRESIDENT earnings
+// tax (opt-in via ny_yonkers_nonresident_workplace — a flat 0.5% on wages
+// above a small per-period exemption, for employees who work in Yonkers but
+// live elsewhere). A real implementation trap encountered and fixed during
+// this build: NY State, NYC, and Yonkers do NOT all share one deduction
+// table — NY State and Yonkers publish identical deduction tables, but NYC's
+// own table uses a materially lower deduction base (its per-allowance
+// exemption value is identical, only the flat deduction differs). Treating
+// all three as one shared table silently understated the NYC tax by
+// several dollars per pay period until caught by comparing against the
+// NYS-50-T-NYC publication's own worked example. Pre-tax deduction handling
+// was NOT extended to NY this pass, for the same reason as NJ (see below).
+//
 // v3 change log (from v2): adds New Jersey as a second supported state.
-// Scoped narrowly and deliberately behind CA in market priority — the
+// Scoped narrowly and deliberately ahead of NY in build order — the
 // NY-Newark-Jersey City metro area is the single largest concentration of
 // small businesses of any US metro, and NJ has no jurisdiction-lookup
-// complexity (unlike the NY and MD builds planned next: NY layers NYC and
-// Yonkers local taxes on top of state tax, MD requires a 24-county rate
+// complexity (unlike NY, built next in v4: NY layers NYC and Yonkers local
+// taxes on top of state tax; MD, still planned, requires a 24-county rate
 // lookup by employee residence). NJ instead layers FOUR separate withholding
 // lines on top of federal: its own state income tax (NJ-W4 Rate Tables A/B,
 // not the federal W-4 shape — NJ never adopted the federal form), plus three
@@ -63,11 +88,11 @@
 //     engine's law-following behavior; see the PR for the full comparison).
 //
 // Scope, deliberately narrow (rejected, not approximated):
-//   - Only two states are supported: California and New Jersey. Every other
-//     US state (including the nine with no state income tax, which would
-//     otherwise be "free" additions) is rejected until built and validated
-//     individually — "no income tax" still leaves SUI/SDI/local nuances
-//     unverified here.
+//   - Only three states are supported: California, New Jersey, and New York.
+//     Every other US state (including the nine with no state income tax,
+//     which would otherwise be "free" additions) is rejected until built and
+//     validated individually — "no income tax" still leaves SUI/SDI/local
+//     nuances unverified here.
 //   - Federal Form W-4 (2020 or later revision) only. Pre-2020 W-4s
 //     (allowances-based) are rejected — the IRS's own "computational bridge"
 //     could approximate them, but that's out of scope for v1.
@@ -106,17 +131,21 @@
 //     simplification.
 //
 // Self-test validated against the exact IRS Pub 15-T 2026 Percentage Method
-// Table, EDD 2026 Method B, and NJ-WT rate table figures cited in evidence
-// below. CA is additionally validated against two real-shaped sample
-// payslips (see the v2 change log and the PR history). NJ has not yet been
-// checked against any real payslip — flagged explicitly as a gap, the same
-// way CA's v1 lacked real-payslip validation before its own review pass.
+// Table, EDD 2026 Method B, NJ-WT, and NYS-50-T-NYS/NYC/Y rate table figures
+// cited in evidence below — the NY/NYC/Yonkers cases are checked directly
+// against the worked examples published in those three official NYS
+// documents, not just hand-derived from the bracket tables. CA is
+// additionally validated against two real-shaped sample payslips (see the
+// v2 change log and the PR history). Neither NJ nor NY has yet been checked
+// against a real payslip — flagged explicitly as a gap, the same way CA's
+// v1 lacked real-payslip validation before its own review pass.
 
 export type UsPayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
 export type UsFederalFilingStatus = 'SINGLE_MFS' | 'MFJ' | 'HOH';
 export type UsCaFilingStatus = 'SINGLE' | 'MARRIED_0_OR_1' | 'MARRIED_2_OR_MORE' | 'HEAD_OF_HOUSEHOLD';
-export type UsState = 'CA' | 'NJ';
+export type UsState = 'CA' | 'NJ' | 'NY';
 export type NjRateTable = 'A' | 'B';
+export type NyFilingStatus = 'SINGLE' | 'MARRIED';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -144,6 +173,16 @@ export type UsEmployeeInput = {
   nj_allowances?: number;
   ytd_nj_ui_wf_wages_before?: number;
   ytd_nj_tdi_fli_wages_before?: number;
+  // NY fields — required when state === 'NY'.
+  ny_filing_status?: NyFilingStatus;
+  ny_allowances?: number;
+  // NYC and Yonkers resident status are independent of ny_filing_status —
+  // an NY employee may be an NYC resident, a Yonkers resident, neither, or
+  // (rarely, e.g. remote-work edge cases) working in Yonkers while resident
+  // elsewhere in NY (Yonkers nonresident earnings tax).
+  ny_nyc_resident?: boolean;
+  ny_yonkers_resident?: boolean;
+  ny_yonkers_nonresident_workplace?: boolean;
 };
 
 export type UsPayrollRunInput = {
@@ -168,6 +207,9 @@ export type UsJournalLine = {
     | 'NJ_UI_WF_SWF_PAYABLE'
     | 'NJ_TDI_PAYABLE'
     | 'NJ_FLI_PAYABLE'
+    | 'NY_INCOME_TAX_PAYABLE'
+    | 'NYC_INCOME_TAX_PAYABLE'
+    | 'YONKERS_TAX_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -193,6 +235,9 @@ export type UsEmployeeResult = {
   nj_ui_wf_swf: number;
   nj_tdi: number;
   nj_fli: number;
+  ny_income_tax: number;
+  nyc_income_tax: number;
+  yonkers_tax: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -223,6 +268,9 @@ export type UsPayrollRunResult = {
     nj_ui_wf_swf: number;
     nj_tdi: number;
     nj_fli: number;
+    ny_income_tax: number;
+    nyc_income_tax: number;
+    yonkers_tax: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -238,7 +286,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-CA-NJ-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V3',
+  id: 'US-CA-NJ-NY-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V4',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -382,6 +430,82 @@ export const PAYROLL_RULE_PACK_US = {
       }
     } as Record<UsPayFrequency, Record<NjRateTable, Array<[number, number, number]>>>
   },
+  new_york: {
+    // NY-WT Special Tables for Deduction and Exemption Allowances (Table B:
+    // per-period deduction by filing status; Table C: value of one exemption
+    // by period). Yonkers (NYS-50-T-Y Table A) publishes the SAME deduction
+    // table as NY State (confirmed identical figures in both publications)
+    // — but NYC's own Table A (NYS-50-T-NYC) uses a materially LOWER
+    // deduction base than NY State/Yonkers, even though the per-allowance
+    // exemption value (Table C) is identical across all three. Do not
+    // conflate the NY State/Yonkers deduction table with NYC's.
+    deduction_per_period: { WEEKLY: 142.3, BIWEEKLY: 284.6, SEMIMONTHLY: 308.35, MONTHLY: 616.7 } as Record<UsPayFrequency, number>,
+    deduction_per_period_married: { WEEKLY: 152.9, BIWEEKLY: 305.8, SEMIMONTHLY: 331.25, MONTHLY: 662.5 } as Record<UsPayFrequency, number>,
+    nyc_deduction_per_period: { WEEKLY: 96.15, BIWEEKLY: 192.3, SEMIMONTHLY: 208.35, MONTHLY: 416.7 } as Record<UsPayFrequency, number>,
+    nyc_deduction_per_period_married: { WEEKLY: 105.75, BIWEEKLY: 211.5, SEMIMONTHLY: 229.15, MONTHLY: 458.3 } as Record<UsPayFrequency, number>,
+    exemption_per_allowance: { WEEKLY: 19.25, BIWEEKLY: 38.5, SEMIMONTHLY: 41.65, MONTHLY: 83.3 } as Record<UsPayFrequency, number>,
+    // NYS-50-T-NYS (1/26) Method II Exact Calculation Method, Tables II-A/B/C/D.
+    // Brackets: [atLeast net wages, base, rate]. Valid up to the "Method III
+    // Top Income Tax Rates" cutover (~$20-41k/period depending on period and
+    // status) — not implemented; see limitations.
+    state_rate_tables: {
+      WEEKLY: {
+        SINGLE: [[0, 0, 0.039], [163, 6.38, 0.044], [225, 9.08, 0.0515], [267, 11.27, 0.054], [1551, 80.58, 0.059], [1862, 98.9, 0.0703], [2070, 113.58, 0.0753], [3032, 186.02, 0.064], [4142, 257.1, 0.1144], [5104, 367.13, 0.0735]],
+        MARRIED: [[0, 0, 0.039], [163, 6.38, 0.044], [225, 9.08, 0.0515], [267, 11.27, 0.054], [1551, 80.58, 0.059], [1862, 98.9, 0.0657], [2070, 112.6, 0.0707], [3032, 180.54, 0.0801], [4068, 263.62, 0.064], [6215, 401.04, 0.1349], [7177, 530.77, 0.0735], [20722, 1526.33, 0.0765]]
+      },
+      BIWEEKLY: {
+        SINGLE: [[0, 0, 0.039], [327, 12.77, 0.044], [450, 18.15, 0.0515], [535, 22.54, 0.054], [3102, 161.15, 0.059], [3723, 197.81, 0.0703], [4140, 227.15, 0.0753], [6063, 372.04, 0.064], [8285, 514.19, 0.1144], [10208, 734.27, 0.0735]],
+        MARRIED: [[0, 0, 0.039], [327, 12.77, 0.044], [450, 18.15, 0.0515], [535, 22.54, 0.054], [3102, 161.15, 0.059], [3723, 197.81, 0.0657], [4140, 225.19, 0.0707], [6063, 361.08, 0.0801], [8137, 527.23, 0.064], [12431, 802.08, 0.1349], [14354, 1061.54, 0.0735], [41444, 3052.65, 0.0765]]
+      },
+      SEMIMONTHLY: {
+        SINGLE: [[0, 0, 0.039], [354, 13.83, 0.044], [488, 19.67, 0.0515], [579, 24.42, 0.054], [3360, 174.58, 0.059], [4033, 214.29, 0.0703], [4485, 246.08, 0.0753], [6569, 403.04, 0.064], [8975, 557.04, 0.1144], [11058, 795.46, 0.0735]],
+        MARRIED: [[0, 0, 0.039], [354, 13.83, 0.044], [488, 19.67, 0.0515], [579, 24.42, 0.054], [3360, 174.58, 0.059], [4033, 214.29, 0.0657], [4485, 243.96, 0.0707], [6569, 391.17, 0.0801], [8815, 571.17, 0.064], [13467, 868.92, 0.1349], [15550, 1150.0, 0.0735], [44898, 3307.04, 0.0765]]
+      },
+      MONTHLY: {
+        SINGLE: [[0, 0, 0.039], [708, 27.67, 0.044], [975, 39.33, 0.0515], [1158, 48.83, 0.054], [6721, 349.17, 0.059], [8067, 428.58, 0.0703], [8971, 492.17, 0.0753], [13138, 806.08, 0.064], [17950, 1114.08, 0.1144], [22117, 1590.92, 0.0735]],
+        MARRIED: [[0, 0, 0.039], [708, 27.67, 0.044], [975, 39.33, 0.0515], [1158, 48.83, 0.054], [6721, 349.17, 0.059], [8067, 428.58, 0.0657], [8971, 487.92, 0.0707], [13138, 782.33, 0.0801], [17629, 1142.33, 0.064], [26933, 1737.83, 0.1349], [31100, 2300.0, 0.0735], [89796, 6614.08, 0.0765]]
+      }
+    } as Record<UsPayFrequency, Record<NyFilingStatus, Array<[number, number, number]>>>,
+    // Net-wage threshold at which NYS-50-T-NYS says "Use Method III, Top
+    // Income Tax Rates Method" instead of the exact-calculation table above.
+    // Method III is NOT implemented — net wages at or above this threshold
+    // are rejected rather than mis-taxed at the top exact-calc bracket rate
+    // indefinitely (irrelevant for this pack's small-business target
+    // segment in practice, but rejected explicitly per this file's
+    // fail-closed convention).
+    state_method_iii_threshold: {
+      WEEKLY: { SINGLE: 20722, MARRIED: 41449 },
+      BIWEEKLY: { SINGLE: 41444, MARRIED: 82898 },
+      SEMIMONTHLY: { SINGLE: 44898, MARRIED: 89806 },
+      MONTHLY: { SINGLE: 89796, MARRIED: 179613 }
+    } as Record<UsPayFrequency, Record<NyFilingStatus, number>>,
+    // NYS-50-T-NYC (1/26) Method II, Tables II-A/B/C/D. Identical bracket
+    // structure for Single and Married filing status (NYC's own table
+    // publishes the same rates/thresholds for both) — only the deduction
+    // amount from Table A above differs by filing status.
+    nyc_rate_table: {
+      WEEKLY: [[0, 0, 0.0205], [154, 3.15, 0.028], [167, 3.54, 0.0325], [288, 7.46, 0.0395], [481, 15.06, 0.0415], [1154, 43.0, 0.0425]],
+      BIWEEKLY: [[0, 0, 0.0205], [308, 6.31, 0.028], [334, 7.08, 0.0325], [577, 14.92, 0.0395], [962, 30.12, 0.0415], [2308, 86.0, 0.0425]],
+      SEMIMONTHLY: [[0, 0, 0.0205], [333, 6.83, 0.028], [362, 7.67, 0.0325], [625, 16.17, 0.0395], [1042, 32.63, 0.0415], [2500, 93.17, 0.0425]],
+      MONTHLY: [[0, 0, 0.0205], [667, 13.67, 0.028], [725, 15.33, 0.0325], [1250, 32.33, 0.0395], [2083, 65.25, 0.0415], [5000, 186.33, 0.0425]]
+    } as Record<UsPayFrequency, Array<[number, number, number]>>,
+    // NYS-50-T-Y (1/26): the Yonkers RESIDENT surcharge is 16.75% of the NY
+    // State tax computed on the same net wages via the same state_rate_tables
+    // brackets above (confirmed identical column values in the Yonkers
+    // publication's own Method II tables) — so no separate Yonkers-resident
+    // bracket table is needed, just this multiplier.
+    yonkers_resident_surcharge_rate: 0.1675,
+    // Yonkers NONRESIDENT earnings tax (Method VII): flat 0.50% of gross
+    // wages after a per-period exemption; applies to employees who work in
+    // Yonkers but live elsewhere. Brackets: [atLeast gross wages, exemption].
+    yonkers_nonresident_rate: 0.005,
+    yonkers_nonresident_exemption_tables: {
+      WEEKLY: [[0, Infinity], [77, 58], [192, 38], [385, 19], [577, 0]],
+      BIWEEKLY: [[0, Infinity], [154, 115], [385, 77], [769, 38], [1154, 0]],
+      SEMIMONTHLY: [[0, Infinity], [167, 125], [417, 83], [833, 42], [1250, 0]],
+      MONTHLY: [[0, Infinity], [333, 250], [833, 167], [1667, 83], [2500, 0]]
+    } as Record<UsPayFrequency, Array<[number, number]>>
+  },
   evidence: [
     { authority: 'Internal Revenue Service', instrument: 'Publication 15-T (2026), Federal Income Tax Withholding Methods, Section 1 — Percentage Method Tables for Automated Payroll Systems', url: 'https://www.irs.gov/pub/irs-pdf/p15t.pdf' },
     { authority: 'Internal Revenue Service', instrument: 'Publication 926 / SSA 2026 wage base and Additional Medicare Tax rules (IRC 3102(f))', url: 'https://www.irs.gov/pub/irs-pdf/p926.pdf' },
@@ -392,10 +516,14 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Internal Revenue Code', instrument: '§125 — cafeteria-plan (Section 125) benefits properly elected are excluded from federal income tax wages, FICA wages, and FUTA wages', url: 'https://www.irs.gov/publications/p15b' },
     { authority: 'California Employment Development Department (EDD)', instrument: 'DE 231 series — California\'s wage-exclusion treatment (Subject Wages vs. PIT Wages) for 401(k) deferrals and cafeteria-plan benefits generally follows the federal treatment', url: 'https://edd.ca.gov' },
     { authority: 'New Jersey Division of Taxation', instrument: 'NJ-WT — New Jersey Income Tax Withholding Instructions and Rate Tables (percentage method, effective Oct 1, 2020, still current)', url: 'https://www.nj.gov/treasury/taxation/pdf/current/njwt.pdf' },
-    { authority: 'New Jersey Department of Labor and Workforce Development', instrument: '2026 UI/Workforce Development/Supplemental Workforce Fund, Temporary Disability Insurance, and Family Leave Insurance employee rates and wage bases', url: 'https://www.nj.gov/labor/lwdhome/press/2025/20251229_newbenefitrates2026.shtml' }
+    { authority: 'New Jersey Department of Labor and Workforce Development', instrument: '2026 UI/Workforce Development/Supplemental Workforce Fund, Temporary Disability Insurance, and Family Leave Insurance employee rates and wage bases', url: 'https://www.nj.gov/labor/lwdhome/press/2025/20251229_newbenefitrates2026.shtml' },
+    { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-NYS (1/26) — New York State Withholding Tax Tables and Methods', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf' },
+    { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-NYC (1/26) — New York City Withholding Tax Tables and Methods', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nyc.pdf' },
+    { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-Y (1/26) — Yonkers Withholding Tax Tables and Methods (resident surcharge and nonresident earnings tax)', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_y.pdf' },
+    { authority: 'Cross-check reference', instrument: '"2026 U.S. Payroll Tax Implementation Reference" (all-50-states developer baseline, verified through 2026-09-13) — used to independently corroborate the CA/NJ/NY figures in this file against a second source; also the source for the NY PFL (0.432% EE, annual max $411.91), NY DBL, and MCTMT figures cited in limitations below, none of which are implemented here', url: 'file: US_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-14)' }
   ],
   limitations: [
-    'Only California and New Jersey are supported as states. Every other state, including New York and Maryland (both explicitly planned next), is rejected pending its own build and validation.',
+    'Only California, New Jersey, and New York are supported as states. Maryland (planned next) and every other state is rejected pending its own build and validation.',
     'Only 2020-or-later Form W-4 revisions are supported (Steps 1-4) for federal withholding. Pre-2020 allowances-based W-4s are rejected, not approximated via the IRS computational bridge.',
     'Only weekly, biweekly, semimonthly, and monthly pay frequencies are supported.',
     'State Unemployment Insurance (SUI) is not calculated for either state — both California (EDD) and New Jersey (NJDOL) assign each employer an individual experience rate, which this engine has no statutory default for. Callers must compute and post employer-side SUI/UI separately. (New Jersey\'s EMPLOYEE-side UI/Workforce Development contribution, which does have a flat statutory rate, IS calculated — see nj_ui_wf_swf below.)',
@@ -404,6 +532,12 @@ export const PAYROLL_RULE_PACK_US = {
     'New Jersey: the Newark payroll tax (an employer-paid 1% tax on total payroll for businesses with 50+ employees working in Newark) is NOT calculated — directly relevant to this pack\'s ~50-employee target segment if any client has a Newark work location, and flagged here rather than silently ignored.',
     'New Jersey: the NJ/PA reciprocal agreement (no NJ withholding for PA-resident employees who file Form NJ-165) is not modeled; all NJ employees are withheld as NJ-taxable.',
     'New Jersey: pretax_401k_deferral and pretax_section125_deduction are NOT applied to NJ state income tax, UI/WF/SWF, TDI, or FLI wages — NJ employees with either pretax field non-zero are rejected rather than silently taxed on the wrong base, since NJ\'s treatment of these wage bases was not independently verified this pass (unlike the federal/CA treatment, which was).',
+    'New York: pretax_401k_deferral and pretax_section125_deduction are also NOT applied to NY State, NYC, or Yonkers wages for the same reason — NY employees with either pretax field non-zero are rejected rather than silently taxed on the wrong wage base.',
+    'New York: the "Method III Top Income Tax Rates" schedule (for very high net wages — roughly above the $20k-$41k per-period range where each exact-calculation table in this file stops, i.e. very high six-figure and up annual pay) is NOT implemented. Employees whose net wages exceed the top bracket of the tables here are rejected rather than approximated — a non-issue for this pack\'s small-business target segment, but rejected explicitly rather than silently mis-taxed.',
+    'New York: NY State Paid Family Leave (PFL — 0.432% of gross wages per pay period, 2026 annual max $411.91) and NY State Disability Benefits Law (DBL — employee contribution up to 0.5% of wages, capped at $0.60/week, where the employer elects to deduct it) are NOT calculated — flagged explicitly since both are real deductions on most NY paystubs, not silently ignored.',
+    'New York: the Metropolitan Commuter Transportation Mobility Tax (MCTMT) — an EMPLOYER-paid payroll tax in the MTA region (NYC + surrounding counties) — is NOT calculated. It is an employer-side tax, not an employee withholding, so it has no effect on any figure this engine reports to employees, but it is a real employer payroll-tax liability this engine does not compute.',
+    'New York: NYC residency and Yonkers residency/workplace are each opt-in per employee via ny_nyc_resident, ny_yonkers_resident, and ny_yonkers_nonresident_workplace. This engine has no way to independently verify an employee\'s actual home or work address — getting these flags wrong for an employee produces a wrong result, not a rejected one, so the caller is responsible for setting them correctly.',
+    'New York: the Yonkers RESIDENT surcharge is computed as 16.75% of the NY State tax amount on the same net wages, per the official NYS-50-T-Y method — its published bracket tables are numerically identical to the NY State ones, so this is the documented method, not an approximation.',
     'Only two pre-tax deduction categories are modeled for CA: traditional 401(k)/403(b) deferrals (excluded from federal/CA income tax wages only, still FICA/FUTA-taxable) and Section 125 cafeteria-plan deductions (excluded from income tax wages, FICA wages, FUTA wages, and CA SDI wages). Roth deferrals, HSA contributions, and IRS annual contribution-limit enforcement are not modeled — the caller must not pass amounts exceeding the employee\'s actual limit.',
     'Supplemental-wage flat-rate withholding methods (22% optional / 37% mandatory federal; NJ\'s own supplemental-wage combining rule) are not implemented; all pay is run through the regular annualized/percentage method.',
     'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official IRS Pub 15-T, EDD Method B, and NJ-WT publications before this pack is marked VERIFIED_BASIC_RULES.',
@@ -518,8 +652,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    if (employee.state !== 'CA' && employee.state !== 'NJ') {
-      const error = new Error(`state for ${employeeId} is not supported — only CA and NJ are implemented in this rule pack`);
+    if (employee.state !== 'CA' && employee.state !== 'NJ' && employee.state !== 'NY') {
+      const error = new Error(`state for ${employeeId} is not supported — only CA, NJ, and NY are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
       throw error;
     }
@@ -555,6 +689,28 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       }
       if (!Number.isInteger(employee.nj_allowances) || (employee.nj_allowances as number) < 0) {
         const error = new Error(`nj_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'NY') {
+      if (pretax401k > 0 || pretaxSection125 > 0) {
+        const error = new Error(`pretax_401k_deferral and pretax_section125_deduction are not supported for NY employees (${employeeId}) in this rule pack — see limitations`);
+        (error as Error & { status?: number }).status = 409;
+        throw error;
+      }
+      if (employee.ny_filing_status !== 'SINGLE' && employee.ny_filing_status !== 'MARRIED') {
+        const error = new Error(`ny_filing_status for ${employeeId} must be 'SINGLE' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.ny_allowances) || (employee.ny_allowances as number) < 0) {
+        const error = new Error(`ny_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (employee.ny_yonkers_resident && employee.ny_yonkers_nonresident_workplace) {
+        const error = new Error(`ny_yonkers_resident and ny_yonkers_nonresident_workplace cannot both be true for ${employeeId}`);
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
@@ -638,9 +794,48 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       njFli = ceilingContribution(ytdNjTdiFliBefore, grossPay, p.new_jersey.tdi_fli_wage_base_annual, p.new_jersey.fli_rate);
     }
 
+    // --- New York State income tax, NYC resident tax, Yonkers resident surcharge / nonresident earnings tax ---
+    let nyIncomeTax = 0;
+    let nycIncomeTax = 0;
+    let yonkersTax = 0;
+    if (employee.state === 'NY') {
+      const nyFilingStatus = employee.ny_filing_status as NyFilingStatus;
+      const deductionTable = nyFilingStatus === 'MARRIED' ? p.new_york.deduction_per_period_married : p.new_york.deduction_per_period;
+      const deduction = deductionTable[employee.pay_frequency];
+      const exemption = money((employee.ny_allowances as number) * p.new_york.exemption_per_allowance[employee.pay_frequency]);
+      const netWages = Math.max(0, money(grossPay - deduction - exemption));
+      const methodIiiThreshold = p.new_york.state_method_iii_threshold[employee.pay_frequency][nyFilingStatus];
+      if (netWages >= methodIiiThreshold) {
+        const error = new Error(`net NY wages for ${employeeId} exceed this engine's supported range (Method III Top Income Tax Rates is not implemented) — see limitations`);
+        (error as Error & { status?: number }).status = 409;
+        throw error;
+      }
+      const nyBrackets = p.new_york.state_rate_tables[employee.pay_frequency][nyFilingStatus];
+      nyIncomeTax = bracketLookup(netWages, nyBrackets);
+      if (employee.ny_nyc_resident) {
+        // NYC uses its OWN (lower) deduction base — not the NY State one.
+        const nycDeductionTable = nyFilingStatus === 'MARRIED' ? p.new_york.nyc_deduction_per_period_married : p.new_york.nyc_deduction_per_period;
+        const nycDeduction = nycDeductionTable[employee.pay_frequency];
+        const nycNetWages = Math.max(0, money(grossPay - nycDeduction - exemption));
+        nycIncomeTax = bracketLookup(nycNetWages, p.new_york.nyc_rate_table[employee.pay_frequency]);
+      }
+      if (employee.ny_yonkers_resident) {
+        yonkersTax = money(nyIncomeTax * p.new_york.yonkers_resident_surcharge_rate);
+      } else if (employee.ny_yonkers_nonresident_workplace) {
+        const exemptionTable = p.new_york.yonkers_nonresident_exemption_tables[employee.pay_frequency];
+        let yonkersExemption = 0;
+        let belowFirstThreshold = grossPay < exemptionTable[1][0];
+        for (const [atLeast, exemptionAmount] of exemptionTable) {
+          if (grossPay >= atLeast) yonkersExemption = exemptionAmount;
+        }
+        yonkersTax = belowFirstThreshold ? 0 : money(Math.max(0, grossPay - yonkersExemption) * p.new_york.yonkers_nonresident_rate);
+      }
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
-      caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli
+      caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
+      nyIncomeTax + nycIncomeTax + yonkersTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -666,6 +861,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       nj_ui_wf_swf: njUiWfSwf,
       nj_tdi: njTdi,
       nj_fli: njFli,
+      ny_income_tax: nyIncomeTax,
+      nyc_income_tax: nycIncomeTax,
+      yonkers_tax: yonkersTax,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -688,6 +886,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     nj_ui_wf_swf: sum(employees.map(e => e.nj_ui_wf_swf)),
     nj_tdi: sum(employees.map(e => e.nj_tdi)),
     nj_fli: sum(employees.map(e => e.nj_fli)),
+    ny_income_tax: sum(employees.map(e => e.ny_income_tax)),
+    nyc_income_tax: sum(employees.map(e => e.nyc_income_tax)),
+    yonkers_tax: sum(employees.map(e => e.yonkers_tax)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -706,6 +907,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'NJ_UI_WF_SWF_PAYABLE', amount: totals.nj_ui_wf_swf },
     { side: 'CREDIT', account_role: 'NJ_TDI_PAYABLE', amount: totals.nj_tdi },
     { side: 'CREDIT', account_role: 'NJ_FLI_PAYABLE', amount: totals.nj_fli },
+    { side: 'CREDIT', account_role: 'NY_INCOME_TAX_PAYABLE', amount: totals.ny_income_tax },
+    { side: 'CREDIT', account_role: 'NYC_INCOME_TAX_PAYABLE', amount: totals.nyc_income_tax },
+    { side: 'CREDIT', account_role: 'YONKERS_TAX_PAYABLE', amount: totals.yonkers_tax },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -1115,6 +1319,67 @@ export function payrollEngineSelfTestUS() {
   const expectedNjTdi11 = money(6100 * 0.0019);
   const expectedNjFli11 = money(6100 * 0.0023);
 
+  // Case 12: New York, weekly, Single, 3 allowances, NYC resident, Yonkers
+  // resident. Hand-derived directly against the worked examples in the
+  // official NYS-50-T-NYS/NYC/Y publications (Method II, page 16/25/16):
+  // deduction+exemption 200.05 -> net 199.95; NY state tax $8.01 (table
+  // line2: (199.95-163)*0.044+6.38); NYC tax $6.11 (deduction 153.90 ->
+  // net 246.10, table line3: (246.10-167)*0.0325+3.54); Yonkers resident
+  // surcharge = $8.01 * 16.75% = $1.34.
+  const nyCaseSingle = calculateUsPayroll({
+    pay_period_start: '2026-08-03',
+    pay_period_end: '2026-08-09',
+    pay_date: '2026-08-09',
+    employees: [
+      {
+        employee_id: 'E012',
+        gross_pay: 400,
+        pay_frequency: 'WEEKLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'NY',
+        ny_filing_status: 'SINGLE',
+        ny_allowances: 3,
+        ny_nyc_resident: true,
+        ny_yonkers_resident: true
+      }
+    ]
+  });
+  const s12 = nyCaseSingle.employees[0];
+  const expectedNyIncomeTax12 = 8.01;
+  const expectedNycIncomeTax12 = 6.11;
+  const expectedYonkersTax12 = 1.34;
+
+  // Case 13: New York, weekly, $200 gross, Yonkers NONRESIDENT workplace.
+  // Hand-derived against the NYS-50-T-Y Method VII worked example: wages
+  // 200 is in the [192,385) bracket, exemption 38 -> (200-38)*0.005=0.81.
+  const nyCaseYonkersNonresident = calculateUsPayroll({
+    pay_period_start: '2026-08-03',
+    pay_period_end: '2026-08-09',
+    pay_date: '2026-08-09',
+    employees: [
+      {
+        employee_id: 'E013',
+        gross_pay: 200,
+        pay_frequency: 'WEEKLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'NY',
+        ny_filing_status: 'SINGLE',
+        ny_allowances: 0,
+        ny_yonkers_nonresident_workplace: true
+      }
+    ]
+  });
+  const s13 = nyCaseYonkersNonresident.employees[0];
+  const expectedYonkersTax13 = 0.81;
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -1162,7 +1427,13 @@ export function payrollEngineSelfTestUS() {
     s11.nj_ui_wf_swf === expectedNjUiWfSwf11 &&
     s11.nj_tdi === expectedNjTdi11 &&
     s11.nj_fli === expectedNjFli11 &&
-    njCeilingCase.controls.journal_balanced;
+    njCeilingCase.controls.journal_balanced &&
+    s12.ny_income_tax === expectedNyIncomeTax12 &&
+    s12.nyc_income_tax === expectedNycIncomeTax12 &&
+    s12.yonkers_tax === expectedYonkersTax12 &&
+    nyCaseSingle.controls.journal_balanced &&
+    s13.yonkers_tax === expectedYonkersTax13 &&
+    nyCaseYonkersNonresident.controls.journal_balanced;
 
   return {
     ok,
@@ -1170,6 +1441,8 @@ export function payrollEngineSelfTestUS() {
     ssCase,
     addlMedicareCase,
     pretaxCase,
+    nyCaseSingle,
+    nyCaseYonkersNonresident,
     njCaseA,
     njCaseB,
     njCeilingCase,
