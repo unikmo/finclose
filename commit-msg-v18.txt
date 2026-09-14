@@ -1,0 +1,44 @@
+payroll(us): fix Ohio to current post-2026-08-01 rates (v18)
+
+User supplied a "developer formula pack" cross-check document covering
+all 50 states + DC as a structural spec. Checked it against every
+already-implemented state: every jurisdiction where it gave an actual
+number (federal FICA/FUTA, AZ, CO, PA, IL, MI, KY, MA, NC headline vs.
+actual rate, GA, IN, WI) matched this engine exactly. One real
+discrepancy surfaced: Ohio.
+
+The cross-check document flagged OH bracket rates as
+"1.60%, 2.99%, 3.40% revised bracket rates" with an August 1, 2026
+effective date, versus this engine's previously-shipped
+1.775%/2.99%/3.64% (sourced from a stale PP20-2025 NFC bulletin,
+already flagged in this file's own limitations as needing
+reconfirmation).
+
+Verified independently before touching any code: a web search
+confirmed Ohio Department of Taxation genuinely revised its
+withholding tables effective for payrolls ending on/after 2026-08-01,
+per House Bill 96 (the 2025 biennial budget) -- corroborated by
+ohiocpa.com's practitioner alert and an EY tax-news item. Then fetched
+Ohio DOT's own current "Employer Withholding Taxes - Percentage Method
+(Effective August 1, 2026)" PDF directly and read the actual tables
+rather than trusting the cross-check document's headline-only mention.
+
+Ohio's real official method turned out to be structured differently
+than what this engine had modeled: separate PER-PAY-PERIOD exemption
+subtractions and bracket tables for weekly/biweekly/semi-monthly/
+monthly, not an annualize-and-divide formula. Replaced the
+implementation to match Ohio's actual method exactly (all four pay
+frequencies), rather than reconstructing an approximately-equivalent
+annual table. Updated the self-test's existing OH assertion (now
+$275.66 for the same $10,000/monthly/0-exemption case that previously
+expected $283.46) and added a second hand-verified weekly case
+($10.98 for $600/week, 0 exemptions) checked directly against Ohio's
+own published table row.
+
+No pre-2026-08-01 payroll date is modeled -- every OH calculation now
+uses the current post-revision table regardless of pay_date, flagged
+explicitly in limitations.
+
+Full self-test suite (all v1-v18 cases) passes.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

@@ -319,7 +319,7 @@ function engineGate() {
   const finance = financeCycleSelfTest();
   const close = closeGovernanceSelfTest();
   const ok = payroll.ok && bookkeeping.ok && finance.ok && close.ok;
-  return gate('deterministic_financial_engines', 'Deterministic payroll/bookkeeping/close regression suite', ok ? 'PASS' : 'FAIL', ok ? 'All deterministic engine self-tests passed.' : 'One or more deterministic financial engine self-tests failed.', true, { payroll_georgia: payroll.georgia.ok, payroll_germany_draft: payroll.germany.ok, bookkeeping: bookkeeping.ok, finance_cycle: finance.ok, close_governance: close.ok });
+  return gate('deterministic_financial_engines', 'Deterministic payroll/bookkeeping/close regression suite', ok ? 'PASS' : 'FAIL', ok ? 'All deterministic engine self-tests passed.' : 'One or more deterministic financial engine self-tests failed.', true, { payroll_georgia: payroll.georgia.ok, payroll_germany_draft: payroll.germany.ok, payroll_us_draft: payroll.unitedStates.ok, bookkeeping: bookkeeping.ok, finance_cycle: finance.ok, close_governance: close.ok });
 }
 
 function manualGates() {
