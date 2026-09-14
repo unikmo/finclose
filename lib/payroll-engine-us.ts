@@ -29,6 +29,27 @@
 // sourced via AI web research (not a professional review) as of September
 // 2026.
 //
+// v8 change log (from v7): adds two local-tax overlays the golden-payslip
+// fixture pack flagged as not-yet-implemented — Philadelphia Wage Tax
+// (pa_philadelphia_resident / pa_philadelphia_nonresident_workplace, on top
+// of the existing PA state calculation, effective-dated by pay_date at the
+// documented 2026-07-01 rate change) and the Denver Occupational Privilege
+// Tax employee share (co_denver_employee, on top of the existing CO state
+// calculation, MONTHLY-pay-frequency-only since the statute's $500 earnings
+// test is a calendar-month test this engine can't cleanly apply to other
+// frequencies). Both were independently primary-sourced directly from
+// phila.gov and denvergov.org this pass (not just taken from the fixture),
+// and both corroborate the fixture's own figures exactly. Denver's $4.00/
+// month employer-paid Business OPT is explicitly NOT modeled — see
+// limitations. Oregon was evaluated and explicitly NOT added — the fixture
+// gives only one worked example (one bracket row for a single filer), and
+// Oregon's own formula publication (Pub. 150-206-436, which would give the
+// federal-subtraction caps and full bracket table needed for a real
+// implementation) could not be fetched from oregon.gov in this environment;
+// an AI web-search synthesis attempted as a fallback returned internally
+// contradictory numbers and was not trusted. Rejected rather than built off
+// a single data point — see limitations for the full reasoning.
+//
 // v7 change log (from v6): a user-supplied golden-payslip QA fixture pack
 // ("US_2026_Payroll_Golden_Payslip_QA_Pack.pdf") was cross-checked line by
 // line against this engine's ACTUAL output for CA, NY/NYC, PA, WA, CO, NJ,
@@ -281,7 +302,13 @@ export type UsEmployeeInput = {
   il_line1_allowances?: number;
   il_line2_allowances?: number;
   il_extra_per_period?: number;
-  // PA fields — none required; PA withholding is a flat rate on gross pay.
+  // PA fields — none required for base PA withholding (flat rate on gross
+  // pay). Philadelphia Wage Tax is a separate, optional local overlay: set
+  // pa_philadelphia_resident for a Philadelphia RESIDENT (any work location)
+  // or pa_philadelphia_nonresident_workplace for a non-resident who works
+  // IN Philadelphia — never both. Rate is effective-dated (see rule pack).
+  pa_philadelphia_resident?: boolean;
+  pa_philadelphia_nonresident_workplace?: boolean;
   // MI fields — required when state === 'MI'.
   mi_personal_exemptions?: number;
   // CO fields — required when state === 'CO'.
@@ -289,6 +316,15 @@ export type UsEmployeeInput = {
   co_dr0004_line2_annual_override?: number;
   co_dr0004_line3_extra_per_period?: number;
   ytd_co_famli_wages_before?: number;
+  // Denver Occupational Privilege Tax (OPT / "head tax") — set when the CO
+  // employee performs sufficient services IN DENVER to receive at least
+  // $500 of compensation for the calendar month (DRMC §53-202 et seq.).
+  // Only supported for MONTHLY pay frequency: the statute's earnings test
+  // is a per-calendar-month test, and this engine has no clean way to
+  // aggregate weekly/biweekly/semimonthly periods into a calendar month
+  // without YTD-style state it doesn't otherwise track — rejected rather
+  // than approximated for other frequencies (see limitations).
+  co_denver_employee?: boolean;
   // AZ fields — required when state === 'AZ'.
   az_election_percent?: AzElectionPercent;
   // AK fields — none required beyond gross pay; AK employee UI applies to
@@ -330,9 +366,11 @@ export type UsJournalLine = {
     | 'IL_INCOME_TAX_PAYABLE'
     | 'PA_INCOME_TAX_PAYABLE'
     | 'PA_UC_PAYABLE'
+    | 'PHL_WAGE_TAX_PAYABLE'
     | 'MI_INCOME_TAX_PAYABLE'
     | 'CO_INCOME_TAX_PAYABLE'
     | 'CO_FAMLI_PAYABLE'
+    | 'DENVER_OPT_PAYABLE'
     | 'AZ_INCOME_TAX_PAYABLE'
     | 'AK_UI_PAYABLE'
     | 'WA_PFML_PAYABLE'
@@ -370,9 +408,11 @@ export type UsEmployeeResult = {
   il_income_tax: number;
   pa_income_tax: number;
   pa_uc: number;
+  phl_wage_tax: number;
   mi_income_tax: number;
   co_income_tax: number;
   co_famli: number;
+  denver_opt_employee: number;
   az_income_tax: number;
   ak_ui: number;
   wa_pfml: number;
@@ -419,9 +459,11 @@ export type UsPayrollRunResult = {
     il_income_tax: number;
     pa_income_tax: number;
     pa_uc: number;
+    phl_wage_tax: number;
     mi_income_tax: number;
     co_income_tax: number;
     co_famli: number;
+    denver_opt_employee: number;
     az_income_tax: number;
     ak_ui: number;
     wa_pfml: number;
@@ -441,7 +483,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V7',
+  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V8',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -708,7 +750,16 @@ export const PAYROLL_RULE_PACK_US = {
     // no annual wage cap — a real, easy-to-miss EMPLOYEE-paid PA tax
     // distinct from employer-paid SUI.
     income_tax_rate: 0.0307,
-    employee_uc_rate: 0.0007
+    employee_uc_rate: 0.0007,
+    // Philadelphia Wage Tax (City of Philadelphia Earnings Tax, employer-
+    // withheld portion): a flat rate on gross pay, separate resident vs.
+    // non-resident-working-in-Philadelphia rates, both of which change
+    // effective 2026-07-01. Confirmed directly against phila.gov (2026-09-14).
+    philadelphia_effective_date_2026: '2026-07-01',
+    philadelphia_resident_rate_before: 0.03740,
+    philadelphia_resident_rate_from: 0.03735,
+    philadelphia_nonresident_rate_before: 0.0343,
+    philadelphia_nonresident_rate_from: 0.03425
   },
   michigan: {
     // Flat 4.25% on wages after the 2026 personal exemption ($5,900/year
@@ -731,7 +782,16 @@ export const PAYROLL_RULE_PACK_US = {
     // share/small-employer rules are DYNAMIC and not modeled (employer-side
     // only, doesn't affect what's withheld from the employee).
     famli_employee_rate: 0.0044,
-    famli_wage_base_annual: 184500
+    famli_wage_base_annual: 184500,
+    // Denver Occupational Privilege Tax (OPT / "head tax"), City & County
+    // of Denver Tax Guide Topic No. 61 (DRMC §53-200 et seq.), confirmed
+    // directly 2026-09-14: employee owes $5.75/month once they perform
+    // sufficient services in Denver to earn at least $500 in that calendar
+    // month; the employer's own $4.00/month Business OPT is a separate,
+    // employer-paid liability this engine does NOT track (see limitations
+    // — the same gap already exists for WA's employer PFML share).
+    denver_opt_employee_monthly: 5.75,
+    denver_opt_monthly_earnings_threshold: 500
   },
   arizona: {
     // Form A-4 employee election: a flat percentage of Arizona taxable
@@ -792,13 +852,16 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Alaska Department of Labor and Workforce Development', instrument: '2026 Alaska employee UI contribution rate (0.50%) and wage base ($54,200), as reproduced in the reference document', url: 'https://labor.alaska.gov/estax/home.htm' },
     { authority: 'Washington Employment Security Department / WA Cares Fund', instrument: '2026 WA PFML total premium/employee-share and WA Cares employee rate, as reproduced in the reference document', url: 'https://paidleave.wa.gov/employers/' },
     { authority: 'New York State Paid Family Leave', instrument: '2026 NY PFL employee rate (0.432%) and annual dollar cap ($411.91), and NY DBL employee rate (0.5%) and weekly dollar cap ($0.60) — sourced from a second-generation "formula pack" cross-check document (2026_US_Payroll_Formula_Implementation_Guide.pdf, user-supplied 2026-09-14) that itself derives from the same secondary reference above, independently corroborating this file\'s NJ/AZ/CO/PA/AK/WA/CA-SDI figures in the process', url: 'https://paidfamilyleave.ny.gov/cost' },
-    { authority: 'Golden-payslip QA fixture pack (user-supplied, 2026-09-14/15)', instrument: '"US_2026_Payroll_Golden_Payslip_QA_Pack.pdf" — deterministic golden payslips for CA, NY/NYC, PA (incl. Philadelphia local tax, not yet implemented here), WA, CO (incl. Denver OPT, not yet implemented here), NJ, and federal cap/bonus cases, checked directly against this engine\'s actual output rather than this file\'s own hand derivations. Found and led to the fix of the NJ $769 bracket bug documented in the v7 change log; every other assertion checked (NY, PA, WA, CO, NJ post-fix, federal cap) passed exactly. Primary sources cited within that pack for each figure: IRS Pub 15/15-T, CA EDD, NYS-50-T-NYS/NYC, NJ-WT/NJDOL, WA PFML/WA Cares, CO DR 1098/FAMLI.', url: 'file: US_2026_Payroll_Golden_Payslip_QA_Pack.pdf' }
+    { authority: 'Golden-payslip QA fixture pack (user-supplied, 2026-09-14/15)', instrument: '"US_2026_Payroll_Golden_Payslip_QA_Pack.pdf" — deterministic golden payslips for CA, NY/NYC, PA (incl. Philadelphia local tax), WA, CO (incl. Denver OPT), NJ, and federal cap/bonus cases, checked directly against this engine\'s actual output rather than this file\'s own hand derivations. Found and led to the fix of the NJ $769 bracket bug documented in the v7 change log; every other assertion checked (NY, PA, WA, CO, NJ post-fix, federal cap) passed exactly. Primary sources cited within that pack for each figure: IRS Pub 15/15-T, CA EDD, NYS-50-T-NYS/NYC, NJ-WT/NJDOL, WA PFML/WA Cares, CO DR 1098/FAMLI.', url: 'file: US_2026_Payroll_Golden_Payslip_QA_Pack.pdf' },
+    { authority: 'City of Philadelphia Department of Revenue', instrument: 'Earnings Tax — employee (resident and non-resident-working-in-Philadelphia) Wage Tax rates, independently fetched 2026-09-14: resident 3.740% through 2026-06-30, 3.735% from 2026-07-01; non-resident 3.43% through 2026-06-30, 3.425% from 2026-07-01. The resident figures corroborate the golden-payslip fixture exactly; the non-resident figures were not present in that fixture and are sourced here directly.', url: 'https://www.phila.gov/services/payments-assistance-taxes/taxes/income-taxes/earnings-tax-employees/' },
+    { authority: 'City and County of Denver, Department of Finance', instrument: 'Tax Guide Topic No. 61, Occupational Privilege Taxes (OPT or "Head Tax") — $5.75/month Employee OPT once an employee earns at least $500 in Denver-sourced compensation in a calendar month; $4.00/month Business OPT (employer-paid, NOT modeled by this engine). Independently fetched 2026-09-14 and corroborates the golden-payslip fixture\'s Denver figures exactly.', url: 'https://denver.prelive.opencities.com/files/assets/public/v/2/finance/documents/treasury/tax-guides/taxguidetopic61_occupationalprivilegetaxes.pdf' }
   ],
   limitations: [
     'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 17 states total. The remaining 33 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, IN, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, NC, ND, OH, OK, OR, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (IN, GA, KY, NC — all flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture (see the IN note below for a concrete example of exactly this trap being avoided rather than walked into).',
     'Indiana was deliberately NOT added despite the secondary reference giving a headline state rate (2.95%), because that reference does not give the actual personal/dependent exemption amounts Indiana\'s real withholding formula subtracts before applying the rate — applying 2.95% to full gross would overstate every IN employee\'s withholding. Rejected rather than approximated. (Indiana county income tax, which is required in addition to the state amount, is unimplemented regardless for the same reason CA/NJ/NY local complexity was scoped state-by-state.)',
     'IL, PA, MI, CO, AZ, AK, and WA (added in v5) are sourced from a secondary cross-check reference document, not independently fetched from each state\'s own primary publication the way CA/NJ/NY were — see the evidence list above. This is a materially weaker sourcing chain and these seven states should be treated as lower-confidence than CA/NJ/NY until independently verified against each state\'s own official withholding-methods publication.',
-    'PA, MI, CO, AZ, AK, and WA local/city income taxes (e.g. Philadelphia Wage Tax — a confirmed real rate of 3.735% resident as of 2026-07-01 per a user-supplied golden-payslip fixture, effective-dated from 3.740% before that date; Denver\'s Occupational Privilege Tax — $5.75 employee / $4.00 employer flat monthly amounts per the same fixture; and the many Michigan cities that levy their own income tax) are NOT modeled — these states are implemented at the state level only. Both Philadelphia and Denver have confirmed, exact rates available and are good near-term candidates to add.',
+    'PA and CO local taxes (v8): Philadelphia Wage Tax (pa_philadelphia_resident / pa_philadelphia_nonresident_workplace, effective-dated by pay_date at the 2026-07-01 rate change) and Denver Occupational Privilege Tax employee share (co_denver_employee, MONTHLY-frequency-only, $5.75 flat once the $500/month earnings threshold is met) are now modeled and independently primary-sourced (phila.gov, denvergov.org) — see evidence. Denver\'s $4.00/month employer-paid Business OPT is explicitly NOT modeled (an employer-side fixed cost this engine has no place to post, the same pre-existing gap as WA\'s employer PFML share not appearing in employer_cost_total). All OTHER MI, CO (outside Denver), AZ, AK, and WA local/city income taxes (e.g. the many Michigan cities that levy their own income tax) remain unmodeled.',
+    'Oregon (OR) was evaluated but NOT added in v8 despite a golden-payslip fixture giving one complete worked example (single filer, one bracket row of the percentage-method formula: BASE = wages − federal subtraction − standard deduction; annual OR WH = $678 + 8.75% × (BASE − $11,400)). Oregon\'s official formula publication (Pub. 150-206-436) — which would give the federal-subtraction caps and full bracket table for ALL filing statuses, not just one example — could not be fetched this pass (oregon.gov was unreachable from this environment; an AI web-search synthesis returned self-contradictory figures, e.g. an $8,500 vs. the fixture\'s $8,750 federal-subtraction cap, and was not trusted). Rejected rather than built off one data point and an unreliable secondary source — consistent with this file\'s fail-closed pattern. Oregon\'s Statewide Transit Tax (0.1% flat, no cap) and Paid Leave Oregon (0.6% employee / 0.4% employer, confirmed wage-base cap per the fixture\'s own EDGE-OR-PAID-LEAVE-CAP vector) are comparatively simple and could be added ahead of the income-tax formula once revisited, but were left out together with OR_PIT this pass to avoid a state that silently omits its own income tax.',
     'California income tax (v7): for a given gross wage, this engine can differ from a result computed via EDD\'s OPTIONAL "annualize wages, apply the annual bracket table, divide by periods" method by a few cents, because this engine uses EDD\'s PRIMARY period-specific Method B tables (Tables 5-28) applied directly to the period\'s taxable income instead. Both methods are EDD-documented and both are "correct" — they can simply round differently at the margin. Confirmed via a user-supplied golden-payslip fixture (CA monthly $10,000/Single/0 allowances: this engine gives $647.84, the fixture\'s annualized-method calculation gives $647.90) — not treated as a bug, but flagged since a caller comparing this engine\'s output against a payslip built with the alternate method may see a few-cent difference at some wage levels.',
     'CO: the FAMLI employer-share/small-employer-exemption rules are DYNAMIC (employer-side only, don\'t affect the employee co_famli figure this engine computes) and not modeled.',
     'WA: PFML and WA Cares small-employer exemptions and WA Cares individual approved-exemption letters are DYNAMIC and not modeled — every WA employee is assumed subject to both at the flat statutory rates. A WA employee with an approved WA Cares exemption would be incorrectly charged the 0.58% contribution by this engine; callers with such employees must adjust outside this engine.',
@@ -1024,6 +1087,11 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
         throw error;
       }
     }
+    if (employee.state === 'PA' && employee.pa_philadelphia_resident && employee.pa_philadelphia_nonresident_workplace) {
+      const error = new Error(`pa_philadelphia_resident and pa_philadelphia_nonresident_workplace cannot both be true for ${employeeId}`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
     if (employee.state === 'MI') {
       if (!Number.isInteger(employee.mi_personal_exemptions) || (employee.mi_personal_exemptions as number) < 0) {
         const error = new Error(`mi_personal_exemptions for ${employeeId} must be a non-negative integer`);
@@ -1035,6 +1103,11 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       if (employee.co_filing_status !== 'MFJ_OR_QSS' && employee.co_filing_status !== 'OTHER') {
         const error = new Error(`co_filing_status for ${employeeId} must be 'MFJ_OR_QSS' or 'OTHER'`);
         (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (employee.co_denver_employee && employee.pay_frequency !== 'MONTHLY') {
+        const error = new Error(`co_denver_employee for ${employeeId} is only supported for MONTHLY pay frequency — Denver OPT's $500 earnings test is a calendar-month test this engine can't reliably apply to other pay frequencies without YTD-style monthly aggregation it doesn't track`);
+        (error as Error & { status?: number }).status = 409;
         throw error;
       }
     }
@@ -1186,9 +1259,20 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     // --- Pennsylvania: flat 3.07% state PIT + flat 0.07% employee UC, both on gross, no allowances ---
     let paIncomeTax = 0;
     let paUc = 0;
+    let phlWageTax = 0;
     if (employee.state === 'PA') {
       paIncomeTax = money(grossPay * p.pennsylvania.income_tax_rate);
       paUc = money(grossPay * p.pennsylvania.employee_uc_rate);
+      // Philadelphia Wage Tax — effective-dated by PAY DATE, not calendar
+      // year label, per this engine's own effective-date contract.
+      const onOrAfterJuly1 = input.pay_date >= p.pennsylvania.philadelphia_effective_date_2026;
+      if (employee.pa_philadelphia_resident) {
+        const rate = onOrAfterJuly1 ? p.pennsylvania.philadelphia_resident_rate_from : p.pennsylvania.philadelphia_resident_rate_before;
+        phlWageTax = money(grossPay * rate);
+      } else if (employee.pa_philadelphia_nonresident_workplace) {
+        const rate = onOrAfterJuly1 ? p.pennsylvania.philadelphia_nonresident_rate_from : p.pennsylvania.philadelphia_nonresident_rate_before;
+        phlWageTax = money(grossPay * rate);
+      }
     }
 
     // --- Michigan: flat 4.25% after the annual personal exemption ---
@@ -1212,6 +1296,12 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const annualTax = money(taxableAnnual * p.colorado.rate);
       coIncomeTax = money(annualTax / periodsPerYear + (employee.co_dr0004_line3_extra_per_period ?? 0));
       coFamli = ceilingContribution(ytdCoFamliBefore, grossPay, p.colorado.famli_wage_base_annual, p.colorado.famli_employee_rate);
+    }
+    // Denver OPT (validated above as MONTHLY-only when set) — a flat
+    // monthly amount once the $500 earnings threshold is met, not a rate.
+    let denverOptEmployee = 0;
+    if (employee.state === 'CO' && employee.co_denver_employee && grossPay >= p.colorado.denver_opt_monthly_earnings_threshold) {
+      denverOptEmployee = p.colorado.denver_opt_employee_monthly;
     }
 
     // --- Arizona: flat employee-elected percentage of gross wages ---
@@ -1241,7 +1331,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
       nyIncomeTax + nycIncomeTax + yonkersTax + nyPfl + nyDbl +
-      ilIncomeTax + paIncomeTax + paUc + miIncomeTax + coIncomeTax + coFamli + azIncomeTax + akUi + waPfml + waCares
+      ilIncomeTax + paIncomeTax + paUc + phlWageTax + miIncomeTax + coIncomeTax + coFamli + denverOptEmployee + azIncomeTax + akUi + waPfml + waCares
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -1275,9 +1365,11 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       il_income_tax: ilIncomeTax,
       pa_income_tax: paIncomeTax,
       pa_uc: paUc,
+      phl_wage_tax: phlWageTax,
       mi_income_tax: miIncomeTax,
       co_income_tax: coIncomeTax,
       co_famli: coFamli,
+      denver_opt_employee: denverOptEmployee,
       az_income_tax: azIncomeTax,
       ak_ui: akUi,
       wa_pfml: waPfml,
@@ -1316,9 +1408,11 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     il_income_tax: sum(employees.map(e => e.il_income_tax)),
     pa_income_tax: sum(employees.map(e => e.pa_income_tax)),
     pa_uc: sum(employees.map(e => e.pa_uc)),
+    phl_wage_tax: sum(employees.map(e => e.phl_wage_tax)),
     mi_income_tax: sum(employees.map(e => e.mi_income_tax)),
     co_income_tax: sum(employees.map(e => e.co_income_tax)),
     co_famli: sum(employees.map(e => e.co_famli)),
+    denver_opt_employee: sum(employees.map(e => e.denver_opt_employee)),
     az_income_tax: sum(employees.map(e => e.az_income_tax)),
     ak_ui: sum(employees.map(e => e.ak_ui)),
     wa_pfml: sum(employees.map(e => e.wa_pfml)),
@@ -1349,9 +1443,11 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'IL_INCOME_TAX_PAYABLE', amount: totals.il_income_tax },
     { side: 'CREDIT', account_role: 'PA_INCOME_TAX_PAYABLE', amount: totals.pa_income_tax },
     { side: 'CREDIT', account_role: 'PA_UC_PAYABLE', amount: totals.pa_uc },
+    { side: 'CREDIT', account_role: 'PHL_WAGE_TAX_PAYABLE', amount: totals.phl_wage_tax },
     { side: 'CREDIT', account_role: 'MI_INCOME_TAX_PAYABLE', amount: totals.mi_income_tax },
     { side: 'CREDIT', account_role: 'CO_INCOME_TAX_PAYABLE', amount: totals.co_income_tax },
     { side: 'CREDIT', account_role: 'CO_FAMLI_PAYABLE', amount: totals.co_famli },
+    { side: 'CREDIT', account_role: 'DENVER_OPT_PAYABLE', amount: totals.denver_opt_employee },
     { side: 'CREDIT', account_role: 'AZ_INCOME_TAX_PAYABLE', amount: totals.az_income_tax },
     { side: 'CREDIT', account_role: 'AK_UI_PAYABLE', amount: totals.ak_ui },
     { side: 'CREDIT', account_role: 'WA_PFML_PAYABLE', amount: totals.wa_pfml },
@@ -1998,6 +2094,41 @@ export function payrollEngineSelfTestUS() {
   });
   const sGoldFedCap = goldenFedCap.employees[0];
 
+  // v8: golden fixtures for the two new local-tax overlays, plus the
+  // fixture pack's own EDGE-PHL-EFFECTIVE-DATE regression vector.
+  const goldenPaPhl = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-PA-PHL', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'PA', pa_philadelphia_resident: true
+    }]
+  });
+  const sGoldPaPhl = goldenPaPhl.employees[0];
+
+  const phlEffectiveDateEdge = calculateUsPayroll({
+    pay_period_start: '2026-06-01', pay_period_end: '2026-06-30', pay_date: '2026-06-30',
+    employees: [{
+      employee_id: 'EDGE-PHL', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'PA', pa_philadelphia_resident: true
+    }]
+  });
+  const sPhlEdge = phlEffectiveDateEdge.employees[0];
+
+  const goldenCoDen = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-CO-DEN', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'CO', co_filing_status: 'OTHER', co_denver_employee: true
+    }]
+  });
+  const sGoldCoDen = goldenCoDen.employees[0];
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -2080,7 +2211,10 @@ export function payrollEngineSelfTestUS() {
     sGoldCo.co_income_tax === 419.83 && sGoldCo.co_famli === 44 && goldenCo.controls.journal_balanced &&
     sGoldNj.nj_income_tax === 40.4 && sGoldNj.federal_income_tax === 102.08 && goldenNj.controls.journal_balanced &&
     sGoldFedCap.employee_social_security === 279 && sGoldFedCap.employee_medicare === 145 &&
-    sGoldFedCap.employee_additional_medicare === 45 && goldenFedCap.controls.journal_balanced;
+    sGoldFedCap.employee_additional_medicare === 45 && goldenFedCap.controls.journal_balanced &&
+    sGoldPaPhl.phl_wage_tax === 373.5 && sGoldPaPhl.net_pay === 7083.33 && goldenPaPhl.controls.journal_balanced &&
+    sPhlEdge.phl_wage_tax === 374 && phlEffectiveDateEdge.controls.journal_balanced &&
+    sGoldCoDen.denver_opt_employee === 5.75 && sGoldCoDen.net_pay === 7301.25 && goldenCoDen.controls.journal_balanced;
 
   return {
     ok,
@@ -2091,6 +2225,7 @@ export function payrollEngineSelfTestUS() {
     nyPflOrdinary,
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
+    goldenPaPhl, phlEffectiveDateEdge, goldenCoDen,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
