@@ -1,4 +1,5 @@
-// United States (US) payroll rule pack — v4: federal + California + New Jersey + New York (incl. NYC + Yonkers).
+// United States (US) payroll rule pack — v5: federal + 17 states (CA, NJ,
+// NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, FL, NV, NH, SD, TN, TX, WY).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -16,12 +17,38 @@
 //      NJ Division of Taxation and NJDOL publications,
 //   6. the New York, NYC, and Yonkers withholding rate tables (NYS-50-T-NYS/
 //      NYC/Y) against the current-year NYS Department of Taxation and
-//      Finance publications.
+//      Finance publications,
+//   7. the IL/PA/MI/CO/AZ/AK/WA figures added in v5 against each state's
+//      OWN primary publication — these seven were sourced from a secondary
+//      cross-check reference document, not independently fetched the way
+//      CA/NJ/NY were, and carry materially lower confidence as a result
+//      (see the v5 change log and limitations for specifics).
 // These figures change every year, several of them (SS wage base, CA SDI
 // rate, FUTA credit reductions, NJ's UI/TDI/FLI rates) finalized only late
 // in the prior year or even during the current year. This file uses figures
 // sourced via AI web research (not a professional review) as of September
 // 2026.
+//
+// v5 change log (from v4): adds 14 more states — IL, PA, MI, CO, AZ (each
+// with a real, if simple, withholding FORMULA), AK and WA (no state income
+// tax, but each has a real statutory EMPLOYEE-paid payroll levy: AK
+// unemployment insurance, WA Paid Family & Medical Leave + WA Cares), and
+// FL/NV/NH/SD/TN/TX/WY (no state income tax AND no statewide employee
+// payroll levy of any kind — nothing to compute beyond the existing
+// state-agnostic federal FICA/FUTA layer). This is the largest scope jump
+// yet, and unlike CA/NJ/NY it draws on a SECONDARY reference document the
+// user supplied rather than each state's own primary publication — flagged
+// explicitly in evidence/limitations as lower-confidence than CA/NJ/NY, not
+// silently treated as equally verified. Deliberately EXCLUDED this pass,
+// even though a headline rate exists in the reference: Indiana, whose real
+// withholding formula needs a personal/dependent exemption figure the
+// reference doesn't supply — applying the headline 2.95% to full gross
+// would overstate withholding, so it was rejected rather than
+// approximated, the same fail-closed principle used throughout this file.
+// The other 32 non-CA/NJ/NY/IL/PA/MI/CO/AZ/AK/WA/no-tax states all need
+// their own official-table fetch-and-build pass, the same way CA/NJ/NY
+// were each built — none of them had a usable complete formula in the
+// reference document, only a pointer to "use the official 20XX tables."
 //
 // v4 change log (from v3): adds New York (state income tax, NYC resident
 // tax, Yonkers resident surcharge / nonresident earnings tax) as a third
@@ -88,10 +115,11 @@
 //     engine's law-following behavior; see the PR for the full comparison).
 //
 // Scope, deliberately narrow (rejected, not approximated):
-//   - Only three states are supported: California, New Jersey, and New York.
-//     Every other US state (including the nine with no state income tax,
-//     which would otherwise be "free" additions) is rejected until built and
-//     validated individually — "no income tax" still leaves SUI/SDI/local
+//   - Only 17 states are supported: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA,
+//     and the 7 states with neither a state income tax nor any statewide
+//     employee payroll levy (FL, NV, NH, SD, TN, TX, WY). Every other US
+//     state is rejected until built and validated individually — "no
+//     income tax" still leaves SUI/SDI/local
 //     nuances unverified here.
 //   - Federal Form W-4 (2020 or later revision) only. Pre-2020 W-4s
 //     (allowances-based) are rejected — the IRS's own "computational bridge"
@@ -143,9 +171,15 @@
 export type UsPayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
 export type UsFederalFilingStatus = 'SINGLE_MFS' | 'MFJ' | 'HOH';
 export type UsCaFilingStatus = 'SINGLE' | 'MARRIED_0_OR_1' | 'MARRIED_2_OR_MORE' | 'HEAD_OF_HOUSEHOLD';
-export type UsState = 'CA' | 'NJ' | 'NY';
+export type UsState =
+  | 'CA' | 'NJ' | 'NY'
+  | 'IL' | 'PA' | 'MI' | 'CO' | 'AZ'
+  | 'AK' | 'WA'
+  | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
+export type CoFilingStatus = 'MFJ_OR_QSS' | 'OTHER';
+export type AzElectionPercent = 0 | 0.5 | 1.0 | 1.5 | 2.0 | 2.5 | 3.0 | 3.5;
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -183,6 +217,27 @@ export type UsEmployeeInput = {
   ny_nyc_resident?: boolean;
   ny_yonkers_resident?: boolean;
   ny_yonkers_nonresident_workplace?: boolean;
+  // IL fields — required when state === 'IL'.
+  il_line1_allowances?: number;
+  il_line2_allowances?: number;
+  il_extra_per_period?: number;
+  // PA fields — none required; PA withholding is a flat rate on gross pay.
+  // MI fields — required when state === 'MI'.
+  mi_personal_exemptions?: number;
+  // CO fields — required when state === 'CO'.
+  co_filing_status?: CoFilingStatus;
+  co_dr0004_line2_annual_override?: number;
+  co_dr0004_line3_extra_per_period?: number;
+  ytd_co_famli_wages_before?: number;
+  // AZ fields — required when state === 'AZ'.
+  az_election_percent?: AzElectionPercent;
+  // AK fields — none required beyond gross pay; AK employee UI applies to
+  // every AK employee at a flat statutory rate.
+  ytd_ak_ui_wages_before?: number;
+  // WA fields — none required beyond gross pay; WA PFML and WA Cares apply
+  // to every WA employee at flat statutory rates (small-employer/approved-
+  // exemption nuances are not modeled — see limitations).
+  ytd_wa_pfml_wages_before?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -210,6 +265,16 @@ export type UsJournalLine = {
     | 'NY_INCOME_TAX_PAYABLE'
     | 'NYC_INCOME_TAX_PAYABLE'
     | 'YONKERS_TAX_PAYABLE'
+    | 'IL_INCOME_TAX_PAYABLE'
+    | 'PA_INCOME_TAX_PAYABLE'
+    | 'PA_UC_PAYABLE'
+    | 'MI_INCOME_TAX_PAYABLE'
+    | 'CO_INCOME_TAX_PAYABLE'
+    | 'CO_FAMLI_PAYABLE'
+    | 'AZ_INCOME_TAX_PAYABLE'
+    | 'AK_UI_PAYABLE'
+    | 'WA_PFML_PAYABLE'
+    | 'WA_CARES_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -238,6 +303,16 @@ export type UsEmployeeResult = {
   ny_income_tax: number;
   nyc_income_tax: number;
   yonkers_tax: number;
+  il_income_tax: number;
+  pa_income_tax: number;
+  pa_uc: number;
+  mi_income_tax: number;
+  co_income_tax: number;
+  co_famli: number;
+  az_income_tax: number;
+  ak_ui: number;
+  wa_pfml: number;
+  wa_cares: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -245,6 +320,9 @@ export type UsEmployeeResult = {
   ytd_futa_wages_after: number;
   ytd_nj_ui_wf_wages_after: number;
   ytd_nj_tdi_fli_wages_after: number;
+  ytd_co_famli_wages_after: number;
+  ytd_ak_ui_wages_after: number;
+  ytd_wa_pfml_wages_after: number;
 };
 
 export type UsPayrollRunResult = {
@@ -271,6 +349,16 @@ export type UsPayrollRunResult = {
     ny_income_tax: number;
     nyc_income_tax: number;
     yonkers_tax: number;
+    il_income_tax: number;
+    pa_income_tax: number;
+    pa_uc: number;
+    mi_income_tax: number;
+    co_income_tax: number;
+    co_famli: number;
+    az_income_tax: number;
+    ak_ui: number;
+    wa_pfml: number;
+    wa_cares: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -286,7 +374,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-CA-NJ-NY-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V4',
+  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V5',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -506,6 +594,89 @@ export const PAYROLL_RULE_PACK_US = {
       MONTHLY: [[0, Infinity], [333, 250], [833, 167], [1667, 83], [2500, 0]]
     } as Record<UsPayFrequency, Array<[number, number]>>
   },
+  // --- v5: states sourced from a secondary cross-check reference (a
+  // "2026 U.S. Payroll Tax Implementation Reference" document the user
+  // supplied), not fetched directly from each state's own primary
+  // publication the way CA/NJ/NY were. Only states where that reference
+  // supplies a COMPLETE formula (not just a headline rate or a pointer to
+  // an official table this engine doesn't have) are implemented here — see
+  // the v5 change log at the top of this file and the limitations list for
+  // which states were deliberately left out for exactly that reason.
+  illinois: {
+    // Flat 4.95% on wages after IL-W-4 allowances. 2026 annual allowance
+    // amounts: $2,925 per Line 1 allowance (self/spouse), $1,000 per Line 2
+    // allowance (dependents), prorated by pay period.
+    rate: 0.0495,
+    line1_allowance_annual: 2925,
+    line2_allowance_annual: 1000
+  },
+  pennsylvania: {
+    // Flat 3.07% of PA taxable compensation, no allowances. Employee UC
+    // (Unemployment Compensation) contribution: flat 0.07% of gross wages,
+    // no annual wage cap — a real, easy-to-miss EMPLOYEE-paid PA tax
+    // distinct from employer-paid SUI.
+    income_tax_rate: 0.0307,
+    employee_uc_rate: 0.0007
+  },
+  michigan: {
+    // Flat 4.25% on wages after the 2026 personal exemption ($5,900/year
+    // per exemption), prorated by pay period. Local city income tax (many
+    // MI cities impose one) is NOT modeled — see limitations.
+    rate: 0.0425,
+    personal_exemption_annual: 5900
+  },
+  colorado: {
+    // DR 1098 percentage method: annualize wages, subtract the DR 0004
+    // Line 2 amount (or the statutory default — $11,000 for MFJ/Qualifying
+    // Surviving Spouse, $5,500 otherwise — if the employee hasn't filed a
+    // DR 0004), multiply by 4.40%, divide by periods, add any DR 0004
+    // Line 3 additional per-period withholding.
+    rate: 0.044,
+    default_subtraction_mfj_or_qss: 11000,
+    default_subtraction_other: 5500,
+    // FAMLI (Family and Medical Leave Insurance): employee share 0.44% of
+    // covered wages up to the SSA wage base ($184,500 in 2026). Employer
+    // share/small-employer rules are DYNAMIC and not modeled (employer-side
+    // only, doesn't affect what's withheld from the employee).
+    famli_employee_rate: 0.0044,
+    famli_wage_base_annual: 184500
+  },
+  arizona: {
+    // Form A-4 employee election: a flat percentage of Arizona taxable
+    // wages, chosen by the employee from a fixed statutory set (no
+    // allowance/bracket calculation at all). This engine requires the
+    // caller to supply the employee's actual election rather than
+    // defaulting to the statutory default of 2.0% for a timely-filed-A-4
+    // employee — a wrong default is worse than a required field.
+    valid_election_percents: [0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
+  },
+  alaska: {
+    // No state income tax. Alaska is one of only three states (with NJ and
+    // PA) where the EMPLOYEE also contributes to state unemployment
+    // insurance, at a flat statutory rate, uncapped by employer experience
+    // rating (the employer's own UI rate is separate and DYNAMIC).
+    ui_employee_rate: 0.005,
+    ui_wage_base_annual: 54200
+  },
+  washington: {
+    // No state income tax. Two separate employee-paid statutory programs:
+    // WA Paid Family & Medical Leave (PFML) — total premium 1.13% of wages
+    // up to the SSA wage base ($184,500), of which the employee's fixed
+    // statutory share is 71.43% (the remainder is an employer-side cost
+    // subject to small-employer exemptions this engine doesn't model); and
+    // WA Cares (long-term care) — a flat 0.58% employee contribution with
+    // NO wage cap, subject to state-approved individual exemptions this
+    // engine also doesn't model (see limitations).
+    pfml_total_rate: 0.0113,
+    pfml_employee_share_of_total: 0.7143,
+    pfml_wage_base_annual: 184500,
+    wa_cares_employee_rate: 0.0058
+  },
+  // States with genuinely no individual wage income tax AND no statewide
+  // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
+  // compute for the employee beyond the state-agnostic federal FICA/FUTA
+  // layer already handled elsewhere in this file.
+  no_tax_no_employee_levy_states: ['FL', 'NV', 'NH', 'SD', 'TN', 'TX', 'WY'] as UsState[],
   evidence: [
     { authority: 'Internal Revenue Service', instrument: 'Publication 15-T (2026), Federal Income Tax Withholding Methods, Section 1 — Percentage Method Tables for Automated Payroll Systems', url: 'https://www.irs.gov/pub/irs-pdf/p15t.pdf' },
     { authority: 'Internal Revenue Service', instrument: 'Publication 926 / SSA 2026 wage base and Additional Medicare Tax rules (IRC 3102(f))', url: 'https://www.irs.gov/pub/irs-pdf/p926.pdf' },
@@ -520,10 +691,23 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-NYS (1/26) — New York State Withholding Tax Tables and Methods', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf' },
     { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-NYC (1/26) — New York City Withholding Tax Tables and Methods', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nyc.pdf' },
     { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-Y (1/26) — Yonkers Withholding Tax Tables and Methods (resident surcharge and nonresident earnings tax)', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_y.pdf' },
-    { authority: 'Cross-check reference', instrument: '"2026 U.S. Payroll Tax Implementation Reference" (all-50-states developer baseline, verified through 2026-09-13) — used to independently corroborate the CA/NJ/NY figures in this file against a second source; also the source for the NY PFL (0.432% EE, annual max $411.91), NY DBL, and MCTMT figures cited in limitations below, none of which are implemented here', url: 'file: US_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-14)' }
+    { authority: 'Cross-check / secondary reference', instrument: '"2026 U.S. Payroll Tax Implementation Reference" (all-50-states developer baseline, verified through 2026-09-13, user-supplied) — used to independently corroborate the CA/NJ/NY figures already in this file (all of which were independently fetched from each state\'s own primary publication), AND as the DIRECT source for the IL/PA/MI/CO/AZ/AK/WA figures added in v5 below, since those five states\' own primary withholding-table publications were not independently fetched this pass. This is a materially weaker sourcing chain than CA/NJ/NY and is called out explicitly, not glossed over — see the v5 change log and limitations.', url: 'file: US_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-14)' },
+    { authority: 'Colorado Department of Revenue', instrument: 'DR 1098 (2026) — the reference document reproduces its full percentage-method computation steps (not just a headline rate), which is why CO is implemented here despite not being independently primary-sourced', url: 'https://tax.colorado.gov/withholding-tax' },
+    { authority: 'Illinois Department of Revenue', instrument: '2026 Illinois withholding tax formula — flat 4.95% and the IL-W-4 Line 1/Line 2 annual allowance amounts, as reproduced in the reference document', url: 'https://tax.illinois.gov/research/publications/pubs/illinois-withholding-tax-tables-booklet.html' },
+    { authority: 'Michigan Department of Treasury', instrument: '2026 Michigan withholding rate (4.25%) and personal exemption amount ($5,900), as reproduced in the reference document', url: 'https://www.michigan.gov/taxes/business-taxes/withholding' },
+    { authority: 'Pennsylvania Department of Revenue', instrument: '2026 Pennsylvania flat withholding rate (3.07%) and employee UC contribution rate (0.07%), as reproduced in the reference document', url: 'https://www.pa.gov/agencies/revenue/businesses/business-registration-and-info/withholding-tax' },
+    { authority: 'Arizona Department of Revenue', instrument: 'Form A-4 (2026) employee percentage-election set, as reproduced in the reference document', url: 'https://azdor.gov/business/withholding-tax' },
+    { authority: 'Alaska Department of Labor and Workforce Development', instrument: '2026 Alaska employee UI contribution rate (0.50%) and wage base ($54,200), as reproduced in the reference document', url: 'https://labor.alaska.gov/estax/home.htm' },
+    { authority: 'Washington Employment Security Department / WA Cares Fund', instrument: '2026 WA PFML total premium/employee-share and WA Cares employee rate, as reproduced in the reference document', url: 'https://paidleave.wa.gov/employers/' }
   ],
   limitations: [
-    'Only California, New Jersey, and New York are supported as states. Maryland (planned next) and every other state is rejected pending its own build and validation.',
+    'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 17 states total. The remaining 33 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, IN, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, NC, ND, OH, OK, OR, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (IN, GA, KY, NC — all flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture (see the IN note below for a concrete example of exactly this trap being avoided rather than walked into).',
+    'Indiana was deliberately NOT added despite the secondary reference giving a headline state rate (2.95%), because that reference does not give the actual personal/dependent exemption amounts Indiana\'s real withholding formula subtracts before applying the rate — applying 2.95% to full gross would overstate every IN employee\'s withholding. Rejected rather than approximated. (Indiana county income tax, which is required in addition to the state amount, is unimplemented regardless for the same reason CA/NJ/NY local complexity was scoped state-by-state.)',
+    'IL, PA, MI, CO, AZ, AK, and WA (added in v5) are sourced from a secondary cross-check reference document, not independently fetched from each state\'s own primary publication the way CA/NJ/NY were — see the evidence list above. This is a materially weaker sourcing chain and these seven states should be treated as lower-confidence than CA/NJ/NY until independently verified against each state\'s own official withholding-methods publication.',
+    'PA, MI, CO, AZ, AK, and WA local/city income taxes (e.g. Philadelphia Wage Tax, and the many Michigan cities that levy their own income tax) are NOT modeled — these states are implemented at the state level only.',
+    'CO: the FAMLI employer-share/small-employer-exemption rules are DYNAMIC (employer-side only, don\'t affect the employee co_famli figure this engine computes) and not modeled.',
+    'WA: PFML and WA Cares small-employer exemptions and WA Cares individual approved-exemption letters are DYNAMIC and not modeled — every WA employee is assumed subject to both at the flat statutory rates. A WA employee with an approved WA Cares exemption would be incorrectly charged the 0.58% contribution by this engine; callers with such employees must adjust outside this engine.',
+    'AZ: only the employee\'s own percentage election (az_election_percent) is modeled. The statutory "default 2.0% if no A-4 timely filed" employer-side default behavior is NOT implemented — the caller must always supply the employee\'s actual election (or explicit 0% if validly elected) rather than relying on this engine to apply the default.',
     'Only 2020-or-later Form W-4 revisions are supported (Steps 1-4) for federal withholding. Pre-2020 allowances-based W-4s are rejected, not approximated via the IRS computational bridge.',
     'Only weekly, biweekly, semimonthly, and monthly pay frequencies are supported.',
     'State Unemployment Insurance (SUI) is not calculated for either state — both California (EDD) and New Jersey (NJDOL) assign each employer an individual experience rate, which this engine has no statutory default for. Callers must compute and post employer-side SUI/UI separately. (New Jersey\'s EMPLOYEE-side UI/Workforce Development contribution, which does have a flat statutory rate, IS calculated — see nj_ui_wf_swf below.)',
@@ -652,8 +836,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    if (employee.state !== 'CA' && employee.state !== 'NJ' && employee.state !== 'NY') {
-      const error = new Error(`state for ${employeeId} is not supported — only CA, NJ, and NY are implemented in this rule pack`);
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', ...p.no_tax_no_employee_levy_states];
+    if (!supportedStates.includes(employee.state)) {
+      const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
       throw error;
     }
@@ -711,6 +896,39 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       }
       if (employee.ny_yonkers_resident && employee.ny_yonkers_nonresident_workplace) {
         const error = new Error(`ny_yonkers_resident and ny_yonkers_nonresident_workplace cannot both be true for ${employeeId}`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'IL') {
+      if (!Number.isInteger(employee.il_line1_allowances) || (employee.il_line1_allowances as number) < 0) {
+        const error = new Error(`il_line1_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.il_line2_allowances) || (employee.il_line2_allowances as number) < 0) {
+        const error = new Error(`il_line2_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'MI') {
+      if (!Number.isInteger(employee.mi_personal_exemptions) || (employee.mi_personal_exemptions as number) < 0) {
+        const error = new Error(`mi_personal_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'CO') {
+      if (employee.co_filing_status !== 'MFJ_OR_QSS' && employee.co_filing_status !== 'OTHER') {
+        const error = new Error(`co_filing_status for ${employeeId} must be 'MFJ_OR_QSS' or 'OTHER'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'AZ') {
+      if (!p.arizona.valid_election_percents.includes(employee.az_election_percent as number)) {
+        const error = new Error(`az_election_percent for ${employeeId} must be one of ${p.arizona.valid_election_percents.join(', ')}`);
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
@@ -832,10 +1050,76 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       }
     }
 
+    // --- Illinois: flat 4.95% after IL-W-4 Line 1/Line 2 allowances ---
+    let ilIncomeTax = 0;
+    if (employee.state === 'IL') {
+      const allowanceAmount = money(
+        ((employee.il_line1_allowances as number) * p.illinois.line1_allowance_annual +
+         (employee.il_line2_allowances as number) * p.illinois.line2_allowance_annual) / periodsPerYear
+      );
+      const ilTaxableWages = Math.max(0, money(grossPay - allowanceAmount));
+      ilIncomeTax = money(ilTaxableWages * p.illinois.rate + (employee.il_extra_per_period ?? 0));
+    }
+
+    // --- Pennsylvania: flat 3.07% state PIT + flat 0.07% employee UC, both on gross, no allowances ---
+    let paIncomeTax = 0;
+    let paUc = 0;
+    if (employee.state === 'PA') {
+      paIncomeTax = money(grossPay * p.pennsylvania.income_tax_rate);
+      paUc = money(grossPay * p.pennsylvania.employee_uc_rate);
+    }
+
+    // --- Michigan: flat 4.25% after the annual personal exemption ---
+    let miIncomeTax = 0;
+    if (employee.state === 'MI') {
+      const exemptionAmount = money(((employee.mi_personal_exemptions as number) * p.michigan.personal_exemption_annual) / periodsPerYear);
+      const miTaxableWages = Math.max(0, money(grossPay - exemptionAmount));
+      miIncomeTax = money(miTaxableWages * p.michigan.rate);
+    }
+
+    // --- Colorado: DR 1098 percentage method + FAMLI employee contribution ---
+    const ytdCoFamliBefore = requireNonNegativeMoney(employee.ytd_co_famli_wages_before ?? 0, `ytd_co_famli_wages_before for ${employeeId}`);
+    let coIncomeTax = 0;
+    let coFamli = 0;
+    if (employee.state === 'CO') {
+      const coFilingStatus = employee.co_filing_status as CoFilingStatus;
+      const defaultSubtraction = coFilingStatus === 'MFJ_OR_QSS' ? p.colorado.default_subtraction_mfj_or_qss : p.colorado.default_subtraction_other;
+      const subtraction = employee.co_dr0004_line2_annual_override ?? defaultSubtraction;
+      const annualWages = money(grossPay * periodsPerYear);
+      const taxableAnnual = Math.max(0, money(annualWages - subtraction));
+      const annualTax = money(taxableAnnual * p.colorado.rate);
+      coIncomeTax = money(annualTax / periodsPerYear + (employee.co_dr0004_line3_extra_per_period ?? 0));
+      coFamli = ceilingContribution(ytdCoFamliBefore, grossPay, p.colorado.famli_wage_base_annual, p.colorado.famli_employee_rate);
+    }
+
+    // --- Arizona: flat employee-elected percentage of gross wages ---
+    let azIncomeTax = 0;
+    if (employee.state === 'AZ') {
+      azIncomeTax = money(grossPay * ((employee.az_election_percent as number) / 100));
+    }
+
+    // --- Alaska: no state income tax, but employee-paid UI at a flat statutory rate ---
+    const ytdAkUiBefore = requireNonNegativeMoney(employee.ytd_ak_ui_wages_before ?? 0, `ytd_ak_ui_wages_before for ${employeeId}`);
+    let akUi = 0;
+    if (employee.state === 'AK') {
+      akUi = ceilingContribution(ytdAkUiBefore, grossPay, p.alaska.ui_wage_base_annual, p.alaska.ui_employee_rate);
+    }
+
+    // --- Washington: no state income tax, but employee-paid PFML share + WA Cares ---
+    const ytdWaPfmlBefore = requireNonNegativeMoney(employee.ytd_wa_pfml_wages_before ?? 0, `ytd_wa_pfml_wages_before for ${employeeId}`);
+    let waPfml = 0;
+    let waCares = 0;
+    if (employee.state === 'WA') {
+      const employeePfmlRate = p.washington.pfml_total_rate * p.washington.pfml_employee_share_of_total;
+      waPfml = ceilingContribution(ytdWaPfmlBefore, grossPay, p.washington.pfml_wage_base_annual, employeePfmlRate);
+      waCares = money(grossPay * p.washington.wa_cares_employee_rate);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
-      nyIncomeTax + nycIncomeTax + yonkersTax
+      nyIncomeTax + nycIncomeTax + yonkersTax +
+      ilIncomeTax + paIncomeTax + paUc + miIncomeTax + coIncomeTax + coFamli + azIncomeTax + akUi + waPfml + waCares
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -864,13 +1148,26 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ny_income_tax: nyIncomeTax,
       nyc_income_tax: nycIncomeTax,
       yonkers_tax: yonkersTax,
+      il_income_tax: ilIncomeTax,
+      pa_income_tax: paIncomeTax,
+      pa_uc: paUc,
+      mi_income_tax: miIncomeTax,
+      co_income_tax: coIncomeTax,
+      co_famli: coFamli,
+      az_income_tax: azIncomeTax,
+      ak_ui: akUi,
+      wa_pfml: waPfml,
+      wa_cares: waCares,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
       ytd_medicare_wages_after: medicareYtdAfter,
       ytd_futa_wages_after: money(ytdFutaBefore + Math.min(ficaAndFutaWages, Math.max(0, p.futa.wage_base_annual - ytdFutaBefore))),
       ytd_nj_ui_wf_wages_after: money(ytdNjUiWfBefore + Math.min(grossPay, Math.max(0, p.new_jersey.ui_wf_swf_wage_base_annual - ytdNjUiWfBefore))),
-      ytd_nj_tdi_fli_wages_after: money(ytdNjTdiFliBefore + Math.min(grossPay, Math.max(0, p.new_jersey.tdi_fli_wage_base_annual - ytdNjTdiFliBefore)))
+      ytd_nj_tdi_fli_wages_after: money(ytdNjTdiFliBefore + Math.min(grossPay, Math.max(0, p.new_jersey.tdi_fli_wage_base_annual - ytdNjTdiFliBefore))),
+      ytd_co_famli_wages_after: money(ytdCoFamliBefore + Math.min(grossPay, Math.max(0, p.colorado.famli_wage_base_annual - ytdCoFamliBefore))),
+      ytd_ak_ui_wages_after: money(ytdAkUiBefore + Math.min(grossPay, Math.max(0, p.alaska.ui_wage_base_annual - ytdAkUiBefore))),
+      ytd_wa_pfml_wages_after: money(ytdWaPfmlBefore + Math.min(grossPay, Math.max(0, p.washington.pfml_wage_base_annual - ytdWaPfmlBefore)))
     };
   });
 
@@ -889,6 +1186,16 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     ny_income_tax: sum(employees.map(e => e.ny_income_tax)),
     nyc_income_tax: sum(employees.map(e => e.nyc_income_tax)),
     yonkers_tax: sum(employees.map(e => e.yonkers_tax)),
+    il_income_tax: sum(employees.map(e => e.il_income_tax)),
+    pa_income_tax: sum(employees.map(e => e.pa_income_tax)),
+    pa_uc: sum(employees.map(e => e.pa_uc)),
+    mi_income_tax: sum(employees.map(e => e.mi_income_tax)),
+    co_income_tax: sum(employees.map(e => e.co_income_tax)),
+    co_famli: sum(employees.map(e => e.co_famli)),
+    az_income_tax: sum(employees.map(e => e.az_income_tax)),
+    ak_ui: sum(employees.map(e => e.ak_ui)),
+    wa_pfml: sum(employees.map(e => e.wa_pfml)),
+    wa_cares: sum(employees.map(e => e.wa_cares)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -910,6 +1217,16 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'NY_INCOME_TAX_PAYABLE', amount: totals.ny_income_tax },
     { side: 'CREDIT', account_role: 'NYC_INCOME_TAX_PAYABLE', amount: totals.nyc_income_tax },
     { side: 'CREDIT', account_role: 'YONKERS_TAX_PAYABLE', amount: totals.yonkers_tax },
+    { side: 'CREDIT', account_role: 'IL_INCOME_TAX_PAYABLE', amount: totals.il_income_tax },
+    { side: 'CREDIT', account_role: 'PA_INCOME_TAX_PAYABLE', amount: totals.pa_income_tax },
+    { side: 'CREDIT', account_role: 'PA_UC_PAYABLE', amount: totals.pa_uc },
+    { side: 'CREDIT', account_role: 'MI_INCOME_TAX_PAYABLE', amount: totals.mi_income_tax },
+    { side: 'CREDIT', account_role: 'CO_INCOME_TAX_PAYABLE', amount: totals.co_income_tax },
+    { side: 'CREDIT', account_role: 'CO_FAMLI_PAYABLE', amount: totals.co_famli },
+    { side: 'CREDIT', account_role: 'AZ_INCOME_TAX_PAYABLE', amount: totals.az_income_tax },
+    { side: 'CREDIT', account_role: 'AK_UI_PAYABLE', amount: totals.ak_ui },
+    { side: 'CREDIT', account_role: 'WA_PFML_PAYABLE', amount: totals.wa_pfml },
+    { side: 'CREDIT', account_role: 'WA_CARES_PAYABLE', amount: totals.wa_cares },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -1380,6 +1697,49 @@ export function payrollEngineSelfTestUS() {
   const s13 = nyCaseYonkersNonresident.employees[0];
   const expectedYonkersTax13 = 0.81;
 
+  // Case 14: one multi-employee run covering all 8 v5 state tiers at once —
+  // IL, PA, MI, CO, AZ, AK, WA, and one no-tax/no-employee-levy state (TX).
+  // All expected values hand-derived directly from this file's own v5
+  // rule-pack constants (illinois/pennsylvania/michigan/colorado/arizona/
+  // alaska/washington), not against any external worked example — these
+  // seven states' figures come from a secondary reference, not an official
+  // publication with its own worked examples the way NY's did.
+  const multiStateCase = calculateUsPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-14',
+    pay_date: '2026-08-14',
+    employees: [
+      { employee_id: 'IL1', gross_pay: 1000, pay_frequency: 'WEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'IL', il_line1_allowances: 1, il_line2_allowances: 0 },
+      { employee_id: 'PA1', gross_pay: 1000, pay_frequency: 'WEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'PA' },
+      { employee_id: 'MI1', gross_pay: 1000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'MI', mi_personal_exemptions: 1 },
+      { employee_id: 'CO1', gross_pay: 2000, pay_frequency: 'BIWEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'CO', co_filing_status: 'OTHER' },
+      { employee_id: 'AZ1', gross_pay: 1500, pay_frequency: 'WEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'AZ', az_election_percent: 2.5 },
+      { employee_id: 'AK1', gross_pay: 1200, pay_frequency: 'WEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'AK' },
+      { employee_id: 'WA1', gross_pay: 2000, pay_frequency: 'BIWEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'WA' },
+      { employee_id: 'TX1', gross_pay: 1000, pay_frequency: 'WEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'TX' }
+    ]
+  });
+  const [sIl, sPa, sMi, sCo, sAz, sAk, sWa, sTx] = multiStateCase.employees;
+  // IL: (1000 - 2925/52) * 4.95% = (1000 - 56.25) * 0.0495 = 46.72 (943.75*0.0495=46.715625)
+  const expectedIl = 46.72;
+  // PA: 1000*3.07% = 30.70; UC 1000*0.07% = 0.70
+  const expectedPaIncomeTax = 30.7;
+  const expectedPaUc = 0.7;
+  // MI: (1000 - 5900/12) * 4.25% = (1000 - 491.67) * 0.0425 = 508.33*0.0425 = 21.60
+  const expectedMi = 21.6;
+  // CO: annualize 2000*26=52000; -5500=46500; *4.4%=2046.00; /26=78.69
+  const expectedCoIncomeTax = 78.69;
+  // CO FAMLI: 2000*0.44% = 8.80
+  const expectedCoFamli = 8.8;
+  // AZ: 1500*2.5% = 37.50
+  const expectedAz = 37.5;
+  // AK UI: 1200*0.5% = 6.00 (well under the $54,200 annual cap)
+  const expectedAkUi = 6.0;
+  // WA PFML: 2000 * (1.13% * 71.43%) = 2000*0.00807159 = 16.14318 -> 16.14
+  const expectedWaPfml = 16.14;
+  // WA Cares: 2000*0.58% = 11.60
+  const expectedWaCares = 11.6;
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -1433,13 +1793,28 @@ export function payrollEngineSelfTestUS() {
     s12.yonkers_tax === expectedYonkersTax12 &&
     nyCaseSingle.controls.journal_balanced &&
     s13.yonkers_tax === expectedYonkersTax13 &&
-    nyCaseYonkersNonresident.controls.journal_balanced;
+    nyCaseYonkersNonresident.controls.journal_balanced &&
+    sIl.il_income_tax === expectedIl &&
+    sPa.pa_income_tax === expectedPaIncomeTax &&
+    sPa.pa_uc === expectedPaUc &&
+    sMi.mi_income_tax === expectedMi &&
+    sCo.co_income_tax === expectedCoIncomeTax &&
+    sCo.co_famli === expectedCoFamli &&
+    sAz.az_income_tax === expectedAz &&
+    sAk.ak_ui === expectedAkUi &&
+    sWa.wa_pfml === expectedWaPfml &&
+    sWa.wa_cares === expectedWaCares &&
+    sTx.federal_income_tax > 0 &&
+    sTx.employee_social_security > 0 &&
+    multiStateCase.controls.employee_count === 8 &&
+    multiStateCase.controls.journal_balanced;
 
   return {
     ok,
     sample,
     ssCase,
     addlMedicareCase,
+    multiStateCase,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
