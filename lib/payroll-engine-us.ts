@@ -915,8 +915,11 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  // v17: added Wisconsin -- 50/50 states plus DC. Full US coverage.
-  id: 'US-50-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V17',
+  // v18: fixed Ohio -- a real dated rate change (HB 96, eff. 2026-08-01)
+  // caught by cross-checking this file against a user-supplied formula
+  // pack. All other states/federal figures in that pack were checked
+  // and matched what was already here. See limitations for detail.
+  id: 'US-50-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V18',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -1656,11 +1659,31 @@ export const PAYROLL_RULE_PACK_US = {
     } as Record<HiFilingStatus, Array<[number, number, number]>>
   },
   ohio: {
-    // NFC bulletin (most recent available, PP20 2025 — no 2026 bulletin
-    // found, should be reconfirmed). Three brackets, flat per-exemption
-    // allowance.
-    exemption_value_annual: 650,
-    brackets: [[0, 0, 0.01775], [26050, 462.39, 0.0299], [100000, 2673.5, 0.0364]] as Array<[number, number, number]>
+    // v18: REPLACED the earlier stale PP20-2025 NFC-bulletin figures.
+    // Ohio Department of Taxation's own "Employer Withholding Taxes -
+    // Percentage Method (Effective August 1, 2026)" — fetched and read
+    // directly 2026-09-15, reflecting the rate reduction enacted by
+    // House Bill 96 (the 2025 biennial budget). Confirmed via an
+    // independent web search (ohiocpa.com, EY tax alert) that this is a
+    // genuine, dated rate change (1.775%/2.99%/3.64% -> 1.60%/2.99%/3.40%)
+    // for payrolls ENDING ON OR AFTER 2026-08-01, not a discrepancy in
+    // the old sourcing. This engine implements Ohio's actual official
+    // method directly: a PER-PAY-PERIOD exemption subtraction and a
+    // PER-PAY-PERIOD bracket table (one set per pay frequency), not an
+    // annualize-and-divide reconstruction — matching Ohio's own
+    // published tables exactly rather than an equivalent-but-not-
+    // identical derived annual formula. No pre-2026-08-01 (older-rate)
+    // period is modeled; every OH payroll is computed under the current
+    // (post-8/1) table regardless of pay_date — see limitations.
+    exemption_per_period: {
+      WEEKLY: 12.50, BIWEEKLY: 25.00, SEMIMONTHLY: 27.08, MONTHLY: 54.17
+    } as Record<UsPayFrequency, number>,
+    brackets_per_period: {
+      WEEKLY: [[0, 0, 0.016], [500.96, 8.02, 0.0299], [1923.08, 50.54, 0.034]],
+      BIWEEKLY: [[0, 0, 0.016], [1001.92, 16.03, 0.0299], [3846.15, 101.07, 0.034]],
+      SEMIMONTHLY: [[0, 0, 0.016], [1085.42, 17.37, 0.0299], [4166.67, 109.50, 0.034]],
+      MONTHLY: [[0, 0, 0.016], [2170.83, 34.73, 0.0299], [8333.33, 218.99, 0.034]]
+    } as Record<UsPayFrequency, Array<[number, number, number]>>
   },
   louisiana: {
     // NFC bulletin, confirmed via a second independent source (secondary
@@ -1884,7 +1907,8 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'USDA National Finance Center', instrument: 'Eleven more state withholding bulletins, each fetched 2026-09-15, same single-source-per-state tier as the v11 batch: Massachusetts (NFC-26-1769797447), Missouri (NFC-26-1773783048), Nebraska (NFC-26-1774374744), South Carolina (NFC-26-1773173131), Vermont (NFC-24-1707500661 — most recent available), West Virginia (NFC-26-1786455448), Kansas (NFC-24-1722617728 — most recent available), Idaho (NFC-25-1747930413 — most recent available), New Mexico (NFC-26-1776874663), Arkansas (NFC-26-1781190112, re-fetched with a follow-up prompt to get the complete bracket structure), Hawaii (NFC-26-1768321238, re-fetched with a follow-up prompt to get the complete 8-bracket tables for both filing statuses after an initial partial extraction).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
     { authority: 'Iowa Department of Revenue', instrument: '"Iowa Individual Income Tax Withholding Formula, Effective January 1, 2026" (released November 2025) — fetched and read directly 2026-09-15, the actual official current-year document with 10 fully worked examples. This engine\'s implementation reproduces all 6 of the examples covering the marital-status categories this engine supports (biweekly and monthly, all three IA W-4 marital-status categories) exactly to the cent.', url: 'https://revenue.iowa.gov/media/53/download?inline=' },
     { authority: 'Alabama Department of Revenue', instrument: '2025-tax-year (TY 2025) official standard deduction table by filing status (25stddeduction40a.pdf, "40A Booklet") — fetched and read directly 2026-09-15, giving the income-phased deduction schedule this engine partially implements (floor value and floor threshold only — see limitations). Combined with the 2022 NFC bulletin for Alabama\'s tax brackets, personal exemption, and dependent exemption tiers (Alabama\'s 2%/4%/5% brackets have been stable for decades, so the bulletin\'s age is treated as low-risk for those specific figures).', url: 'https://www.revenue.alabama.gov/wp-content/uploads/2026/01/25stddeduction40a.pdf' },
-    { authority: 'USDA National Finance Center / secondary corroboration', instrument: 'Ohio (NFC-25-1758202227, most recent available, PP20 2025) and Louisiana (NFC-26-1767639939, PP15 2026, corroborated by a second web search confirming Louisiana\'s 2025 Act 11 tax reform eliminated the per-dependent exemption entirely — so unlike most gaps in this file, there is genuinely nothing left to model for LA dependents).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
+    { authority: 'USDA National Finance Center / secondary corroboration', instrument: 'Louisiana (NFC-26-1767639939, PP15 2026, corroborated by a second web search confirming Louisiana\'s 2025 Act 11 tax reform eliminated the per-dependent exemption entirely — so unlike most gaps in this file, there is genuinely nothing left to model for LA dependents).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
+    { authority: 'Ohio Department of Taxation', instrument: '"Employer Withholding Taxes - Percentage Method (Effective August 1, 2026)" — fetched and read directly 2026-09-15, superseding this file\'s earlier stale PP20-2025 NFC-bulletin figures for Ohio (1.775%/2.99%/3.64% -> the current, House-Bill-96-enacted 1.60%/2.99%/3.40%). Independently corroborated via a web search (ohiocpa.com practitioner alert, EY tax news) confirming this is a genuine dated rate change effective for payrolls ending on/after 2026-08-01, not a sourcing error. Implements Ohio\'s actual official PER-PAY-PERIOD tables (weekly/biweekly/semi-monthly/monthly, each with its own exemption subtraction and bracket set) directly, rather than annualizing and dividing.', url: 'https://tax.ohio.gov/business/employer-withholding' },
     { authority: 'USDA National Finance Center', instrument: 'Maryland (NFC-26-1783003892), re-fetched with a targeted follow-up prompt to get the complete county-by-county rate table (all 23 counties plus Baltimore City, including the full graduated bracket tables for Anne Arundel and Frederick — the only two MD counties that don\'t use a flat rate) rather than a partial/summarized list.', url: 'https://help.nfc.usda.gov/bulletins/2026/1783003892.htm' },
     { authority: 'USDA National Finance Center (via text-extraction proxy)', instrument: 'Connecticut (NFC-24-1712697342) — the direct WebFetch of this bulletin repeatedly truncated the phase-out add-back and recapture step tables (each has ~10-50 rows); re-fetched via the same proxy workaround used for Oregon in v9 (oregon.gov and this NFC page both proved directly unreachable/unreliable to summarize fully), which returned the complete tables for withholding code A/D verbatim.', url: 'https://help.nfc.usda.gov/bulletins/2024/1712697342.htm' },
     { authority: 'Delaware Division of Revenue', instrument: '"Employer\'s Guide (Withholding Regulations and Employer\'s Duties)" — fetched and read directly 2026-09-15, effective 2025-01-01. Every bracket boundary hand-verified for internal consistency (each row\'s base tax figure exactly reproduces the previous row\'s formula extrapolated to that threshold).', url: 'https://revenue.delaware.gov/employers-guide-withholding-regulations-employers-duties/' },
@@ -1892,7 +1916,8 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Wisconsin Department of Revenue', instrument: 'Publication W-166 (1/26), "Withholding Tax Guide" — fetched and read directly 2026-09-15, the department\'s own current WITHHOLDING-specific publication (distinct from the individual income tax annual-return instructions, which give a similar-looking but not necessarily interchangeable formula — a distinction this session deliberately checked rather than assumed). Contains the "Alternate Method of Withholding Wisconsin Income Tax" section with a complete percentage-method formula (deduction phase-out by filing status, $400/exemption, and a single bracket schedule applying to both filing statuses) plus 3 fully worked examples, all reproduced exactly by this engine\'s self-tests.', url: 'https://www.revenue.wi.gov/DOR%20Publications/pb166.pdf' }
   ],
   limitations: [
-    'Supported states (v17): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, DE, DC, WI, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — full 50-state-plus-DC coverage. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Supported states (v18): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, DE, DC, WI, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — full 50-state-plus-DC coverage. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Ohio (v18): fixed a real, dated rate change caught by a user-supplied cross-check document (a "developer formula pack") that flagged Ohio\'s brackets as "EFFECTIVE-DATED" and cited different rates than this file previously shipped. Verified independently (web search + Ohio DOT\'s own current PDF) that Ohio genuinely revised its withholding brackets effective for payrolls ending on/after 2026-08-01 (House Bill 96): 1.775%/2.99%/3.64% -> 1.60%/2.99%/3.40%. This file now implements Ohio\'s actual official method — separate per-pay-period exemption/bracket tables for weekly, biweekly, semi-monthly, and monthly — rather than an annualize-and-divide approximation. No pre-2026-08-01 payroll date is modeled; every OH calculation uses the current post-revision table regardless of pay_date, which would be incorrect for a payroll actually run before August 1, 2026.',
     'DC (v16): the bracket table is high-confidence — two independent sources (DC OTR\'s own current rates page + a 2022 USDA NFC bulletin) landed on the identical 7-row table. However, the $4,300-per-dependent allowance is ONLY as current as its 2022 source; no more recent DC bulletin was located, so this figure should be reconfirmed before real 2026 payroll runs (same dated-source caveat pattern as VA/KS/ID/VT). Also, no separate DC standard-deduction figure (beyond the dependent allowance) was captured in the sources obtained — taxable wages here are annual wages minus only the dependent allowance; if DC withholding in fact also subtracts a base standard deduction independent of dependents, this would overstate DC withholding for employees with few/no dependents. Flagged rather than guessed.',
     'Wisconsin (v17, the final state, completing full US coverage): sourced from the Wisconsin DOR\'s own current Publication W-166 (1/26) Withholding Tax Guide, specifically its "Alternate Method of Withholding" section — this is the WITHHOLDING-specific formula, deliberately distinguished from a similar-looking but ANNUAL-RETURN-specific formula found earlier in Form 1\'s instructions (which was NOT used, precisely because mixing annual-return constants into a withholding calculation without confirming interchangeability could have produced genuinely wrong numbers — flagged and held back in the v16 pass rather than guessed). All 3 of the guide\'s own worked examples (single/weekly, single/weekly with more exemptions, married/biweekly) are reproduced exactly by this engine. Treat as a high-confidence, primary-sourced, worked-example-verified state — comparable to IN/NC/IA/DE rather than the weaker single-NFC-bulletin tier.',
     'Connecticut (v14): only withholding code A/D is implemented. Codes B, C, and F use their own separate base bracket tables and/or phase-out/recapture schedules that were not captured this pass — employees on those codes are REJECTED with an explicit error rather than approximated using the A/D tables.',
@@ -2983,10 +3008,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     // --- v13 states ---
     let ohIncomeTax = 0;
     if (employee.state === 'OH') {
-      const ded = (employee.oh_exemptions as number) * p.ohio.exemption_value_annual;
-      const taxable = Math.max(0, money(annualWagesV11 - ded));
-      const annualTax = bracketLookup(taxable, p.ohio.brackets);
-      ohIncomeTax = money(annualTax / periodsPerYear);
+      const ded = (employee.oh_exemptions as number) * p.ohio.exemption_per_period[employee.pay_frequency];
+      const taxable = Math.max(0, money(grossPay - ded));
+      ohIncomeTax = bracketLookup(taxable, p.ohio.brackets_per_period[employee.pay_frequency]);
     }
 
     let laIncomeTax = 0;
@@ -4145,7 +4169,11 @@ export function payrollEngineSelfTestUS() {
     ]
   });
   const [sOh1, sLa1, sAl1] = v13Case.employees;
-  const expectedOh1 = 283.46;
+  // v18: updated for Ohio's 2026-08-01 revised per-period tables.
+  // MONTHLY, 0 exemptions, $10,000 gross: taxable $10,000 falls in the
+  // >$8,333.33 bracket: $218.99 + 3.400% * ($10,000-$8,333.33)
+  // = $218.99 + $56.67 (rounded) = $275.66.
+  const expectedOh1 = 275.66;
   const expectedLa1 = 275.85;
   const expectedAl1 = 480;
 
@@ -4173,6 +4201,16 @@ export function payrollEngineSelfTestUS() {
   });
   const sDe1 = deCase.employees[0];
   const expectedDe1 = 548.25;
+
+  // v18: Ohio, re-verified against the DOT's own current (post-2026-08-01)
+  // weekly table: $600 gross, 0 exemptions -> taxable $600 falls in the
+  // >$500.96 bracket: $8.02 + 2.99%*(600-500.96) = $8.02+$2.9613 = $10.98.
+  const ohV18Case = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-07', pay_date: '2026-09-07',
+    employees: [{ employee_id: 'OHW1', gross_pay: 600, pay_frequency: 'WEEKLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'OH', oh_exemptions: 0 }]
+  });
+  const sOhV18 = ohV18Case.employees[0];
+  const expectedOhV18 = 10.98;
 
   // v16: DC, hand-verified against bracket-math computed by hand.
   // annual wages 120000; dependent allowance 1*4300=4300; taxable 115700
@@ -4304,7 +4342,8 @@ export function payrollEngineSelfTestUS() {
     v14Case.controls.journal_balanced &&
     sDe1.de_income_tax === expectedDe1 && deCase.controls.journal_balanced &&
     sDc1.dc_income_tax === expectedDc1 && dcCase.controls.journal_balanced &&
-    sWi1.wi_income_tax === expectedWi1 && wiCase.controls.journal_balanced;
+    sWi1.wi_income_tax === expectedWi1 && wiCase.controls.journal_balanced &&
+    sOhV18.oh_income_tax === expectedOhV18 && ohV18Case.controls.journal_balanced;
 
   return {
     ok,
@@ -4316,7 +4355,7 @@ export function payrollEngineSelfTestUS() {
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
-    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case, v14Case, deCase, dcCase, wiCase,
+    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case, v14Case, deCase, dcCase, wiCase, ohV18Case,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
