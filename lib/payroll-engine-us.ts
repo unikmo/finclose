@@ -1,5 +1,6 @@
-// United States (US) payroll rule pack — v5: federal + 17 states (CA, NJ,
-// NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, FL, NV, NH, SD, TN, TX, WY).
+// United States (US) payroll rule pack — v9: federal + 18 states (CA, NJ,
+// NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, OR, FL, NV, NH, SD, TN,
+// TX, WY).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -28,6 +29,39 @@
 // in the prior year or even during the current year. This file uses figures
 // sourced via AI web research (not a professional review) as of September
 // 2026.
+//
+// v9 change log (from v8): adds Oregon (OR) as an 18th state — the first
+// entirely new state added since v5, and one v8 had explicitly rejected for
+// lack of a full bracket table. Revisited on explicit user instruction not
+// to reject it but to compare sources and find a way to implement it
+// correctly. What changed: v8 had only ONE worked example (the golden
+// fixture's single data point) and one self-contradictory AI web-search
+// synthesis. This pass instead (1) fetched Oregon's own 2026 formula
+// publication (Pub. 150-206-436) via a text-extraction proxy — oregon.gov
+// itself remains unreachable from this environment — and re-queried it
+// three times with independently-worded prompts, getting byte-identical
+// numbers each time; (2) found and fetched a genuinely independent second
+// source, the USDA National Finance Center's federal payroll-processing
+// bulletin, which reproduces Oregon's PRIOR year (2025) formula in the
+// identical structural pattern (same bracket shape, same "credit amount
+// equals bracket-1 base" design quirk, same wage-tier split at $50,000)
+// at dollar amounts consistently ~2.6-2.9% below the 2026 figures — exactly
+// what one year of routine inflation indexing would produce, not what two
+// independent transcription errors would look like; (3) independently
+// confirmed Paid Leave Oregon's rate/split/wage-cap and the Statewide
+// Transit Tax rate directly against paidleave.oregon.gov (via the same
+// proxy) and a targeted web search. The golden fixture's own worked
+// example (annual OR WH = 678 + 8.75% x (108,340-11,400) = 9,160.25 for
+// $120,000 wages, 0 allowances) now matches this engine's actual output
+// exactly, as does the fixture's EDGE-OR-PAID-LEAVE-CAP wage-cap-crossing
+// vector. One number from the proxy-fetched text ("$38,340" as a bracket
+// lower bound) did NOT appear in the NFC structure and was discarded as a
+// likely extraction artifact rather than built on. One genuinely
+// unresolved ambiguity — whether a SINGLE filer claiming 3+ allowances
+// uses the single or married federal-subtraction phase-out schedule once
+// annual wages reach $125,000+ — is rejected rather than guessed (see
+// limitations); this is a narrow, rare combination for this pack's small-
+// business target market, not a gap in the common case.
 //
 // v8 change log (from v7): adds two local-tax overlays the golden-payslip
 // fixture pack flagged as not-yet-implemented — Philadelphia Wage Tax
@@ -247,12 +281,13 @@ export type UsCaFilingStatus = 'SINGLE' | 'MARRIED_0_OR_1' | 'MARRIED_2_OR_MORE'
 export type UsState =
   | 'CA' | 'NJ' | 'NY'
   | 'IL' | 'PA' | 'MI' | 'CO' | 'AZ'
-  | 'AK' | 'WA'
+  | 'AK' | 'WA' | 'OR'
   | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
 export type CoFilingStatus = 'MFJ_OR_QSS' | 'OTHER';
 export type AzElectionPercent = 0 | 0.5 | 1.0 | 1.5 | 2.0 | 2.5 | 3.0 | 3.5;
+export type OrFilingStatus = 'SINGLE' | 'MARRIED';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -334,6 +369,14 @@ export type UsEmployeeInput = {
   // to every WA employee at flat statutory rates (small-employer/approved-
   // exemption nuances are not modeled — see limitations).
   ytd_wa_pfml_wages_before?: number;
+  // OR fields — required when state === 'OR'. or_filing_status is the
+  // OR-W-4 line 1 marital-status box; or_allowances is line 2. A SINGLE
+  // filer claiming 3+ allowances uses the same (wider) bracket track and
+  // standard deduction as a MARRIED filer — a real, documented quirk of
+  // Oregon's own formula, not a simplification made by this engine.
+  or_filing_status?: OrFilingStatus;
+  or_allowances?: number;
+  ytd_or_paid_leave_wages_before?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -375,6 +418,9 @@ export type UsJournalLine = {
     | 'AK_UI_PAYABLE'
     | 'WA_PFML_PAYABLE'
     | 'WA_CARES_PAYABLE'
+    | 'OR_INCOME_TAX_PAYABLE'
+    | 'OR_STT_PAYABLE'
+    | 'OR_PAID_LEAVE_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -417,6 +463,9 @@ export type UsEmployeeResult = {
   ak_ui: number;
   wa_pfml: number;
   wa_cares: number;
+  or_income_tax: number;
+  or_stt: number;
+  or_paid_leave_employee: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -428,6 +477,7 @@ export type UsEmployeeResult = {
   ytd_ak_ui_wages_after: number;
   ytd_wa_pfml_wages_after: number;
   ytd_ny_pfl_tax_after: number;
+  ytd_or_paid_leave_wages_after: number;
 };
 
 export type UsPayrollRunResult = {
@@ -468,6 +518,9 @@ export type UsPayrollRunResult = {
     ak_ui: number;
     wa_pfml: number;
     wa_cares: number;
+    or_income_tax: number;
+    or_stt: number;
+    or_paid_leave_employee: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -483,7 +536,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V8',
+  id: 'US-18-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V9',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -824,6 +877,60 @@ export const PAYROLL_RULE_PACK_US = {
     pfml_wage_base_annual: 184500,
     wa_cares_employee_rate: 0.0058
   },
+  oregon: {
+    // 2026 Oregon Withholding Tax Formulas, Pub. 150-206-436 (Rev.
+    // 12-31-25, effective 2026-01-01). oregon.gov is unreachable from this
+    // environment, so the publication was fetched via a text-extraction
+    // proxy and re-queried three times with independently-worded prompts,
+    // producing byte-identical numbers each time. Independently
+    // corroborated by the USDA National Finance Center's federal payroll-
+    // processing bulletin (TAXES 25-xx, effective PP06 2025), which
+    // reproduces the PRIOR year's (2025) Oregon formula in the identical
+    // structural pattern — every 2026 figure below sits ~2.6-2.9% above
+    // its NFC-confirmed 2025 counterpart, consistent with one annual
+    // indexing factor, not independent errors. The one fixture-tested
+    // value (annual OR WH = 678 + 8.75% x (108,340-11,400) = 9,160.25 for
+    // $120,000 annual wages, 0 allowances) matches both sources AND the
+    // golden-payslip fixture exactly. See v9 change log for the full
+    // reconciliation, including one discarded number ("$38,340") that
+    // appeared in the proxy-fetched text but not in the NFC structure and
+    // was NOT used.
+    //
+    // Two bracket "tracks": NARROW (single, fewer than 3 allowances) and
+    // WIDE (married, OR single claiming 3+ allowances — a real documented
+    // quirk, not a simplification). Each track has its own standard
+    // deduction and its own pair of bracket tables, selected by whether
+    // ANNUAL WAGES are below or at/above $50,000 (the federal-tax-
+    // subtraction cap only binds at the higher tier).
+    standard_deduction_narrow_annual: 2910,
+    standard_deduction_wide_annual: 5820,
+    exemption_credit_per_allowance_annual: 263,
+    wage_tier_boundary_annual: 50000,
+    // Federal tax subtraction: uncapped (use actual annualized federal
+    // income tax withheld) below the wage-tier boundary; capped by this
+    // phase-out schedule (keyed by ANNUAL WAGES, by FILING STATUS — not by
+    // allowance count) at/above it.
+    federal_subtraction_phaseout_single: [
+      [0, 8750], [125000, 7000], [130000, 5250], [135000, 3500], [140000, 1750], [145000, 0]
+    ] as Array<[number, number]>,
+    federal_subtraction_phaseout_married: [
+      [0, 8750], [250000, 7000], [260000, 5250], [270000, 3500], [280000, 1750], [290000, 0]
+    ] as Array<[number, number]>,
+    // Bracket rows: [BASE atLeast, base tax, rate].
+    brackets_narrow_under_wage_tier: [[0, 263, 0.0475], [4550, 479, 0.0675], [11400, 941, 0.0875]] as Array<[number, number, number]>,
+    brackets_narrow_at_or_over_wage_tier: [[0, 0, 0], [11400, 678, 0.0875], [125000, 10618, 0.099]] as Array<[number, number, number]>,
+    brackets_wide_under_wage_tier: [[0, 263, 0.0475], [9100, 695, 0.0675], [22800, 1620, 0.0875]] as Array<[number, number, number]>,
+    brackets_wide_at_or_over_wage_tier: [[0, 0, 0], [22800, 1357, 0.0875], [250000, 21237, 0.099]] as Array<[number, number, number]>,
+    // Statewide Transit Tax: flat, no wage cap, unchanged since 2018.
+    stt_rate: 0.001,
+    // Paid Leave Oregon: 1% total (0.6% employee / 0.4% employer for
+    // employers with 25+ workers — employer share not modeled, same
+    // precedent as WA's employer PFML share), wage base pegged to the SSA
+    // taxable maximum, confirmed independently via paidleave.oregon.gov
+    // (2026-09-14).
+    paid_leave_employee_rate: 0.006,
+    paid_leave_wage_base_annual: 184500
+  },
   // States with genuinely no individual wage income tax AND no statewide
   // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
   // compute for the employee beyond the state-agnostic federal FICA/FUTA
@@ -854,14 +961,17 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'New York State Paid Family Leave', instrument: '2026 NY PFL employee rate (0.432%) and annual dollar cap ($411.91), and NY DBL employee rate (0.5%) and weekly dollar cap ($0.60) — sourced from a second-generation "formula pack" cross-check document (2026_US_Payroll_Formula_Implementation_Guide.pdf, user-supplied 2026-09-14) that itself derives from the same secondary reference above, independently corroborating this file\'s NJ/AZ/CO/PA/AK/WA/CA-SDI figures in the process', url: 'https://paidfamilyleave.ny.gov/cost' },
     { authority: 'Golden-payslip QA fixture pack (user-supplied, 2026-09-14/15)', instrument: '"US_2026_Payroll_Golden_Payslip_QA_Pack.pdf" — deterministic golden payslips for CA, NY/NYC, PA (incl. Philadelphia local tax), WA, CO (incl. Denver OPT), NJ, and federal cap/bonus cases, checked directly against this engine\'s actual output rather than this file\'s own hand derivations. Found and led to the fix of the NJ $769 bracket bug documented in the v7 change log; every other assertion checked (NY, PA, WA, CO, NJ post-fix, federal cap) passed exactly. Primary sources cited within that pack for each figure: IRS Pub 15/15-T, CA EDD, NYS-50-T-NYS/NYC, NJ-WT/NJDOL, WA PFML/WA Cares, CO DR 1098/FAMLI.', url: 'file: US_2026_Payroll_Golden_Payslip_QA_Pack.pdf' },
     { authority: 'City of Philadelphia Department of Revenue', instrument: 'Earnings Tax — employee (resident and non-resident-working-in-Philadelphia) Wage Tax rates, independently fetched 2026-09-14: resident 3.740% through 2026-06-30, 3.735% from 2026-07-01; non-resident 3.43% through 2026-06-30, 3.425% from 2026-07-01. The resident figures corroborate the golden-payslip fixture exactly; the non-resident figures were not present in that fixture and are sourced here directly.', url: 'https://www.phila.gov/services/payments-assistance-taxes/taxes/income-taxes/earnings-tax-employees/' },
-    { authority: 'City and County of Denver, Department of Finance', instrument: 'Tax Guide Topic No. 61, Occupational Privilege Taxes (OPT or "Head Tax") — $5.75/month Employee OPT once an employee earns at least $500 in Denver-sourced compensation in a calendar month; $4.00/month Business OPT (employer-paid, NOT modeled by this engine). Independently fetched 2026-09-14 and corroborates the golden-payslip fixture\'s Denver figures exactly.', url: 'https://denver.prelive.opencities.com/files/assets/public/v/2/finance/documents/treasury/tax-guides/taxguidetopic61_occupationalprivilegetaxes.pdf' }
+    { authority: 'City and County of Denver, Department of Finance', instrument: 'Tax Guide Topic No. 61, Occupational Privilege Taxes (OPT or "Head Tax") — $5.75/month Employee OPT once an employee earns at least $500 in Denver-sourced compensation in a calendar month; $4.00/month Business OPT (employer-paid, NOT modeled by this engine). Independently fetched 2026-09-14 and corroborates the golden-payslip fixture\'s Denver figures exactly.', url: 'https://denver.prelive.opencities.com/files/assets/public/v/2/finance/documents/treasury/tax-guides/taxguidetopic61_occupationalprivilegetaxes.pdf' },
+    { authority: 'Oregon Department of Revenue', instrument: 'Pub. 150-206-436 (Rev. 12-31-25), 2026 Oregon Withholding Tax Formulas — fetched via a text-extraction proxy (oregon.gov itself unreachable from this environment) and re-queried three times with independently-worded prompts 2026-09-14, producing identical figures each time: standard deductions ($2,910 narrow / $5,820 wide), exemption credit ($263/allowance), federal-subtraction phase-out schedule ($8,750 cap phasing to $0 between $125k-$145k single / $250k-$290k married), and the complete bracket tables for both the under-$50,000 and at-or-over-$50,000 annual-wage tiers.', url: 'https://www.oregon.gov/dor/forms/FormsPubs/withholding-tax-formulas_206-436_2026.pdf' },
+    { authority: 'USDA National Finance Center', instrument: 'Federal payroll-processing bulletin reproducing Oregon\'s 2025 state withholding formula (effective Pay Period 06, 2025) — used by this pass as an INDEPENDENT second source (different organization, different document, prior tax year) to corroborate the 2026 Oregon DOR figures above: identical structural pattern (same bracket shape, same wage-tier split at $50,000, same "exemption credit equals bracket-1 base" design), with every 2025 dollar figure sitting ~2.6-2.9% below its 2026 counterpart — consistent with one year of routine inflation indexing, not independent transcription errors.', url: 'https://help.nfc.usda.gov/bulletins/2025/1743009231.htm' },
+    { authority: 'Paid Leave Oregon (Oregon Employment Department)', instrument: '2026 Paid Leave Oregon contribution rate (1% total: 0.6% employee / 0.4% employer for employers with 25+ workers) and wage base (pegged to the 2026 Social Security taxable maximum, $184,500) — confirmed 2026-09-14 via paidleave.oregon.gov (through the same text-extraction proxy) and corroborated by a separate web search.', url: 'https://paidleave.oregon.gov/employers/' }
   ],
   limitations: [
-    'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 17 states total. The remaining 33 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, IN, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, NC, ND, OH, OK, OR, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (IN, GA, KY, NC — all flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture (see the IN note below for a concrete example of exactly this trap being avoided rather than walked into).',
+    'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 18 states total. The remaining 32 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, IN, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, NC, ND, OH, OK, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (IN, GA, KY, NC — all flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture (see the IN note below for a concrete example of exactly this trap being avoided rather than walked into).',
+    'Oregon (v9): the federal-tax-subtraction phase-out schedule is applied by FILING STATUS alone (single vs. married), independent of the allowance-count-driven bracket track. A SINGLE filer claiming 3+ allowances (who therefore uses the WIDE bracket track, same as a married filer) whose annual wages also reach $125,000+ (the point the single/married phase-out schedules start to diverge) hits a combination this engine\'s two sources don\'t clearly resolve — rejected with an explicit error rather than guessed. This is a narrow, rare combination for the ~50-employee freelancer/small-business target market, not a gap in the ordinary case. One number seen in the proxy-fetched Oregon DOR text ("$38,340" as a bracket lower bound) was NOT corroborated by the independent USDA NFC source and was discarded rather than used — see the v9 change log for the full reconciliation.',
     'Indiana was deliberately NOT added despite the secondary reference giving a headline state rate (2.95%), because that reference does not give the actual personal/dependent exemption amounts Indiana\'s real withholding formula subtracts before applying the rate — applying 2.95% to full gross would overstate every IN employee\'s withholding. Rejected rather than approximated. (Indiana county income tax, which is required in addition to the state amount, is unimplemented regardless for the same reason CA/NJ/NY local complexity was scoped state-by-state.)',
     'IL, PA, MI, CO, AZ, AK, and WA (added in v5) are sourced from a secondary cross-check reference document, not independently fetched from each state\'s own primary publication the way CA/NJ/NY were — see the evidence list above. This is a materially weaker sourcing chain and these seven states should be treated as lower-confidence than CA/NJ/NY until independently verified against each state\'s own official withholding-methods publication.',
     'PA and CO local taxes (v8): Philadelphia Wage Tax (pa_philadelphia_resident / pa_philadelphia_nonresident_workplace, effective-dated by pay_date at the 2026-07-01 rate change) and Denver Occupational Privilege Tax employee share (co_denver_employee, MONTHLY-frequency-only, $5.75 flat once the $500/month earnings threshold is met) are now modeled and independently primary-sourced (phila.gov, denvergov.org) — see evidence. Denver\'s $4.00/month employer-paid Business OPT is explicitly NOT modeled (an employer-side fixed cost this engine has no place to post, the same pre-existing gap as WA\'s employer PFML share not appearing in employer_cost_total). All OTHER MI, CO (outside Denver), AZ, AK, and WA local/city income taxes (e.g. the many Michigan cities that levy their own income tax) remain unmodeled.',
-    'Oregon (OR) was evaluated but NOT added in v8 despite a golden-payslip fixture giving one complete worked example (single filer, one bracket row of the percentage-method formula: BASE = wages − federal subtraction − standard deduction; annual OR WH = $678 + 8.75% × (BASE − $11,400)). Oregon\'s official formula publication (Pub. 150-206-436) — which would give the federal-subtraction caps and full bracket table for ALL filing statuses, not just one example — could not be fetched this pass (oregon.gov was unreachable from this environment; an AI web-search synthesis returned self-contradictory figures, e.g. an $8,500 vs. the fixture\'s $8,750 federal-subtraction cap, and was not trusted). Rejected rather than built off one data point and an unreliable secondary source — consistent with this file\'s fail-closed pattern. Oregon\'s Statewide Transit Tax (0.1% flat, no cap) and Paid Leave Oregon (0.6% employee / 0.4% employer, confirmed wage-base cap per the fixture\'s own EDGE-OR-PAID-LEAVE-CAP vector) are comparatively simple and could be added ahead of the income-tax formula once revisited, but were left out together with OR_PIT this pass to avoid a state that silently omits its own income tax.',
     'California income tax (v7): for a given gross wage, this engine can differ from a result computed via EDD\'s OPTIONAL "annualize wages, apply the annual bracket table, divide by periods" method by a few cents, because this engine uses EDD\'s PRIMARY period-specific Method B tables (Tables 5-28) applied directly to the period\'s taxable income instead. Both methods are EDD-documented and both are "correct" — they can simply round differently at the margin. Confirmed via a user-supplied golden-payslip fixture (CA monthly $10,000/Single/0 allowances: this engine gives $647.84, the fixture\'s annualized-method calculation gives $647.90) — not treated as a bug, but flagged since a caller comparing this engine\'s output against a payslip built with the alternate method may see a few-cent difference at some wage levels.',
     'CO: the FAMLI employer-share/small-employer-exemption rules are DYNAMIC (employer-side only, don\'t affect the employee co_famli figure this engine computes) and not modeled.',
     'WA: PFML and WA Cares small-employer exemptions and WA Cares individual approved-exemption letters are DYNAMIC and not modeled — every WA employee is assumed subject to both at the flat statutory rates. A WA employee with an approved WA Cares exemption would be incorrectly charged the 0.58% contribution by this engine; callers with such employees must adjust outside this engine.',
@@ -942,6 +1052,19 @@ function bracketLookup(annualAmount: number, brackets: Array<[number, number, nu
   return money(base + (annualAmount - atLeast) * rate);
 }
 
+// Step (non-marginal) lookup: returns the VALUE of the last row whose
+// threshold the amount has reached or passed — used for Oregon's federal-
+// tax-subtraction phase-out schedule, which is a flat override amount per
+// wage tier, not a per-dollar marginal rate.
+function stepLookup(amount: number, rows: Array<[number, number]>) {
+  let value = rows[0][1];
+  for (const [atLeast, rowValue] of rows) {
+    if (amount >= atLeast) value = rowValue;
+    else break;
+  }
+  return value;
+}
+
 export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult {
   requireIsoDate(input.pay_period_start, 'pay_period_start');
   requireIsoDate(input.pay_period_end, 'pay_period_end');
@@ -1006,7 +1129,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', ...p.no_tax_no_employee_levy_states];
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', ...p.no_tax_no_employee_levy_states];
     if (!supportedStates.includes(employee.state)) {
       const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
@@ -1114,6 +1237,18 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     if (employee.state === 'AZ') {
       if (!p.arizona.valid_election_percents.includes(employee.az_election_percent as number)) {
         const error = new Error(`az_election_percent for ${employeeId} must be one of ${p.arizona.valid_election_percents.join(', ')}`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'OR') {
+      if (employee.or_filing_status !== 'SINGLE' && employee.or_filing_status !== 'MARRIED') {
+        const error = new Error(`or_filing_status for ${employeeId} must be 'SINGLE' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.or_allowances) || (employee.or_allowances as number) < 0) {
+        const error = new Error(`or_allowances for ${employeeId} must be a non-negative integer`);
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
@@ -1327,11 +1462,49 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       waCares = money(grossPay * p.washington.wa_cares_employee_rate);
     }
 
+    // --- Oregon: percentage-method state PIT + Statewide Transit Tax + Paid Leave Oregon employee share ---
+    const ytdOrPaidLeaveBefore = requireNonNegativeMoney(employee.ytd_or_paid_leave_wages_before ?? 0, `ytd_or_paid_leave_wages_before for ${employeeId}`);
+    let orIncomeTax = 0;
+    let orStt = 0;
+    let orPaidLeaveEmployee = 0;
+    if (employee.state === 'OR') {
+      const orFilingStatus = employee.or_filing_status as OrFilingStatus;
+      const orAllowances = employee.or_allowances as number;
+      const annualWages = money(grossPay * periodsPerYear);
+      const wideTrack = orFilingStatus === 'MARRIED' || orAllowances >= 3;
+      const atOrOverWageTier = annualWages >= p.oregon.wage_tier_boundary_annual;
+      // The federal-subtraction phase-out schedule is keyed by FILING
+      // STATUS alone (per the NFC-confirmed structure), independent of the
+      // bracket track above. A single filer claiming 3+ allowances who ALSO
+      // crosses into the top phase-out region is a genuinely ambiguous
+      // combination the sources don't resolve — rejected rather than guessed.
+      if (orFilingStatus === 'SINGLE' && orAllowances >= 3 && annualWages >= p.oregon.federal_subtraction_phaseout_single[1][0]) {
+        const error = new Error(`OR employee ${employeeId} is SINGLE with 3+ allowances and annual wages at or above $${p.oregon.federal_subtraction_phaseout_single[1][0]} — this engine's sources don't clearly resolve whether the single or married federal-subtraction phase-out schedule applies in this combination, so it's rejected rather than guessed`);
+        (error as Error & { status?: number }).status = 409;
+        throw error;
+      }
+      const annualFederalTax = money(federalIncomeTax * periodsPerYear);
+      const federalSubtraction = atOrOverWageTier
+        ? Math.min(annualFederalTax, stepLookup(annualWages, orFilingStatus === 'MARRIED' ? p.oregon.federal_subtraction_phaseout_married : p.oregon.federal_subtraction_phaseout_single))
+        : annualFederalTax;
+      const standardDeduction = wideTrack ? p.oregon.standard_deduction_wide_annual : p.oregon.standard_deduction_narrow_annual;
+      const base = Math.max(0, money(annualWages - federalSubtraction - standardDeduction));
+      const brackets = wideTrack
+        ? (atOrOverWageTier ? p.oregon.brackets_wide_at_or_over_wage_tier : p.oregon.brackets_wide_under_wage_tier)
+        : (atOrOverWageTier ? p.oregon.brackets_narrow_at_or_over_wage_tier : p.oregon.brackets_narrow_under_wage_tier);
+      const annualWh = bracketLookup(base, brackets);
+      const annualWhAfterCredit = Math.max(0, money(annualWh - orAllowances * p.oregon.exemption_credit_per_allowance_annual));
+      orIncomeTax = money(annualWhAfterCredit / periodsPerYear);
+      orStt = money(grossPay * p.oregon.stt_rate);
+      orPaidLeaveEmployee = ceilingContribution(ytdOrPaidLeaveBefore, grossPay, p.oregon.paid_leave_wage_base_annual, p.oregon.paid_leave_employee_rate);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
       nyIncomeTax + nycIncomeTax + yonkersTax + nyPfl + nyDbl +
-      ilIncomeTax + paIncomeTax + paUc + phlWageTax + miIncomeTax + coIncomeTax + coFamli + denverOptEmployee + azIncomeTax + akUi + waPfml + waCares
+      ilIncomeTax + paIncomeTax + paUc + phlWageTax + miIncomeTax + coIncomeTax + coFamli + denverOptEmployee + azIncomeTax + akUi + waPfml + waCares +
+      orIncomeTax + orStt + orPaidLeaveEmployee
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -1374,6 +1547,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ak_ui: akUi,
       wa_pfml: waPfml,
       wa_cares: waCares,
+      or_income_tax: orIncomeTax,
+      or_stt: orStt,
+      or_paid_leave_employee: orPaidLeaveEmployee,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -1384,7 +1560,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ytd_co_famli_wages_after: money(ytdCoFamliBefore + Math.min(grossPay, Math.max(0, p.colorado.famli_wage_base_annual - ytdCoFamliBefore))),
       ytd_ak_ui_wages_after: money(ytdAkUiBefore + Math.min(grossPay, Math.max(0, p.alaska.ui_wage_base_annual - ytdAkUiBefore))),
       ytd_wa_pfml_wages_after: money(ytdWaPfmlBefore + Math.min(grossPay, Math.max(0, p.washington.pfml_wage_base_annual - ytdWaPfmlBefore))),
-      ytd_ny_pfl_tax_after: money(ytdNyPflTaxBefore + nyPfl)
+      ytd_ny_pfl_tax_after: money(ytdNyPflTaxBefore + nyPfl),
+      ytd_or_paid_leave_wages_after: money(ytdOrPaidLeaveBefore + Math.min(grossPay, Math.max(0, p.oregon.paid_leave_wage_base_annual - ytdOrPaidLeaveBefore)))
     };
   });
 
@@ -1417,6 +1594,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     ak_ui: sum(employees.map(e => e.ak_ui)),
     wa_pfml: sum(employees.map(e => e.wa_pfml)),
     wa_cares: sum(employees.map(e => e.wa_cares)),
+    or_income_tax: sum(employees.map(e => e.or_income_tax)),
+    or_stt: sum(employees.map(e => e.or_stt)),
+    or_paid_leave_employee: sum(employees.map(e => e.or_paid_leave_employee)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -1452,6 +1632,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'AK_UI_PAYABLE', amount: totals.ak_ui },
     { side: 'CREDIT', account_role: 'WA_PFML_PAYABLE', amount: totals.wa_pfml },
     { side: 'CREDIT', account_role: 'WA_CARES_PAYABLE', amount: totals.wa_cares },
+    { side: 'CREDIT', account_role: 'OR_INCOME_TAX_PAYABLE', amount: totals.or_income_tax },
+    { side: 'CREDIT', account_role: 'OR_STT_PAYABLE', amount: totals.or_stt },
+    { side: 'CREDIT', account_role: 'OR_PAID_LEAVE_PAYABLE', amount: totals.or_paid_leave_employee },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -2129,6 +2312,36 @@ export function payrollEngineSelfTestUS() {
   });
   const sGoldCoDen = goldenCoDen.employees[0];
 
+  // v9: Oregon — first genuinely new state added since v5, built from two
+  // independently-corroborating sources (Oregon DOR's own 2026 publication
+  // via text-extraction proxy + USDA NFC's 2025 federal payroll bulletin)
+  // rather than rejected outright, per explicit user instruction to find a
+  // way to implement it correctly instead of giving up on it.
+  const goldenOr = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-OR', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'OR', or_filing_status: 'SINGLE', or_allowances: 0
+    }]
+  });
+  const sGoldOr = goldenOr.employees[0];
+
+  // EDGE-OR-PAID-LEAVE-CAP: $180,000 YTD Paid Leave wages before this
+  // $10,000 check leaves only $4,500 of room under the $184,500 cap.
+  const orPaidLeaveCapEdge = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'EDGE-OR-PL', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'OR', or_filing_status: 'SINGLE', or_allowances: 0,
+      ytd_or_paid_leave_wages_before: 180000
+    }]
+  });
+  const sOrPlEdge = orPaidLeaveCapEdge.employees[0];
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -2214,7 +2427,10 @@ export function payrollEngineSelfTestUS() {
     sGoldFedCap.employee_additional_medicare === 45 && goldenFedCap.controls.journal_balanced &&
     sGoldPaPhl.phl_wage_tax === 373.5 && sGoldPaPhl.net_pay === 7083.33 && goldenPaPhl.controls.journal_balanced &&
     sPhlEdge.phl_wage_tax === 374 && phlEffectiveDateEdge.controls.journal_balanced &&
-    sGoldCoDen.denver_opt_employee === 5.75 && sGoldCoDen.net_pay === 7301.25 && goldenCoDen.controls.journal_balanced;
+    sGoldCoDen.denver_opt_employee === 5.75 && sGoldCoDen.net_pay === 7301.25 && goldenCoDen.controls.journal_balanced &&
+    sGoldOr.or_income_tax === 763.35 && sGoldOr.or_stt === 10 && sGoldOr.or_paid_leave_employee === 60 &&
+    sGoldOr.net_pay === 6937.48 && goldenOr.controls.journal_balanced &&
+    sOrPlEdge.or_paid_leave_employee === 27 && orPaidLeaveCapEdge.controls.journal_balanced;
 
   return {
     ok,
@@ -2225,7 +2441,7 @@ export function payrollEngineSelfTestUS() {
     nyPflOrdinary,
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
-    goldenPaPhl, phlEffectiveDateEdge, goldenCoDen,
+    goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
