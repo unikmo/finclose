@@ -1,6 +1,6 @@
-// United States (US) payroll rule pack — v9: federal + 18 states (CA, NJ,
-// NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, OR, FL, NV, NH, SD, TN,
-// TX, WY).
+// United States (US) payroll rule pack — v10: federal + 20 states (CA, NJ,
+// NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, FL, NV, NH,
+// SD, TN, TX, WY).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -29,6 +29,23 @@
 // in the prior year or even during the current year. This file uses figures
 // sourced via AI web research (not a professional review) as of September
 // 2026.
+//
+// v10 change log (from v9): adds Indiana (IN) and North Carolina (NC),
+// closing the two states this file's own limitations had singled out as
+// "deceptively simple flat-rate traps" — Indiana was explicitly rejected in
+// earlier versions for lack of its real exemption amounts and mandatory
+// county tax. Both fetched and independently confirmed directly from each
+// state's own official publication this pass: Indiana Department of
+// Revenue Departmental Notice #1 (R46/01-26, effective 2026-01-01) gives
+// the flat 2.95% rate, the $1,000/$1,500/$3,000 personal/dependent/
+// adopted-child exemption amounts, AND the complete 92-county tax rate
+// table, so county tax (previously the specific reason IN was left out) is
+// now implemented as a mandatory input rather than silently skipped. North
+// Carolina's NC-30 (Web 11-25) gives the 4.09% withholding rate (3.99%
+// statutory rate + NC's own 0.1% formula adjustment — confirmed in NC-30's
+// own text, not a bug), the $12,750/$19,125 standard deductions, the
+// $2,500 allowance value, and NC's unusual nearest-whole-dollar (not cent)
+// final rounding, verified against NC-30's own worked example.
 //
 // v9 change log (from v8): adds Oregon (OR) as an 18th state — the first
 // entirely new state added since v5, and one v8 had explicitly rejected for
@@ -281,13 +298,14 @@ export type UsCaFilingStatus = 'SINGLE' | 'MARRIED_0_OR_1' | 'MARRIED_2_OR_MORE'
 export type UsState =
   | 'CA' | 'NJ' | 'NY'
   | 'IL' | 'PA' | 'MI' | 'CO' | 'AZ'
-  | 'AK' | 'WA' | 'OR'
+  | 'AK' | 'WA' | 'OR' | 'IN' | 'NC'
   | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
 export type CoFilingStatus = 'MFJ_OR_QSS' | 'OTHER';
 export type AzElectionPercent = 0 | 0.5 | 1.0 | 1.5 | 2.0 | 2.5 | 3.0 | 3.5;
 export type OrFilingStatus = 'SINGLE' | 'MARRIED';
+export type NcFilingStatus = 'SINGLE_MARRIED_OR_SURVIVING_SPOUSE' | 'HEAD_OF_HOUSEHOLD';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -377,6 +395,17 @@ export type UsEmployeeInput = {
   or_filing_status?: OrFilingStatus;
   or_allowances?: number;
   ytd_or_paid_leave_wages_before?: number;
+  // IN fields — required when state === 'IN'. in_county must match one of
+  // the 92 Indiana county names in the rule pack's county_tax_rates table
+  // (Indiana county tax is mandatory alongside the flat state rate — this
+  // engine requires it explicitly rather than silently skipping it).
+  in_personal_exemptions?: number;
+  in_dependent_exemptions?: number;
+  in_adopted_child_exemptions?: number;
+  in_county?: string;
+  // NC fields — required when state === 'NC'.
+  nc_filing_status?: NcFilingStatus;
+  nc_allowances?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -421,6 +450,9 @@ export type UsJournalLine = {
     | 'OR_INCOME_TAX_PAYABLE'
     | 'OR_STT_PAYABLE'
     | 'OR_PAID_LEAVE_PAYABLE'
+    | 'IN_INCOME_TAX_PAYABLE'
+    | 'IN_COUNTY_TAX_PAYABLE'
+    | 'NC_INCOME_TAX_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -466,6 +498,9 @@ export type UsEmployeeResult = {
   or_income_tax: number;
   or_stt: number;
   or_paid_leave_employee: number;
+  in_income_tax: number;
+  in_county_tax: number;
+  nc_income_tax: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -521,6 +556,9 @@ export type UsPayrollRunResult = {
     or_income_tax: number;
     or_stt: number;
     or_paid_leave_employee: number;
+    in_income_tax: number;
+    in_county_tax: number;
+    nc_income_tax: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -536,7 +574,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-18-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V9',
+  id: 'US-20-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V10',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -931,6 +969,75 @@ export const PAYROLL_RULE_PACK_US = {
     paid_leave_employee_rate: 0.006,
     paid_leave_wage_base_annual: 184500
   },
+  indiana: {
+    // Indiana Department of Revenue, Departmental Notice #1 (R46 / 01-26,
+    // effective 2026-01-01) — fetched directly and independently 2026-09-14.
+    // Flat 2.95% state rate on gross wages after THREE separate annual
+    // exemption amounts (each divided by the pay-period count): personal
+    // ($1,000/exemption, WH-4 line 5), dependent ($1,500/exemption, WH-4
+    // lines 6 AND 7 — "additional" and "first-time additional" dependents
+    // both use the same $1,500 rate, so this engine sums them into one
+    // caller-supplied count), and adopted child ($3,000/exemption, WH-4
+    // line 8). PLUS mandatory county income tax at the flat rate for the
+    // employee's Indiana county of residence (or county of principal work
+    // if a Jan-1 out-of-state resident) — the same taxable-income base as
+    // the state tax. This engine requires in_county explicitly rather than
+    // silently omitting county tax, which was the reason Indiana was
+    // rejected entirely in earlier versions of this file.
+    rate: 0.0295,
+    personal_exemption_annual: 1000,
+    dependent_exemption_annual: 1500,
+    adopted_child_exemption_annual: 3000,
+    // County tax rates effective 2026-01-01, all 92 counties, as published
+    // in Departmental Notice #1.
+    county_tax_rates: {
+      'Adams': 0.016, 'Allen': 0.0159, 'Bartholomew': 0.0175, 'Benton': 0.0179,
+      'Blackford': 0.025, 'Boone': 0.017, 'Brown': 0.025234, 'Carroll': 0.024733,
+      'Cass': 0.0295, 'Clark': 0.02, 'Clay': 0.0235, 'Clinton': 0.0265,
+      'Crawford': 0.0165, 'Daviess': 0.015, 'Dearborn': 0.014, 'Decatur': 0.0245,
+      'DeKalb': 0.0213, 'Delaware': 0.015, 'Dubois': 0.012, 'Elkhart': 0.02,
+      'Fayette': 0.0282, 'Floyd': 0.0189, 'Fountain': 0.021, 'Franklin': 0.017,
+      'Fulton': 0.0288, 'Gibson': 0.013, 'Grant': 0.0275, 'Greene': 0.0235,
+      'Hamilton': 0.011, 'Hancock': 0.0194, 'Harrison': 0.01, 'Hendricks': 0.017,
+      'Henry': 0.0202, 'Howard': 0.0235, 'Huntington': 0.0195, 'Jackson': 0.021,
+      'Jasper': 0.02864, 'Jay': 0.025, 'Jefferson': 0.0103, 'Jennings': 0.025,
+      'Johnson': 0.014, 'Knox': 0.017, 'Kosciusko': 0.01, 'LaGrange': 0.0165,
+      'Lake': 0.015, 'LaPorte': 0.0145, 'Lawrence': 0.0175, 'Madison': 0.0225,
+      'Marion': 0.0202, 'Marshall': 0.0125, 'Martin': 0.025, 'Miami': 0.0254,
+      'Monroe': 0.0214, 'Montgomery': 0.0265, 'Morgan': 0.0272, 'Newton': 0.01,
+      'Noble': 0.0175, 'Ohio': 0.02, 'Orange': 0.0175, 'Owen': 0.025,
+      'Parke': 0.0265, 'Perry': 0.014, 'Pike': 0.012, 'Porter': 0.005,
+      'Posey': 0.0145, 'Pulaski': 0.0285, 'Putnam': 0.023, 'Randolph': 0.03,
+      'Ripley': 0.0238, 'Rush': 0.0215, 'St. Joseph': 0.0175, 'Scott': 0.0216,
+      'Shelby': 0.017, 'Spencer': 0.008, 'Starke': 0.0171, 'Steuben': 0.0199,
+      'Sullivan': 0.017, 'Switzerland': 0.0145, 'Tippecanoe': 0.0128, 'Tipton': 0.026,
+      'Union': 0.0275, 'Vanderburgh': 0.0125, 'Vermillion': 0.015, 'Vigo': 0.02,
+      'Wabash': 0.029, 'Warren': 0.0212, 'Warrick': 0.01, 'Washington': 0.02,
+      'Wayne': 0.0125, 'Wells': 0.021, 'White': 0.0232, 'Whitley': 0.016829
+    } as Record<string, number>
+  },
+  north_carolina: {
+    // NCDOR Form NC-30 (Web 11-25), 2026 Income Tax Withholding Tables and
+    // Instructions for Employers — fetched directly and independently
+    // 2026-09-14. Percentage method, applied PER PERIOD (not annualized):
+    // rate is 4.09% (the statutory 3.99% individual income tax rate for
+    // 2026 plus a 0.1% adjustment NC's own formula bakes into the
+    // withholding rate — confirmed in NC-30's own text, not a discrepancy).
+    // Two filing-status tracks only: "Single, Married Person, or Surviving
+    // Spouse" (one combined table) and "Head of Household". Standard
+    // deduction and allowance value are divided by the pay-period count
+    // each run (reproduces NC-30's own printed per-period constants
+    // exactly, e.g. $12,750/52 = $245.19weekly). Final per-period tax is
+    // rounded to the NEAREST WHOLE DOLLAR, not cents — the one state in
+    // this file that rounds this way; confirmed via NC-30's own worked
+    // example ($450 weekly, single, 2 allowances -> $4.00).
+    rate: 0.0409,
+    standard_deduction_annual: {
+      SINGLE_MARRIED_OR_SURVIVING_SPOUSE: 12750,
+      HEAD_OF_HOUSEHOLD: 19125
+    } as Record<NcFilingStatus, number>,
+    allowance_value_annual: 2500
+  },
   // States with genuinely no individual wage income tax AND no statewide
   // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
   // compute for the employee beyond the state-agnostic federal FICA/FUTA
@@ -964,10 +1071,14 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'City and County of Denver, Department of Finance', instrument: 'Tax Guide Topic No. 61, Occupational Privilege Taxes (OPT or "Head Tax") — $5.75/month Employee OPT once an employee earns at least $500 in Denver-sourced compensation in a calendar month; $4.00/month Business OPT (employer-paid, NOT modeled by this engine). Independently fetched 2026-09-14 and corroborates the golden-payslip fixture\'s Denver figures exactly.', url: 'https://denver.prelive.opencities.com/files/assets/public/v/2/finance/documents/treasury/tax-guides/taxguidetopic61_occupationalprivilegetaxes.pdf' },
     { authority: 'Oregon Department of Revenue', instrument: 'Pub. 150-206-436 (Rev. 12-31-25), 2026 Oregon Withholding Tax Formulas — fetched via a text-extraction proxy (oregon.gov itself unreachable from this environment) and re-queried three times with independently-worded prompts 2026-09-14, producing identical figures each time: standard deductions ($2,910 narrow / $5,820 wide), exemption credit ($263/allowance), federal-subtraction phase-out schedule ($8,750 cap phasing to $0 between $125k-$145k single / $250k-$290k married), and the complete bracket tables for both the under-$50,000 and at-or-over-$50,000 annual-wage tiers.', url: 'https://www.oregon.gov/dor/forms/FormsPubs/withholding-tax-formulas_206-436_2026.pdf' },
     { authority: 'USDA National Finance Center', instrument: 'Federal payroll-processing bulletin reproducing Oregon\'s 2025 state withholding formula (effective Pay Period 06, 2025) — used by this pass as an INDEPENDENT second source (different organization, different document, prior tax year) to corroborate the 2026 Oregon DOR figures above: identical structural pattern (same bracket shape, same wage-tier split at $50,000, same "exemption credit equals bracket-1 base" design), with every 2025 dollar figure sitting ~2.6-2.9% below its 2026 counterpart — consistent with one year of routine inflation indexing, not independent transcription errors.', url: 'https://help.nfc.usda.gov/bulletins/2025/1743009231.htm' },
-    { authority: 'Paid Leave Oregon (Oregon Employment Department)', instrument: '2026 Paid Leave Oregon contribution rate (1% total: 0.6% employee / 0.4% employer for employers with 25+ workers) and wage base (pegged to the 2026 Social Security taxable maximum, $184,500) — confirmed 2026-09-14 via paidleave.oregon.gov (through the same text-extraction proxy) and corroborated by a separate web search.', url: 'https://paidleave.oregon.gov/employers/' }
+    { authority: 'Paid Leave Oregon (Oregon Employment Department)', instrument: '2026 Paid Leave Oregon contribution rate (1% total: 0.6% employee / 0.4% employer for employers with 25+ workers) and wage base (pegged to the 2026 Social Security taxable maximum, $184,500) — confirmed 2026-09-14 via paidleave.oregon.gov (through the same text-extraction proxy) and corroborated by a separate web search.', url: 'https://paidleave.oregon.gov/employers/' },
+    { authority: 'Indiana Department of Revenue', instrument: 'Departmental Notice #1 (R46 / 01-26), "How to Compute Withholding for State and County Income Tax", effective 2026-01-01 — fetched and read directly 2026-09-14 (the actual official document, not a secondary summary). Gives the 2.95% flat state rate, the $1,000/$1,500/$3,000 personal/dependent/adopted-child annual exemption amounts (Tables A/B/C), a fully worked example matching this engine\'s implementation exactly, and the complete 2026 county income tax rate table for all 92 Indiana counties.', url: 'https://www.in.gov/dor/files/dn01.pdf' },
+    { authority: 'North Carolina Department of Revenue', instrument: 'Form NC-30 (Web 11-25), "2026 Income Tax Withholding Tables and Instructions for Employers" — fetched and read directly 2026-09-14 (the actual official document). Gives the 4.09% withholding rate (3.99% statutory rate + NC\'s own built-in 0.1% adjustment, per the document\'s own text), the $12,750 (Single/Married/Surviving Spouse) and $19,125 (Head of Household) standard deductions, the $2,500 allowance value, the nearest-whole-dollar final rounding rule, and a fully worked example matching this engine\'s implementation exactly.', url: 'https://www.ncdor.gov/income-tax-withholding-tables-and-instructions-employers/open' }
   ],
   limitations: [
-    'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 18 states total. The remaining 32 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, IN, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, NC, ND, OH, OK, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (IN, GA, KY, NC — all flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture (see the IN note below for a concrete example of exactly this trap being avoided rather than walked into).',
+    'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 20 states total. The remaining 30 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, ND, OH, OK, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (GA, KY — flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture — exactly the trap Indiana was originally rejected over in earlier versions of this file, until the actual Departmental Notice #1 was fetched directly and the real exemption/county-rate structure built (see the v10 change log).',
+    'Indiana (v10): county tax is MANDATORY and this engine requires in_county to be set to one of the 92 official county names rather than silently omitting it (the prior version\'s reason for rejecting Indiana entirely). The county rate table is current as of Departmental Notice #1 (effective 2026-01-01) and will go stale if Indiana updates rates later in the year (the notice itself tracks mid-year changes with an asterisk per county) — callers running payroll well into 2026 should reconfirm the table.',
+    'North Carolina (v10): NC-30 documents two alternative methods (Wage Bracket Tables, keyed by income RANGE, and the Percentage Method, keyed by exact dollar amounts) that NC-30 itself says "will differ slightly" from each other. This engine implements only the Percentage Method (the documented-exact one, same choice made for every other state in this file).',
     'Oregon (v9): the federal-tax-subtraction phase-out schedule is applied by FILING STATUS alone (single vs. married), independent of the allowance-count-driven bracket track. A SINGLE filer claiming 3+ allowances (who therefore uses the WIDE bracket track, same as a married filer) whose annual wages also reach $125,000+ (the point the single/married phase-out schedules start to diverge) hits a combination this engine\'s two sources don\'t clearly resolve — rejected with an explicit error rather than guessed. This is a narrow, rare combination for the ~50-employee freelancer/small-business target market, not a gap in the ordinary case. One number seen in the proxy-fetched Oregon DOR text ("$38,340" as a bracket lower bound) was NOT corroborated by the independent USDA NFC source and was discarded rather than used — see the v9 change log for the full reconciliation.',
     'Indiana was deliberately NOT added despite the secondary reference giving a headline state rate (2.95%), because that reference does not give the actual personal/dependent exemption amounts Indiana\'s real withholding formula subtracts before applying the rate — applying 2.95% to full gross would overstate every IN employee\'s withholding. Rejected rather than approximated. (Indiana county income tax, which is required in addition to the state amount, is unimplemented regardless for the same reason CA/NJ/NY local complexity was scoped state-by-state.)',
     'IL, PA, MI, CO, AZ, AK, and WA (added in v5) are sourced from a secondary cross-check reference document, not independently fetched from each state\'s own primary publication the way CA/NJ/NY were — see the evidence list above. This is a materially weaker sourcing chain and these seven states should be treated as lower-confidence than CA/NJ/NY until independently verified against each state\'s own official withholding-methods publication.',
@@ -1129,7 +1240,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', ...p.no_tax_no_employee_levy_states];
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', ...p.no_tax_no_employee_levy_states];
     if (!supportedStates.includes(employee.state)) {
       const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
@@ -1249,6 +1360,41 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       }
       if (!Number.isInteger(employee.or_allowances) || (employee.or_allowances as number) < 0) {
         const error = new Error(`or_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'IN') {
+      if (!Number.isInteger(employee.in_personal_exemptions) || (employee.in_personal_exemptions as number) < 0) {
+        const error = new Error(`in_personal_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.in_dependent_exemptions) || (employee.in_dependent_exemptions as number) < 0) {
+        const error = new Error(`in_dependent_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      const adoptedChild = employee.in_adopted_child_exemptions ?? 0;
+      if (!Number.isInteger(adoptedChild) || adoptedChild < 0) {
+        const error = new Error(`in_adopted_child_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!employee.in_county || !(employee.in_county in p.indiana.county_tax_rates)) {
+        const error = new Error(`in_county for ${employeeId} must be one of the 92 Indiana county names in this rule pack (Indiana county tax is mandatory and is not skipped by this engine)`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'NC') {
+      if (employee.nc_filing_status !== 'SINGLE_MARRIED_OR_SURVIVING_SPOUSE' && employee.nc_filing_status !== 'HEAD_OF_HOUSEHOLD') {
+        const error = new Error(`nc_filing_status for ${employeeId} must be 'SINGLE_MARRIED_OR_SURVIVING_SPOUSE' or 'HEAD_OF_HOUSEHOLD'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.nc_allowances) || (employee.nc_allowances as number) < 0) {
+        const error = new Error(`nc_allowances for ${employeeId} must be a non-negative integer`);
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
@@ -1499,12 +1645,36 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       orPaidLeaveEmployee = ceilingContribution(ytdOrPaidLeaveBefore, grossPay, p.oregon.paid_leave_wage_base_annual, p.oregon.paid_leave_employee_rate);
     }
 
+    // --- Indiana: flat 2.95% state + mandatory flat-rate county tax, after three per-period exemption amounts ---
+    let inIncomeTax = 0;
+    let inCountyTax = 0;
+    if (employee.state === 'IN') {
+      const personalExemptionPerPeriod = money(((employee.in_personal_exemptions as number) * p.indiana.personal_exemption_annual) / periodsPerYear);
+      const dependentExemptionPerPeriod = money(((employee.in_dependent_exemptions as number) * p.indiana.dependent_exemption_annual) / periodsPerYear);
+      const adoptedChildExemptionPerPeriod = money((((employee.in_adopted_child_exemptions as number) ?? 0) * p.indiana.adopted_child_exemption_annual) / periodsPerYear);
+      const inTaxableIncome = Math.max(0, money(grossPay - personalExemptionPerPeriod - dependentExemptionPerPeriod - adoptedChildExemptionPerPeriod));
+      inIncomeTax = money(inTaxableIncome * p.indiana.rate);
+      const countyRate = p.indiana.county_tax_rates[employee.in_county as string];
+      inCountyTax = money(inTaxableIncome * countyRate);
+    }
+
+    // --- North Carolina: percentage method, per period (not annualized), rounded to the nearest WHOLE DOLLAR ---
+    let ncIncomeTax = 0;
+    if (employee.state === 'NC') {
+      const ncFilingStatus = employee.nc_filing_status as NcFilingStatus;
+      const periodStandardDeduction = money(p.north_carolina.standard_deduction_annual[ncFilingStatus] / periodsPerYear);
+      const periodAllowanceValue = money(p.north_carolina.allowance_value_annual / periodsPerYear);
+      const ncNetWages = Math.max(0, money(grossPay - periodStandardDeduction - (employee.nc_allowances as number) * periodAllowanceValue));
+      ncIncomeTax = Math.round(ncNetWages * p.north_carolina.rate);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
       nyIncomeTax + nycIncomeTax + yonkersTax + nyPfl + nyDbl +
       ilIncomeTax + paIncomeTax + paUc + phlWageTax + miIncomeTax + coIncomeTax + coFamli + denverOptEmployee + azIncomeTax + akUi + waPfml + waCares +
-      orIncomeTax + orStt + orPaidLeaveEmployee
+      orIncomeTax + orStt + orPaidLeaveEmployee +
+      inIncomeTax + inCountyTax + ncIncomeTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -1550,6 +1720,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       or_income_tax: orIncomeTax,
       or_stt: orStt,
       or_paid_leave_employee: orPaidLeaveEmployee,
+      in_income_tax: inIncomeTax,
+      in_county_tax: inCountyTax,
+      nc_income_tax: ncIncomeTax,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -1597,6 +1770,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     or_income_tax: sum(employees.map(e => e.or_income_tax)),
     or_stt: sum(employees.map(e => e.or_stt)),
     or_paid_leave_employee: sum(employees.map(e => e.or_paid_leave_employee)),
+    in_income_tax: sum(employees.map(e => e.in_income_tax)),
+    in_county_tax: sum(employees.map(e => e.in_county_tax)),
+    nc_income_tax: sum(employees.map(e => e.nc_income_tax)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -1635,6 +1811,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'OR_INCOME_TAX_PAYABLE', amount: totals.or_income_tax },
     { side: 'CREDIT', account_role: 'OR_STT_PAYABLE', amount: totals.or_stt },
     { side: 'CREDIT', account_role: 'OR_PAID_LEAVE_PAYABLE', amount: totals.or_paid_leave_employee },
+    { side: 'CREDIT', account_role: 'IN_INCOME_TAX_PAYABLE', amount: totals.in_income_tax },
+    { side: 'CREDIT', account_role: 'IN_COUNTY_TAX_PAYABLE', amount: totals.in_county_tax },
+    { side: 'CREDIT', account_role: 'NC_INCOME_TAX_PAYABLE', amount: totals.nc_income_tax },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -2342,6 +2521,31 @@ export function payrollEngineSelfTestUS() {
   });
   const sOrPlEdge = orPaidLeaveCapEdge.employees[0];
 
+  // v10: Indiana and North Carolina, each checked against that state's OWN
+  // official worked example (not a hand-derived self-test).
+  const inWorkedExample = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-07', pay_date: '2026-09-07',
+    employees: [{
+      employee_id: 'IN-WORKED', gross_pay: 800, pay_frequency: 'WEEKLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'IN', in_personal_exemptions: 5, in_dependent_exemptions: 4, in_adopted_child_exemptions: 2,
+      in_county: 'Harrison'
+    }]
+  });
+  const sInWorked = inWorkedExample.employees[0];
+
+  const ncWorkedExample = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-07', pay_date: '2026-09-07',
+    employees: [{
+      employee_id: 'NC-WORKED', gross_pay: 450, pay_frequency: 'WEEKLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'NC', nc_filing_status: 'SINGLE_MARRIED_OR_SURVIVING_SPOUSE', nc_allowances: 2
+    }]
+  });
+  const sNcWorked = ncWorkedExample.employees[0];
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -2430,7 +2634,9 @@ export function payrollEngineSelfTestUS() {
     sGoldCoDen.denver_opt_employee === 5.75 && sGoldCoDen.net_pay === 7301.25 && goldenCoDen.controls.journal_balanced &&
     sGoldOr.or_income_tax === 763.35 && sGoldOr.or_stt === 10 && sGoldOr.or_paid_leave_employee === 60 &&
     sGoldOr.net_pay === 6937.48 && goldenOr.controls.journal_balanced &&
-    sOrPlEdge.or_paid_leave_employee === 27 && orPaidLeaveCapEdge.controls.journal_balanced;
+    sOrPlEdge.or_paid_leave_employee === 27 && orPaidLeaveCapEdge.controls.journal_balanced &&
+    sInWorked.in_income_tax === 13.96 && sInWorked.in_county_tax === 4.73 && inWorkedExample.controls.journal_balanced &&
+    sNcWorked.nc_income_tax === 4 && ncWorkedExample.controls.journal_balanced;
 
   return {
     ok,
@@ -2442,6 +2648,7 @@ export function payrollEngineSelfTestUS() {
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
+    inWorkedExample, ncWorkedExample,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
