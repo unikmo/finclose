@@ -29,6 +29,37 @@
 // sourced via AI web research (not a professional review) as of September
 // 2026.
 //
+// v7 change log (from v6): a user-supplied golden-payslip QA fixture pack
+// ("US_2026_Payroll_Golden_Payslip_QA_Pack.pdf") was cross-checked line by
+// line against this engine's ACTUAL output for CA, NY/NYC, PA, WA, CO, NJ,
+// and a federal cap-crossing case — not just against this file's own hand
+// derivations, a materially stronger check than any self-test added before
+// this pass. It found ONE real bug: the NJ Rate Table A weekly $769 bracket
+// base was transcribed as $15.29 from the raw printed NJ-WT table, but
+// NJ's OWN worked example in that same publication computes $15.28 for
+// that exact bracket, and the unrounded cumulative chain also rounds to
+// $15.28 — NJ's own printed table has a one-cent inconsistency with its
+// own worked example. Fixed to $15.28, matching both NJ's example and the
+// golden fixture's independently-stated $40.40 for the exact scenario
+// (weekly $1,200, Rate A, 1 allowance) that had been getting $40.41. The
+// affected self-test (Case 9) was also corrected. Everything else checked
+// against the fixture pack matched exactly on the first attempt: NY, PA,
+// WA, CO, and federal cap-crossing all passed with zero changes. One
+// fixture (CA monthly $10,000, Single, 0 allowances) was investigated in
+// depth: this engine computes $647.84, the fixture states $647.90. Both
+// numbers are correct under DIFFERENT EDD-documented methods — this engine
+// uses the primary period-specific Method B table (Tables 5-28, applied
+// directly to the monthly taxable income), while the fixture used EDD's
+// optional "annualize the wages, apply the annual table, divide by 12"
+// alternative (demonstrated in the EDD publication's own Examples E/F,
+// explicitly framed there as a computer-memory-saving convenience, not the
+// primary method). The two methods can diverge by a few cents at the
+// margin purely from where rounding happens in the chain. This file keeps
+// the primary-method result and documents the divergence rather than
+// silently matching the fixture's number, since matching it would mean
+// switching to a different (also valid, but not primary) EDD method
+// without evidence that's actually the right choice for this engine.
+//
 // v6 change log (from v5): adds NY Paid Family Leave (PFL, unconditional
 // for every NY employee, 0.432% of gross wages) and NY Disability Benefits
 // Law (DBL, opt-in only, WEEKLY-pay-only). Both were explicitly flagged as
@@ -410,7 +441,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V6',
+  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V7',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -535,9 +566,20 @@ export const PAYROLL_RULE_PACK_US = {
     // when the employee has not elected a different table on line 3.
     // Rate Tables C, D, and E (elective, chosen via the NJ-W4 wage chart for
     // dual-income households) are NOT implemented — see limitations.
+    // CORRECTED (v7): the WEEKLY Rate A $769 bracket base was transcribed
+    // as $15.29 from the raw printed NJ-WT rate table, but NJ's OWN worked
+    // example in the same publication (Rate "A" weekly $1,200/1 allowance)
+    // computes and states $15.28 for this exact bracket — and the unrounded
+    // cumulative chain (5.775 -> 11.535 -> 15.279) also rounds to $15.28,
+    // not $15.29. NJ's own printed table has a one-cent inconsistency with
+    // its own worked example; this file now follows the worked example
+    // (and the golden-payslip QA pack's independently-confirmed $40.40 for
+    // that exact scenario), not the raw table digit. Found via cross-check
+    // against a user-supplied golden-payslip fixture pack, not by routine
+    // review — flagged here so the reasoning survives the next edit.
     rate_tables: {
       WEEKLY: {
-        A: [[0, 0, 0.015], [385, 5.77, 0.02], [673, 11.54, 0.039], [769, 15.29, 0.061], [1442, 56.35, 0.07], [9615, 628.46, 0.099], [19231, 1580.38, 0.118]],
+        A: [[0, 0, 0.015], [385, 5.77, 0.02], [673, 11.54, 0.039], [769, 15.28, 0.061], [1442, 56.35, 0.07], [9615, 628.46, 0.099], [19231, 1580.38, 0.118]],
         B: [[0, 0, 0.015], [385, 5.77, 0.02], [962, 17.31, 0.027], [1346, 27.69, 0.039], [1538, 35.19, 0.061], [2885, 117.31, 0.07], [9615, 588.46, 0.099], [19231, 1540.38, 0.118]]
       },
       BIWEEKLY: {
@@ -749,13 +791,15 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Arizona Department of Revenue', instrument: 'Form A-4 (2026) employee percentage-election set, as reproduced in the reference document', url: 'https://azdor.gov/business/withholding-tax' },
     { authority: 'Alaska Department of Labor and Workforce Development', instrument: '2026 Alaska employee UI contribution rate (0.50%) and wage base ($54,200), as reproduced in the reference document', url: 'https://labor.alaska.gov/estax/home.htm' },
     { authority: 'Washington Employment Security Department / WA Cares Fund', instrument: '2026 WA PFML total premium/employee-share and WA Cares employee rate, as reproduced in the reference document', url: 'https://paidleave.wa.gov/employers/' },
-    { authority: 'New York State Paid Family Leave', instrument: '2026 NY PFL employee rate (0.432%) and annual dollar cap ($411.91), and NY DBL employee rate (0.5%) and weekly dollar cap ($0.60) — sourced from a second-generation "formula pack" cross-check document (2026_US_Payroll_Formula_Implementation_Guide.pdf, user-supplied 2026-09-14) that itself derives from the same secondary reference above, independently corroborating this file\'s NJ/AZ/CO/PA/AK/WA/CA-SDI figures in the process', url: 'https://paidfamilyleave.ny.gov/cost' }
+    { authority: 'New York State Paid Family Leave', instrument: '2026 NY PFL employee rate (0.432%) and annual dollar cap ($411.91), and NY DBL employee rate (0.5%) and weekly dollar cap ($0.60) — sourced from a second-generation "formula pack" cross-check document (2026_US_Payroll_Formula_Implementation_Guide.pdf, user-supplied 2026-09-14) that itself derives from the same secondary reference above, independently corroborating this file\'s NJ/AZ/CO/PA/AK/WA/CA-SDI figures in the process', url: 'https://paidfamilyleave.ny.gov/cost' },
+    { authority: 'Golden-payslip QA fixture pack (user-supplied, 2026-09-14/15)', instrument: '"US_2026_Payroll_Golden_Payslip_QA_Pack.pdf" — deterministic golden payslips for CA, NY/NYC, PA (incl. Philadelphia local tax, not yet implemented here), WA, CO (incl. Denver OPT, not yet implemented here), NJ, and federal cap/bonus cases, checked directly against this engine\'s actual output rather than this file\'s own hand derivations. Found and led to the fix of the NJ $769 bracket bug documented in the v7 change log; every other assertion checked (NY, PA, WA, CO, NJ post-fix, federal cap) passed exactly. Primary sources cited within that pack for each figure: IRS Pub 15/15-T, CA EDD, NYS-50-T-NYS/NYC, NJ-WT/NJDOL, WA PFML/WA Cares, CO DR 1098/FAMLI.', url: 'file: US_2026_Payroll_Golden_Payslip_QA_Pack.pdf' }
   ],
   limitations: [
     'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 17 states total. The remaining 33 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, IN, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, NC, ND, OH, OK, OR, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (IN, GA, KY, NC — all flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture (see the IN note below for a concrete example of exactly this trap being avoided rather than walked into).',
     'Indiana was deliberately NOT added despite the secondary reference giving a headline state rate (2.95%), because that reference does not give the actual personal/dependent exemption amounts Indiana\'s real withholding formula subtracts before applying the rate — applying 2.95% to full gross would overstate every IN employee\'s withholding. Rejected rather than approximated. (Indiana county income tax, which is required in addition to the state amount, is unimplemented regardless for the same reason CA/NJ/NY local complexity was scoped state-by-state.)',
     'IL, PA, MI, CO, AZ, AK, and WA (added in v5) are sourced from a secondary cross-check reference document, not independently fetched from each state\'s own primary publication the way CA/NJ/NY were — see the evidence list above. This is a materially weaker sourcing chain and these seven states should be treated as lower-confidence than CA/NJ/NY until independently verified against each state\'s own official withholding-methods publication.',
-    'PA, MI, CO, AZ, AK, and WA local/city income taxes (e.g. Philadelphia Wage Tax, and the many Michigan cities that levy their own income tax) are NOT modeled — these states are implemented at the state level only.',
+    'PA, MI, CO, AZ, AK, and WA local/city income taxes (e.g. Philadelphia Wage Tax — a confirmed real rate of 3.735% resident as of 2026-07-01 per a user-supplied golden-payslip fixture, effective-dated from 3.740% before that date; Denver\'s Occupational Privilege Tax — $5.75 employee / $4.00 employer flat monthly amounts per the same fixture; and the many Michigan cities that levy their own income tax) are NOT modeled — these states are implemented at the state level only. Both Philadelphia and Denver have confirmed, exact rates available and are good near-term candidates to add.',
+    'California income tax (v7): for a given gross wage, this engine can differ from a result computed via EDD\'s OPTIONAL "annualize wages, apply the annual bracket table, divide by periods" method by a few cents, because this engine uses EDD\'s PRIMARY period-specific Method B tables (Tables 5-28) applied directly to the period\'s taxable income instead. Both methods are EDD-documented and both are "correct" — they can simply round differently at the margin. Confirmed via a user-supplied golden-payslip fixture (CA monthly $10,000/Single/0 allowances: this engine gives $647.84, the fixture\'s annualized-method calculation gives $647.90) — not treated as a bug, but flagged since a caller comparing this engine\'s output against a payslip built with the alternate method may see a few-cent difference at some wage levels.',
     'CO: the FAMLI employer-share/small-employer-exemption rules are DYNAMIC (employer-side only, don\'t affect the employee co_famli figure this engine computes) and not modeled.',
     'WA: PFML and WA Cares small-employer exemptions and WA Cares individual approved-exemption letters are DYNAMIC and not modeled — every WA employee is assumed subject to both at the flat statutory rates. A WA employee with an approved WA Cares exemption would be incorrectly charged the 0.58% contribution by this engine; callers with such employees must adjust outside this engine.',
     'AZ: only the employee\'s own percentage election (az_election_percent) is modeled. The statutory "default 2.0% if no A-4 timely filed" employer-side default behavior is NOT implemented — the caller must always supply the employee\'s actual election (or explicit 0% if validly elected) rather than relying on this engine to apply the default.',
@@ -1638,7 +1682,8 @@ export function payrollEngineSelfTestUS() {
 
   // Case 9: New Jersey, Rate Table A (Single), weekly, 1 allowance.
   // Allowance value weekly = 19.20 -> subject = 1000-19.20 = 980.80.
-  // Rate A weekly bracket [769,15.29,6.1%]: 15.29+0.061*(980.80-769)=28.21.
+  // Rate A weekly bracket [769,15.28,6.1%] (corrected, see rule-pack comment
+  // above): 15.28+0.061*(980.80-769)=28.1998 -> 28.20.
   const njCaseA = calculateUsPayroll({
     pay_period_start: '2026-08-03',
     pay_period_end: '2026-08-09',
@@ -1660,7 +1705,7 @@ export function payrollEngineSelfTestUS() {
     ]
   });
   const s9 = njCaseA.employees[0];
-  const expectedNjIncomeTax9 = 28.21;
+  const expectedNjIncomeTax9 = 28.2;
   const expectedNjUiWfSwf9 = money(1000 * 0.00425);
   const expectedNjTdi9 = money(1000 * 0.0019);
   const expectedNjFli9 = money(1000 * 0.0023);
@@ -1858,6 +1903,101 @@ export function payrollEngineSelfTestUS() {
   // WA Cares: 2000*0.58% = 11.60
   const expectedWaCares = 11.6;
 
+  // Case 17 (v7): golden-payslip fixtures from a user-supplied third-party
+  // QA pack ("US_2026_Payroll_Golden_Payslip_QA_Pack.pdf"), checked
+  // directly against ITS published expected cents, independent of this
+  // file's own hand-derivations elsewhere. This is the highest-confidence
+  // test tier in this file for the fields it covers, because the fixture's
+  // own calculation trace was cross-checked line by line against this
+  // engine's actual output (not just against this file's own constants) —
+  // that process is exactly what found and fixed the NJ $769 bracket bug
+  // documented above. One fixture (CA monthly $10,000/Single/0 allowances)
+  // is DELIBERATELY NOT asserted to the fixture's own number: the fixture
+  // computes CA PIT via EDD's optional "annualize then divide by periods"
+  // method ($647.90), while this engine uses EDD's primary period-specific
+  // Method B table (Tables 5-28), giving $647.84 for the same inputs. Both
+  // are legitimate EDD-documented methods that can diverge by a few cents
+  // at the margin due to where rounding happens in the chain; this is
+  // asserted against this engine's own correct-per-primary-method result,
+  // not the fixture's alternate-method result — see the california comment
+  // block above for the full reasoning.
+  const goldenCa = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-CA', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'CA', ca_filing_status: 'SINGLE', ca_regular_allowances: 0
+    }]
+  });
+  const sGoldCa = goldenCa.employees[0];
+
+  const goldenNy = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-NY', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'NY', ny_filing_status: 'SINGLE', ny_allowances: 0, ny_nyc_resident: true
+    }]
+  });
+  const sGoldNy = goldenNy.employees[0];
+
+  const goldenPa = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-PA', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'PA'
+    }]
+  });
+  const sGoldPa = goldenPa.employees[0];
+
+  const goldenWa = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-WA', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'WA'
+    }]
+  });
+  const sGoldWa = goldenWa.employees[0];
+
+  const goldenCo = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'GOLD-CO', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'CO', co_filing_status: 'OTHER'
+    }]
+  });
+  const sGoldCo = goldenCo.employees[0];
+
+  const goldenNj = calculateUsPayroll({
+    pay_period_start: '2026-09-21', pay_period_end: '2026-09-25', pay_date: '2026-09-25',
+    employees: [{
+      employee_id: 'GOLD-NJ', gross_pay: 1200, pay_frequency: 'WEEKLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'NJ', nj_rate_table: 'A', nj_allowances: 1
+    }]
+  });
+  const sGoldNj = goldenNj.employees[0];
+
+  const goldenFedCap = calculateUsPayroll({
+    pay_period_start: '2026-12-01', pay_period_end: '2026-12-31', pay_date: '2026-12-31',
+    employees: [{
+      employee_id: 'GOLD-FEDCAP', gross_pay: 10000, pay_frequency: 'MONTHLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 180000, ytd_medicare_wages_before: 195000, ytd_futa_wages_before: 7000,
+      state: 'TX'
+    }]
+  });
+  const sGoldFedCap = goldenFedCap.employees[0];
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -1930,7 +2070,17 @@ export function payrollEngineSelfTestUS() {
     s15.ny_dbl === expectedNyDbl15 &&
     nyPflOrdinary.controls.journal_balanced &&
     s16.ny_pfl === expectedNyPfl16 &&
-    nyPflCapCrossing.controls.journal_balanced;
+    nyPflCapCrossing.controls.journal_balanced &&
+    sGoldCa.employee_social_security === 620 && sGoldCa.employee_medicare === 145 &&
+    sGoldCa.ca_sdi === 130 && sGoldCa.ca_income_tax === 647.84 && goldenCa.controls.journal_balanced &&
+    sGoldNy.ny_income_tax === 523.22 && sGoldNy.nyc_income_tax === 381.12 &&
+    sGoldNy.ny_pfl === 43.2 && goldenNy.controls.journal_balanced &&
+    sGoldPa.pa_income_tax === 307 && sGoldPa.pa_uc === 7 && goldenPa.controls.journal_balanced &&
+    sGoldWa.wa_pfml === 80.72 && sGoldWa.wa_cares === 58 && goldenWa.controls.journal_balanced &&
+    sGoldCo.co_income_tax === 419.83 && sGoldCo.co_famli === 44 && goldenCo.controls.journal_balanced &&
+    sGoldNj.nj_income_tax === 40.4 && sGoldNj.federal_income_tax === 102.08 && goldenNj.controls.journal_balanced &&
+    sGoldFedCap.employee_social_security === 279 && sGoldFedCap.employee_medicare === 145 &&
+    sGoldFedCap.employee_additional_medicare === 45 && goldenFedCap.controls.journal_balanced;
 
   return {
     ok,
@@ -1940,6 +2090,7 @@ export function payrollEngineSelfTestUS() {
     multiStateCase,
     nyPflOrdinary,
     nyPflCapCrossing,
+    goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
