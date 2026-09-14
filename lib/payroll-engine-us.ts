@@ -1,7 +1,7 @@
-// United States (US) payroll rule pack — v13: federal + 45 states (CA, NJ,
+// United States (US) payroll rule pack — v14: federal + 47 states (CA, NJ,
 // NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS,
 // UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI,
-// OH, LA, IA, AL, FL, NV, NH, SD, TN, TX, WY).
+// OH, LA, IA, AL, MD, CT, FL, NV, NH, SD, TN, TX, WY).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -30,6 +30,24 @@
 // in the prior year or even during the current year. This file uses figures
 // sourced via AI web research (not a professional review) as of September
 // 2026.
+//
+// v14 change log (from v13): adds Maryland (MD) and Connecticut (CT), the
+// two states explicitly named in the v12 change log as investigated-but-
+// deferred rather than sourcing dead-ends — closing both this pass with
+// more targeted re-fetches, reaching 47/50 states. Maryland: got the
+// complete county rate table for all 23 counties plus Baltimore City (22
+// flat-rate counties plus Anne Arundel and Frederick's own graduated
+// bracket tables, fully implemented rather than approximated to a flat
+// rate) — Maryland county tax is mandatory, same required-not-skipped
+// pattern as Indiana's county tax in v10. Connecticut: the direct NFC
+// fetch kept truncating the phase-out/recapture tables (a ~50-row
+// step-function table clawing back lower-bracket benefit from higher
+// earners); re-fetched via the same text-extraction-proxy workaround used
+// for Oregon in v9, which returned the complete tables. Only Connecticut
+// withholding code A/D (which share an identical base bracket table,
+// phase-out table, and recapture table) is implemented; codes B, C, and F
+// are explicitly rejected rather than guessed, since their own tables
+// were not captured.
 //
 // v13 change log (from v12): adds four more states on the same "keep
 // going" instruction — OH, LA, IA, AL — reaching 45/50 states. Notably
@@ -376,7 +394,7 @@ export type UsState =
   | 'AK' | 'WA' | 'OR' | 'IN' | 'NC'
   | 'GA' | 'KY' | 'MS' | 'UT' | 'MN' | 'MT' | 'ND' | 'OK' | 'RI' | 'VA'
   | 'MA' | 'MO' | 'NE' | 'SC' | 'VT' | 'WV' | 'KS' | 'ID' | 'NM' | 'AR' | 'HI'
-  | 'OH' | 'LA' | 'IA' | 'AL'
+  | 'OH' | 'LA' | 'IA' | 'AL' | 'MD' | 'CT'
   | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
@@ -402,6 +420,8 @@ export type HiFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
 export type LaFilingStatus = 'SINGLE_OR_MFS' | 'MARRIED_OR_HOH';
 export type IaMaritalStatus = 'OTHER_OR_MFJ_SPOUSE_WORKS' | 'HEAD_OF_HOUSEHOLD' | 'MFJ_SPOUSE_NO_EARNED_INCOME';
 export type AlFilingStatus = 'SINGLE' | 'MARRIED_FILING_JOINTLY' | 'MARRIED_FILING_SEPARATELY' | 'HEAD_OF_FAMILY';
+export type MdFilingStatus = 'SINGLE' | 'MARRIED';
+export type CtWithholdingCode = 'A_OR_D';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -585,6 +605,18 @@ export type UsEmployeeInput = {
   // approximated.
   al_filing_status?: AlFilingStatus;
   al_dependents?: number;
+  // MD fields — required when state === 'MD'. md_county must match one of
+  // Maryland's 23 counties or Baltimore City (see the rule pack's county
+  // rate/bracket tables). County tax is mandatory in Maryland alongside
+  // the state tax, same requirement pattern as Indiana.
+  md_filing_status?: MdFilingStatus;
+  md_exemptions?: number;
+  md_county?: string;
+  // CT fields — required when state === 'CT'. Only withholding code A/D
+  // (which share an identical base bracket table, phase-out add-back
+  // table, and recapture table) is implemented — codes B, C, and F are
+  // rejected as unsupported (see limitations).
+  ct_withholding_code?: CtWithholdingCode;
 };
 
 export type UsPayrollRunInput = {
@@ -657,6 +689,9 @@ export type UsJournalLine = {
     | 'LA_INCOME_TAX_PAYABLE'
     | 'IA_INCOME_TAX_PAYABLE'
     | 'AL_INCOME_TAX_PAYABLE'
+    | 'MD_INCOME_TAX_PAYABLE'
+    | 'MD_COUNTY_TAX_PAYABLE'
+    | 'CT_INCOME_TAX_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -730,6 +765,9 @@ export type UsEmployeeResult = {
   la_income_tax: number;
   ia_income_tax: number;
   al_income_tax: number;
+  md_income_tax: number;
+  md_county_tax: number;
+  ct_income_tax: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -813,6 +851,9 @@ export type UsPayrollRunResult = {
     la_income_tax: number;
     ia_income_tax: number;
     al_income_tax: number;
+    md_income_tax: number;
+    md_county_tax: number;
+    ct_income_tax: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -828,7 +869,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-45-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V13',
+  id: 'US-47-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V14',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -1633,6 +1674,69 @@ export const PAYROLL_RULE_PACK_US = {
     brackets_single_mfs_hof: [[0, 0, 0.02], [500, 10, 0.04], [3000, 110, 0.05]] as Array<[number, number, number]>,
     brackets_mfj: [[0, 0, 0.02], [1000, 20, 0.04], [6000, 220, 0.05]] as Array<[number, number, number]>
   },
+  maryland: {
+    // NFC bulletin. State brackets by two-way filing status, standard
+    // deduction, flat per-exemption allowance, PLUS mandatory county
+    // income tax (Maryland's own state+county combined-return design).
+    // All 23 counties + Baltimore City confirmed — 22 use a single flat
+    // rate; Anne Arundel and Frederick use their own graduated bracket
+    // tables (fully captured here, not simplified to a flat rate).
+    standard_deduction_annual: 3400,
+    allowance_value_annual: 3200,
+    brackets: {
+      SINGLE: [[0, 0, 0], [100000, 4750, 0.05], [125000, 6000, 0.0525], [150000, 7312.5, 0.055], [250000, 12812.5, 0.0575], [500000, 27187.5, 0.0625], [1000000, 58437.5, 0.065]],
+      MARRIED: [[0, 0, 0], [150000, 7125, 0.05], [175000, 8375, 0.0525], [225000, 11000, 0.055], [300000, 15125, 0.0575], [600000, 32375, 0.0625], [1200000, 69875, 0.065]]
+    } as Record<MdFilingStatus, Array<[number, number, number]>>,
+    county_flat_rates: {
+      'Allegany': 0.032, 'Baltimore County': 0.032, 'Baltimore City': 0.032, 'Calvert': 0.032,
+      'Caroline': 0.032, 'Carroll': 0.0303, 'Cecil': 0.0274, 'Charles': 0.0303,
+      'Dorchester': 0.033, 'Garrett': 0.0265, 'Harford': 0.0306, 'Howard': 0.032,
+      'Kent': 0.033, 'Montgomery': 0.032, "Prince George's": 0.032, "Queen Anne's": 0.032,
+      'St. Mary\'s': 0.032, 'Somerset': 0.032, 'Talbot': 0.024, 'Washington': 0.0295,
+      'Wicomico': 0.032, 'Worcester': 0.0225
+    } as Record<string, number>,
+    county_graduated_brackets: {
+      'Anne Arundel': {
+        SINGLE: [[0, 0, 0.027], [50000, 1350, 0.0294], [400000, 11640, 0.032]],
+        MARRIED: [[0, 0, 0.027], [75000, 2025, 0.0294], [480000, 13932, 0.032]]
+      } as Record<MdFilingStatus, Array<[number, number, number]>>,
+      'Frederick': {
+        SINGLE: [[0, 0, 0.0225], [25000, 562.5, 0.0275], [50000, 1250, 0.0296], [150000, 4210, 0.032]],
+        MARRIED: [[0, 0, 0.0225], [25000, 562.5, 0.0275], [100000, 2625, 0.0296], [250000, 7065, 0.032]]
+      } as Record<MdFilingStatus, Array<[number, number, number]>>
+    } as Record<string, Record<MdFilingStatus, Array<[number, number, number]>>>
+  },
+  connecticut: {
+    // NFC bulletin, fetched via a text-extraction proxy after the direct
+    // fetch repeatedly truncated the table. Only withholding CODE A/D
+    // (which share an identical base bracket table, phase-out add-back
+    // table, and recapture table per the source) is implemented — codes
+    // B, C, and F are REJECTED as unsupported (their base bracket tables
+    // and/or phase-out/recapture tables were not captured this pass).
+    brackets_a_or_d: [
+      [0, 0, 0.02], [10000, 200, 0.045], [50000, 2000, 0.055], [100000, 4750, 0.06],
+      [200000, 10750, 0.065], [250000, 14000, 0.069], [500000, 31250, 0.0699]
+    ] as Array<[number, number, number]>,
+    // [atLeast, amount] step tables — CT's phase-out/recapture add fixed
+    // dollar amounts on top of the bracket tax as annual wages rise,
+    // clawing back the benefit of lower brackets for higher earners.
+    phase_out_add_back_a_or_d: [
+      [0, 0], [50250, 25], [52750, 50], [55250, 75], [57750, 100], [60250, 125],
+      [62750, 150], [65250, 175], [67750, 200], [70250, 225], [72750, 250]
+    ] as Array<[number, number]>,
+    recapture_a_or_d: [
+      [0, 0], [105000, 25], [110000, 50], [115000, 75], [120000, 100], [125000, 125],
+      [130000, 150], [135000, 175], [140000, 200], [145000, 225], [150000, 250],
+      [200000, 340], [205000, 430], [210000, 520], [215000, 610], [220000, 700],
+      [225000, 790], [230000, 880], [235000, 970], [240000, 1060], [245000, 1150],
+      [250000, 1240], [255000, 1330], [260000, 1420], [265000, 1510], [270000, 1600],
+      [275000, 1690], [280000, 1780], [285000, 1870], [290000, 1960], [295000, 2050],
+      [300000, 2140], [305000, 2230], [310000, 2320], [315000, 2410], [320000, 2500],
+      [325000, 2590], [330000, 2680], [335000, 2770], [340000, 2860], [345000, 2950],
+      [500000, 3000], [505000, 3050], [510000, 3100], [515000, 3150], [520000, 3200],
+      [525000, 3250], [530000, 3300], [535000, 3350], [540000, 3400]
+    ] as Array<[number, number]>
+  },
   // States with genuinely no individual wage income tax AND no statewide
   // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
   // compute for the employee beyond the state-agnostic federal FICA/FUTA
@@ -1673,10 +1777,15 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'USDA National Finance Center', instrument: 'Eleven more state withholding bulletins, each fetched 2026-09-15, same single-source-per-state tier as the v11 batch: Massachusetts (NFC-26-1769797447), Missouri (NFC-26-1773783048), Nebraska (NFC-26-1774374744), South Carolina (NFC-26-1773173131), Vermont (NFC-24-1707500661 — most recent available), West Virginia (NFC-26-1786455448), Kansas (NFC-24-1722617728 — most recent available), Idaho (NFC-25-1747930413 — most recent available), New Mexico (NFC-26-1776874663), Arkansas (NFC-26-1781190112, re-fetched with a follow-up prompt to get the complete bracket structure), Hawaii (NFC-26-1768321238, re-fetched with a follow-up prompt to get the complete 8-bracket tables for both filing statuses after an initial partial extraction).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
     { authority: 'Iowa Department of Revenue', instrument: '"Iowa Individual Income Tax Withholding Formula, Effective January 1, 2026" (released November 2025) — fetched and read directly 2026-09-15, the actual official current-year document with 10 fully worked examples. This engine\'s implementation reproduces all 6 of the examples covering the marital-status categories this engine supports (biweekly and monthly, all three IA W-4 marital-status categories) exactly to the cent.', url: 'https://revenue.iowa.gov/media/53/download?inline=' },
     { authority: 'Alabama Department of Revenue', instrument: '2025-tax-year (TY 2025) official standard deduction table by filing status (25stddeduction40a.pdf, "40A Booklet") — fetched and read directly 2026-09-15, giving the income-phased deduction schedule this engine partially implements (floor value and floor threshold only — see limitations). Combined with the 2022 NFC bulletin for Alabama\'s tax brackets, personal exemption, and dependent exemption tiers (Alabama\'s 2%/4%/5% brackets have been stable for decades, so the bulletin\'s age is treated as low-risk for those specific figures).', url: 'https://www.revenue.alabama.gov/wp-content/uploads/2026/01/25stddeduction40a.pdf' },
-    { authority: 'USDA National Finance Center / secondary corroboration', instrument: 'Ohio (NFC-25-1758202227, most recent available, PP20 2025) and Louisiana (NFC-26-1767639939, PP15 2026, corroborated by a second web search confirming Louisiana\'s 2025 Act 11 tax reform eliminated the per-dependent exemption entirely — so unlike most gaps in this file, there is genuinely nothing left to model for LA dependents).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' }
+    { authority: 'USDA National Finance Center / secondary corroboration', instrument: 'Ohio (NFC-25-1758202227, most recent available, PP20 2025) and Louisiana (NFC-26-1767639939, PP15 2026, corroborated by a second web search confirming Louisiana\'s 2025 Act 11 tax reform eliminated the per-dependent exemption entirely — so unlike most gaps in this file, there is genuinely nothing left to model for LA dependents).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
+    { authority: 'USDA National Finance Center', instrument: 'Maryland (NFC-26-1783003892), re-fetched with a targeted follow-up prompt to get the complete county-by-county rate table (all 23 counties plus Baltimore City, including the full graduated bracket tables for Anne Arundel and Frederick — the only two MD counties that don\'t use a flat rate) rather than a partial/summarized list.', url: 'https://help.nfc.usda.gov/bulletins/2026/1783003892.htm' },
+    { authority: 'USDA National Finance Center (via text-extraction proxy)', instrument: 'Connecticut (NFC-24-1712697342) — the direct WebFetch of this bulletin repeatedly truncated the phase-out add-back and recapture step tables (each has ~10-50 rows); re-fetched via the same proxy workaround used for Oregon in v9 (oregon.gov and this NFC page both proved directly unreachable/unreliable to summarize fully), which returned the complete tables for withholding code A/D verbatim.', url: 'https://help.nfc.usda.gov/bulletins/2024/1712697342.htm' }
   ],
   limitations: [
-    'Supported states (v13): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 45 states total. Only 5 states plus DC remain unbuilt: CT, DE, MD, WI, DC. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Supported states (v14): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 47 states total. Only Delaware, Wisconsin, and DC remain unbuilt (see below). Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Delaware, Wisconsin, and DC remain unbuilt: no reliable primary or NFC source was reached for any of the three across multiple attempts this session — only AI-search-synthesized secondary sources, the same untrustworthy-alone category as the discarded Oregon "$8,500" figure in v9. These three, not Maryland or Connecticut, are this pack\'s true remaining research gap.',
+    'Connecticut (v14): only withholding code A/D is implemented. Codes B, C, and F use their own separate base bracket tables and/or phase-out/recapture schedules that were not captured this pass — employees on those codes are REJECTED with an explicit error rather than approximated using the A/D tables.',
+    'Maryland (v14): county tax is MANDATORY and this engine requires md_county to be set to one of Maryland\'s 23 counties or Baltimore City rather than silently omitting it (the same required-not-skipped pattern established for Indiana\'s county tax in v10). Anne Arundel and Frederick\'s own graduated county bracket tables are fully implemented (not simplified to a flat rate); their bracket "base" dollar amounts for Frederick were computed by this engine from the source\'s rate-and-threshold data (not directly quoted in the source), then verified for internal consistency at every bracket boundary.',
     'Iowa (v13): the ONE state in the v11-v13 batches sourced with the same rigor as CA/NJ/NY/OR/IN/NC — the actual Iowa DOR current-year formula publication, with all 6 relevant worked examples reproduced exactly. Treat as high confidence, not the weaker single-NFC-bulletin tier the rest of this batch carries.',
     'Alabama (v13): only wages at or above the FLOOR standard-deduction threshold are supported ($35,500/year Single/MFJ/Head of Family, $17,750/year MFS) — Alabama\'s real standard deduction phases DOWN in $25 increments for every $500 of income below that threshold (confirmed via Alabama\'s own official TY2025 deduction table), which this engine does not model. Employees below the threshold are REJECTED with an explicit error rather than approximated. Alabama\'s tax brackets, personal exemption, and dependent exemption tiers are sourced from a 2022 NFC bulletin (not reconfirmed for 2026) — treated as low-risk given AL\'s historical rate stability, but should be reconfirmed before real payroll runs. The Alabama standard deduction table itself is dated tax-year 2025, not yet confirmed for 2026.',
     'v12 eleven-state batch (MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI): same single-NFC-source confidence tier as v11. Only 4 (MO, HI, SC, AR) were hand-verified against manual bracket arithmetic; the rest (MA, NE, VT, WV, KS, ID, NM) checked only for journal-balance/positive-tax sanity — a real, explicitly-flagged verification gap.',
@@ -1854,7 +1963,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', 'OH', 'LA', 'IA', 'AL', ...p.no_tax_no_employee_levy_states];
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', 'OH', 'LA', 'IA', 'AL', 'MD', 'CT', ...p.no_tax_no_employee_levy_states];
     if (!supportedStates.includes(employee.state)) {
       const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
@@ -2218,6 +2327,31 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
+    }
+    if (employee.state === 'MD') {
+      if (employee.md_filing_status !== 'SINGLE' && employee.md_filing_status !== 'MARRIED') {
+        const error = new Error(`md_filing_status for ${employeeId} must be 'SINGLE' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.md_exemptions) || (employee.md_exemptions as number) < 0) {
+        const error = new Error(`md_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      const knownCounty = employee.md_county !== undefined && (
+        employee.md_county in p.maryland.county_flat_rates || employee.md_county in p.maryland.county_graduated_brackets
+      );
+      if (!knownCounty) {
+        const error = new Error(`md_county for ${employeeId} must be one of Maryland's 23 counties or Baltimore City in this rule pack (Maryland county tax is mandatory and is not skipped by this engine)`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'CT' && employee.ct_withholding_code !== 'A_OR_D') {
+      const error = new Error(`ct_withholding_code for ${employeeId} must be 'A_OR_D' — withholding codes B, C, and F are not implemented in this rule pack (their base bracket and/or phase-out/recapture tables were not captured)`);
+      (error as Error & { status?: number }).status = 409;
+      throw error;
     }
 
     const periodsPerYear = p.federal_income_tax.periods_per_year[employee.pay_frequency];
@@ -2747,6 +2881,33 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       alIncomeTax = money(annualTax / periodsPerYear);
     }
 
+    // --- v14 states ---
+    let mdIncomeTax = 0;
+    let mdCountyTax = 0;
+    if (employee.state === 'MD') {
+      const status = employee.md_filing_status as MdFilingStatus;
+      const county = employee.md_county as string;
+      const ded = p.maryland.standard_deduction_annual + (employee.md_exemptions as number) * p.maryland.allowance_value_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.maryland.brackets[status]);
+      mdIncomeTax = money(annualTax / periodsPerYear);
+      if (county in p.maryland.county_flat_rates) {
+        mdCountyTax = money((taxable * p.maryland.county_flat_rates[county]) / periodsPerYear);
+      } else {
+        const countyAnnualTax = bracketLookup(taxable, p.maryland.county_graduated_brackets[county][status]);
+        mdCountyTax = money(countyAnnualTax / periodsPerYear);
+      }
+    }
+
+    let ctIncomeTax = 0;
+    if (employee.state === 'CT') {
+      const baseTax = bracketLookup(annualWagesV11, p.connecticut.brackets_a_or_d);
+      const phaseOut = stepLookup(annualWagesV11, p.connecticut.phase_out_add_back_a_or_d);
+      const recapture = stepLookup(annualWagesV11, p.connecticut.recapture_a_or_d);
+      const annualTax = money(baseTax + phaseOut + recapture);
+      ctIncomeTax = money(annualTax / periodsPerYear);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
@@ -2758,7 +2919,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       mtIncomeTax + ndIncomeTax + okIncomeTax + riIncomeTax + vaIncomeTax +
       maIncomeTax + moIncomeTax + neIncomeTax + scIncomeTax + vtIncomeTax +
       wvIncomeTax + ksIncomeTax + idIncomeTax + nmIncomeTax + arIncomeTax + hiIncomeTax +
-      ohIncomeTax + laIncomeTax + iaIncomeTax + alIncomeTax
+      ohIncomeTax + laIncomeTax + iaIncomeTax + alIncomeTax +
+      mdIncomeTax + mdCountyTax + ctIncomeTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -2832,6 +2994,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       la_income_tax: laIncomeTax,
       ia_income_tax: iaIncomeTax,
       al_income_tax: alIncomeTax,
+      md_income_tax: mdIncomeTax,
+      md_county_tax: mdCountyTax,
+      ct_income_tax: ctIncomeTax,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -2907,6 +3072,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     la_income_tax: sum(employees.map(e => e.la_income_tax)),
     ia_income_tax: sum(employees.map(e => e.ia_income_tax)),
     al_income_tax: sum(employees.map(e => e.al_income_tax)),
+    md_income_tax: sum(employees.map(e => e.md_income_tax)),
+    md_county_tax: sum(employees.map(e => e.md_county_tax)),
+    ct_income_tax: sum(employees.map(e => e.ct_income_tax)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -2973,6 +3141,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'LA_INCOME_TAX_PAYABLE', amount: totals.la_income_tax },
     { side: 'CREDIT', account_role: 'IA_INCOME_TAX_PAYABLE', amount: totals.ia_income_tax },
     { side: 'CREDIT', account_role: 'AL_INCOME_TAX_PAYABLE', amount: totals.al_income_tax },
+    { side: 'CREDIT', account_role: 'MD_INCOME_TAX_PAYABLE', amount: totals.md_income_tax },
+    { side: 'CREDIT', account_role: 'MD_COUNTY_TAX_PAYABLE', amount: totals.md_county_tax },
+    { side: 'CREDIT', account_role: 'CT_INCOME_TAX_PAYABLE', amount: totals.ct_income_tax },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -3779,6 +3950,23 @@ export function payrollEngineSelfTestUS() {
   const expectedLa1 = 275.85;
   const expectedAl1 = 480;
 
+  // v14: Maryland (flat + graduated counties) and Connecticut (code A/D
+  // phase-out + recapture), both hand-verified against bracket-math
+  // computed by hand, including the Anne Arundel graduated county table.
+  const v14Case = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [
+      { employee_id: 'MD1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'MD', md_filing_status: 'SINGLE', md_exemptions: 0, md_county: 'Baltimore County' },
+      { employee_id: 'MD2', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'MD', md_filing_status: 'SINGLE', md_exemptions: 0, md_county: 'Anne Arundel' },
+      { employee_id: 'CT1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'CT', ct_withholding_code: 'A_OR_D' }
+    ]
+  });
+  const [sMd1, sMd2, sCt1] = v14Case.employees;
+  const expectedMd1State = 465;
+  const expectedMd1County = 310.93;
+  const expectedMd2County = 275.67;
+  const expectedCt1 = 525;
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -3883,7 +4071,10 @@ export function payrollEngineSelfTestUS() {
     iaEx3.employees[0].ia_income_tax === 45.15 && iaEx4.employees[0].ia_income_tax === 145.5 &&
     iaEx5.employees[0].ia_income_tax === 101 && iaEx6.employees[0].ia_income_tax === 114.92 &&
     sOh1.oh_income_tax === expectedOh1 && sLa1.la_income_tax === expectedLa1 && sAl1.al_income_tax === expectedAl1 &&
-    v13Case.controls.journal_balanced;
+    v13Case.controls.journal_balanced &&
+    sMd1.md_income_tax === expectedMd1State && sMd1.md_county_tax === expectedMd1County &&
+    sMd2.md_county_tax === expectedMd2County && sCt1.ct_income_tax === expectedCt1 &&
+    v14Case.controls.journal_balanced;
 
   return {
     ok,
@@ -3895,7 +4086,7 @@ export function payrollEngineSelfTestUS() {
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
-    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case,
+    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case, v14Case,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
