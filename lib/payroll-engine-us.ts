@@ -29,6 +29,27 @@
 // sourced via AI web research (not a professional review) as of September
 // 2026.
 //
+// v6 change log (from v5): adds NY Paid Family Leave (PFL, unconditional
+// for every NY employee, 0.432% of gross wages) and NY Disability Benefits
+// Law (DBL, opt-in only, WEEKLY-pay-only). Both were explicitly flagged as
+// unimplemented gaps in v4/v5's own limitations list; a user-supplied
+// second-generation "formula pack" document (derived from the same
+// secondary reference already cited in v5, but distilling it into
+// code-ready equations) supplied the complete formula for both, so the gap
+// is now closed rather than merely flagged. PFL introduces a genuinely new
+// primitive to this file — capTax(rawTax, ytdTaxBefore, annualCap), which
+// caps the computed TAX amount against a cumulative annual DOLLAR figure,
+// as opposed to every other capped tax in this file (ceilingContribution),
+// which caps the taxable WAGE base before applying a rate. NY PFL's
+// published cap is a flat dollar figure the state sets independently each
+// year, not (rate × some wage base), so the two helpers are genuinely not
+// interchangeable — using ceilingContribution for PFL would have been
+// wrong. The same formula-pack document independently corroborated this
+// file's existing NJ, AZ, CO, PA, AK, WA, and CA SDI figures with no
+// discrepancies found, which is a meaningful secondary confirmation for the
+// v5 states, even though it derives from the same original reference
+// rather than being a fully independent source.
+//
 // v5 change log (from v4): adds 14 more states — IL, PA, MI, CO, AZ (each
 // with a real, if simple, withholding FORMULA), AK and WA (no state income
 // tax, but each has a real statutory EMPLOYEE-paid payroll levy: AK
@@ -217,6 +238,14 @@ export type UsEmployeeInput = {
   ny_nyc_resident?: boolean;
   ny_yonkers_resident?: boolean;
   ny_yonkers_nonresident_workplace?: boolean;
+  // NY Paid Family Leave: always applies to NY employees (no opt-out) at a
+  // flat rate up to a cumulative ANNUAL DOLLAR cap (not a wage-base cap).
+  ytd_ny_pfl_tax_before?: number;
+  // NY Disability Benefits Law: opt-in only (employer elects to deduct it),
+  // and only supported for WEEKLY pay — the statute caps it per calendar
+  // week, which has no clean equivalent for biweekly/semimonthly/monthly
+  // periods, so those are rejected rather than approximated.
+  ny_dbl_opt_in?: boolean;
   // IL fields — required when state === 'IL'.
   il_line1_allowances?: number;
   il_line2_allowances?: number;
@@ -265,6 +294,8 @@ export type UsJournalLine = {
     | 'NY_INCOME_TAX_PAYABLE'
     | 'NYC_INCOME_TAX_PAYABLE'
     | 'YONKERS_TAX_PAYABLE'
+    | 'NY_PFL_PAYABLE'
+    | 'NY_DBL_PAYABLE'
     | 'IL_INCOME_TAX_PAYABLE'
     | 'PA_INCOME_TAX_PAYABLE'
     | 'PA_UC_PAYABLE'
@@ -303,6 +334,8 @@ export type UsEmployeeResult = {
   ny_income_tax: number;
   nyc_income_tax: number;
   yonkers_tax: number;
+  ny_pfl: number;
+  ny_dbl: number;
   il_income_tax: number;
   pa_income_tax: number;
   pa_uc: number;
@@ -323,6 +356,7 @@ export type UsEmployeeResult = {
   ytd_co_famli_wages_after: number;
   ytd_ak_ui_wages_after: number;
   ytd_wa_pfml_wages_after: number;
+  ytd_ny_pfl_tax_after: number;
 };
 
 export type UsPayrollRunResult = {
@@ -349,6 +383,8 @@ export type UsPayrollRunResult = {
     ny_income_tax: number;
     nyc_income_tax: number;
     yonkers_tax: number;
+    ny_pfl: number;
+    ny_dbl: number;
     il_income_tax: number;
     pa_income_tax: number;
     pa_uc: number;
@@ -374,7 +410,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V5',
+  id: 'US-17-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V6',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -592,7 +628,21 @@ export const PAYROLL_RULE_PACK_US = {
       BIWEEKLY: [[0, Infinity], [154, 115], [385, 77], [769, 38], [1154, 0]],
       SEMIMONTHLY: [[0, Infinity], [167, 125], [417, 83], [833, 42], [1250, 0]],
       MONTHLY: [[0, Infinity], [333, 250], [833, 167], [1667, 83], [2500, 0]]
-    } as Record<UsPayFrequency, Array<[number, number]>>
+    } as Record<UsPayFrequency, Array<[number, number]>>,
+    // NY Paid Family Leave (PFL): applies to every NY employee, no opt-out,
+    // at a flat 0.432% of gross wages up to a cumulative ANNUAL DOLLAR cap
+    // ($411.91 for 2026) — a dollar cap on the computed tax itself, not a
+    // wage-base cap (see capTax vs ceilingContribution). Cross-verified via
+    // a second-generation formula-pack document (v6 change log).
+    pfl_rate: 0.00432,
+    pfl_annual_dollar_cap: 411.91,
+    // NY Disability Benefits Law (DBL): employer-elects-to-deduct only, and
+    // the statute caps it PER CALENDAR WEEK ($0.60/week) — which has no
+    // clean equivalent for biweekly/semimonthly/monthly pay, so this engine
+    // only supports it for WEEKLY pay frequency; other frequencies with
+    // ny_dbl_opt_in set are rejected rather than approximated.
+    dbl_rate: 0.005,
+    dbl_weekly_dollar_cap: 0.6
   },
   // --- v5: states sourced from a secondary cross-check reference (a
   // "2026 U.S. Payroll Tax Implementation Reference" document the user
@@ -698,7 +748,8 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Pennsylvania Department of Revenue', instrument: '2026 Pennsylvania flat withholding rate (3.07%) and employee UC contribution rate (0.07%), as reproduced in the reference document', url: 'https://www.pa.gov/agencies/revenue/businesses/business-registration-and-info/withholding-tax' },
     { authority: 'Arizona Department of Revenue', instrument: 'Form A-4 (2026) employee percentage-election set, as reproduced in the reference document', url: 'https://azdor.gov/business/withholding-tax' },
     { authority: 'Alaska Department of Labor and Workforce Development', instrument: '2026 Alaska employee UI contribution rate (0.50%) and wage base ($54,200), as reproduced in the reference document', url: 'https://labor.alaska.gov/estax/home.htm' },
-    { authority: 'Washington Employment Security Department / WA Cares Fund', instrument: '2026 WA PFML total premium/employee-share and WA Cares employee rate, as reproduced in the reference document', url: 'https://paidleave.wa.gov/employers/' }
+    { authority: 'Washington Employment Security Department / WA Cares Fund', instrument: '2026 WA PFML total premium/employee-share and WA Cares employee rate, as reproduced in the reference document', url: 'https://paidleave.wa.gov/employers/' },
+    { authority: 'New York State Paid Family Leave', instrument: '2026 NY PFL employee rate (0.432%) and annual dollar cap ($411.91), and NY DBL employee rate (0.5%) and weekly dollar cap ($0.60) — sourced from a second-generation "formula pack" cross-check document (2026_US_Payroll_Formula_Implementation_Guide.pdf, user-supplied 2026-09-14) that itself derives from the same secondary reference above, independently corroborating this file\'s NJ/AZ/CO/PA/AK/WA/CA-SDI figures in the process', url: 'https://paidfamilyleave.ny.gov/cost' }
   ],
   limitations: [
     'Supported states: CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 17 states total. The remaining 33 states plus DC are rejected pending an official-table build for each: AL, AR, CT, DE, GA, HI, IA, ID, IN, KS, KY, LA, MD, MA, MN, MS, MO, MT, NE, NM, NC, ND, OH, OK, OR, RI, SC, UT, VT, VA, WI, WV, DC. Several of these (IN, GA, KY, NC — all flat- or near-flat-rate states) look deceptively simple from a headline rate alone, but this engine\'s own experience building CA/NJ/NY is that the actual withholding formula always has an allowance/deduction/exemption structure a headline rate doesn\'t capture (see the IN note below for a concrete example of exactly this trap being avoided rather than walked into).',
@@ -718,7 +769,8 @@ export const PAYROLL_RULE_PACK_US = {
     'New Jersey: pretax_401k_deferral and pretax_section125_deduction are NOT applied to NJ state income tax, UI/WF/SWF, TDI, or FLI wages — NJ employees with either pretax field non-zero are rejected rather than silently taxed on the wrong base, since NJ\'s treatment of these wage bases was not independently verified this pass (unlike the federal/CA treatment, which was).',
     'New York: pretax_401k_deferral and pretax_section125_deduction are also NOT applied to NY State, NYC, or Yonkers wages for the same reason — NY employees with either pretax field non-zero are rejected rather than silently taxed on the wrong wage base.',
     'New York: the "Method III Top Income Tax Rates" schedule (for very high net wages — roughly above the $20k-$41k per-period range where each exact-calculation table in this file stops, i.e. very high six-figure and up annual pay) is NOT implemented. Employees whose net wages exceed the top bracket of the tables here are rejected rather than approximated — a non-issue for this pack\'s small-business target segment, but rejected explicitly rather than silently mis-taxed.',
-    'New York: NY State Paid Family Leave (PFL — 0.432% of gross wages per pay period, 2026 annual max $411.91) and NY State Disability Benefits Law (DBL — employee contribution up to 0.5% of wages, capped at $0.60/week, where the employer elects to deduct it) are NOT calculated — flagged explicitly since both are real deductions on most NY paystubs, not silently ignored.',
+    'New York PFL (v6): calculated for every NY employee at 0.432% of gross wages, capped by a cumulative ANNUAL DOLLAR amount ($411.91 for 2026) via a new capTax primitive — distinct from every other capped tax in this file, which caps the taxable WAGE base (ceilingContribution) rather than the computed tax itself. Callers must track and pass ytd_ny_pfl_tax_before (a YTD TAX total, not a YTD wage total) for this one to cap correctly.',
+    'New York DBL (v6): calculated only when the caller sets ny_dbl_opt_in (employer elects to deduct it) AND pay_frequency is WEEKLY — DBL\'s statutory cap is $0.60 PER CALENDAR WEEK, which has no clean equivalent for biweekly/semimonthly/monthly pay (is a semimonthly period ~2.17 weeks? ~2 weeks? the source doesn\'t say), so non-weekly employees with ny_dbl_opt_in set are rejected rather than guessed at.',
     'New York: the Metropolitan Commuter Transportation Mobility Tax (MCTMT) — an EMPLOYER-paid payroll tax in the MTA region (NYC + surrounding counties) — is NOT calculated. It is an employer-side tax, not an employee withholding, so it has no effect on any figure this engine reports to employees, but it is a real employer payroll-tax liability this engine does not compute.',
     'New York: NYC residency and Yonkers residency/workplace are each opt-in per employee via ny_nyc_resident, ny_yonkers_resident, and ny_yonkers_nonresident_workplace. This engine has no way to independently verify an employee\'s actual home or work address — getting these flags wrong for an employee produces a wrong result, not a rejected one, so the caller is responsible for setting them correctly.',
     'New York: the Yonkers RESIDENT surcharge is computed as 16.75% of the NY State tax amount on the same net wages, per the official NYS-50-T-Y method — its published bracket tables are numerically identical to the NY State ones, so this is the documented method, not an approximation.',
@@ -760,6 +812,17 @@ function ceilingContribution(ytdBefore: number, amount: number, ceilingAnnual: n
   const remainingRoom = Math.max(0, ceilingAnnual - ytdBefore);
   const contributable = Math.min(amount, remainingRoom);
   return money(contributable * rate);
+}
+
+// Caps the computed TAX amount itself against a cumulative annual dollar
+// cap (e.g. NY Paid Family Leave), as distinct from ceilingContribution
+// above which caps the taxable WAGE base before applying a rate. The two
+// are not interchangeable — a dollar-capped tax like NY PFL has no simple
+// equivalent wage-base cap because the published cap is a flat dollar
+// figure the state sets independently each year, not (rate × some base).
+function capTax(rawTax: number, ytdTaxBefore: number, annualCap: number) {
+  const roomLeft = Math.max(0, annualCap - ytdTaxBefore);
+  return money(Math.min(Math.max(rawTax, 0), roomLeft));
 }
 
 function bracketLookup(annualAmount: number, brackets: Array<[number, number, number]>) {
@@ -899,6 +962,11 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
+      if (employee.ny_dbl_opt_in && employee.pay_frequency !== 'WEEKLY') {
+        const error = new Error(`ny_dbl_opt_in for ${employeeId} is only supported for WEEKLY pay frequency — NY DBL's statutory cap is per calendar week and has no clean equivalent for other pay frequencies`);
+        (error as Error & { status?: number }).status = 409;
+        throw error;
+      }
     }
     if (employee.state === 'IL') {
       if (!Number.isInteger(employee.il_line1_allowances) || (employee.il_line1_allowances as number) < 0) {
@@ -1012,10 +1080,13 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       njFli = ceilingContribution(ytdNjTdiFliBefore, grossPay, p.new_jersey.tdi_fli_wage_base_annual, p.new_jersey.fli_rate);
     }
 
-    // --- New York State income tax, NYC resident tax, Yonkers resident surcharge / nonresident earnings tax ---
+    // --- New York State income tax, NYC resident tax, Yonkers resident surcharge / nonresident earnings tax, PFL, DBL ---
+    const ytdNyPflTaxBefore = requireNonNegativeMoney(employee.ytd_ny_pfl_tax_before ?? 0, `ytd_ny_pfl_tax_before for ${employeeId}`);
     let nyIncomeTax = 0;
     let nycIncomeTax = 0;
     let yonkersTax = 0;
+    let nyPfl = 0;
+    let nyDbl = 0;
     if (employee.state === 'NY') {
       const nyFilingStatus = employee.ny_filing_status as NyFilingStatus;
       const deductionTable = nyFilingStatus === 'MARRIED' ? p.new_york.deduction_per_period_married : p.new_york.deduction_per_period;
@@ -1047,6 +1118,13 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
           if (grossPay >= atLeast) yonkersExemption = exemptionAmount;
         }
         yonkersTax = belowFirstThreshold ? 0 : money(Math.max(0, grossPay - yonkersExemption) * p.new_york.yonkers_nonresident_rate);
+      }
+      // PFL applies to every NY employee, no opt-out, capped by cumulative
+      // ANNUAL DOLLAR amount rather than by a wage base.
+      nyPfl = capTax(money(grossPay * p.new_york.pfl_rate), ytdNyPflTaxBefore, p.new_york.pfl_annual_dollar_cap);
+      // DBL is opt-in (employer elects to deduct) and WEEKLY-only — validated above.
+      if (employee.ny_dbl_opt_in) {
+        nyDbl = money(Math.min(grossPay * p.new_york.dbl_rate, p.new_york.dbl_weekly_dollar_cap));
       }
     }
 
@@ -1118,7 +1196,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
-      nyIncomeTax + nycIncomeTax + yonkersTax +
+      nyIncomeTax + nycIncomeTax + yonkersTax + nyPfl + nyDbl +
       ilIncomeTax + paIncomeTax + paUc + miIncomeTax + coIncomeTax + coFamli + azIncomeTax + akUi + waPfml + waCares
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
@@ -1148,6 +1226,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ny_income_tax: nyIncomeTax,
       nyc_income_tax: nycIncomeTax,
       yonkers_tax: yonkersTax,
+      ny_pfl: nyPfl,
+      ny_dbl: nyDbl,
       il_income_tax: ilIncomeTax,
       pa_income_tax: paIncomeTax,
       pa_uc: paUc,
@@ -1167,7 +1247,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ytd_nj_tdi_fli_wages_after: money(ytdNjTdiFliBefore + Math.min(grossPay, Math.max(0, p.new_jersey.tdi_fli_wage_base_annual - ytdNjTdiFliBefore))),
       ytd_co_famli_wages_after: money(ytdCoFamliBefore + Math.min(grossPay, Math.max(0, p.colorado.famli_wage_base_annual - ytdCoFamliBefore))),
       ytd_ak_ui_wages_after: money(ytdAkUiBefore + Math.min(grossPay, Math.max(0, p.alaska.ui_wage_base_annual - ytdAkUiBefore))),
-      ytd_wa_pfml_wages_after: money(ytdWaPfmlBefore + Math.min(grossPay, Math.max(0, p.washington.pfml_wage_base_annual - ytdWaPfmlBefore)))
+      ytd_wa_pfml_wages_after: money(ytdWaPfmlBefore + Math.min(grossPay, Math.max(0, p.washington.pfml_wage_base_annual - ytdWaPfmlBefore))),
+      ytd_ny_pfl_tax_after: money(ytdNyPflTaxBefore + nyPfl)
     };
   });
 
@@ -1186,6 +1267,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     ny_income_tax: sum(employees.map(e => e.ny_income_tax)),
     nyc_income_tax: sum(employees.map(e => e.nyc_income_tax)),
     yonkers_tax: sum(employees.map(e => e.yonkers_tax)),
+    ny_pfl: sum(employees.map(e => e.ny_pfl)),
+    ny_dbl: sum(employees.map(e => e.ny_dbl)),
     il_income_tax: sum(employees.map(e => e.il_income_tax)),
     pa_income_tax: sum(employees.map(e => e.pa_income_tax)),
     pa_uc: sum(employees.map(e => e.pa_uc)),
@@ -1217,6 +1300,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'NY_INCOME_TAX_PAYABLE', amount: totals.ny_income_tax },
     { side: 'CREDIT', account_role: 'NYC_INCOME_TAX_PAYABLE', amount: totals.nyc_income_tax },
     { side: 'CREDIT', account_role: 'YONKERS_TAX_PAYABLE', amount: totals.yonkers_tax },
+    { side: 'CREDIT', account_role: 'NY_PFL_PAYABLE', amount: totals.ny_pfl },
+    { side: 'CREDIT', account_role: 'NY_DBL_PAYABLE', amount: totals.ny_dbl },
     { side: 'CREDIT', account_role: 'IL_INCOME_TAX_PAYABLE', amount: totals.il_income_tax },
     { side: 'CREDIT', account_role: 'PA_INCOME_TAX_PAYABLE', amount: totals.pa_income_tax },
     { side: 'CREDIT', account_role: 'PA_UC_PAYABLE', amount: totals.pa_uc },
@@ -1697,6 +1782,39 @@ export function payrollEngineSelfTestUS() {
   const s13 = nyCaseYonkersNonresident.employees[0];
   const expectedYonkersTax13 = 0.81;
 
+  // Case 15 (v6): NY PFL, ordinary case + dollar-cap crossing, plus NY DBL.
+  // PFL rate 0.432% is unconditional for every NY employee.
+  const nyPflOrdinary = calculateUsPayroll({
+    pay_period_start: '2026-08-03', pay_period_end: '2026-08-09', pay_date: '2026-08-09',
+    employees: [{
+      employee_id: 'E015', gross_pay: 1000, pay_frequency: 'WEEKLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'NY', ny_filing_status: 'SINGLE', ny_allowances: 0,
+      ny_dbl_opt_in: true
+    }]
+  });
+  const s15 = nyPflOrdinary.employees[0];
+  // PFL: 1000 * 0.432% = 4.32, well under the $411.91 annual cap.
+  const expectedNyPfl15 = 4.32;
+  // DBL: min(1000*0.5%, 0.60) = min(5.00, 0.60) = 0.60 (capped).
+  const expectedNyDbl15 = 0.6;
+
+  // Case 16: NY PFL dollar-cap crossing mid-year — YTD PFL tax already at
+  // $410.00, only $1.91 of room left before hitting the $411.91 annual cap.
+  const nyPflCapCrossing = calculateUsPayroll({
+    pay_period_start: '2026-12-01', pay_period_end: '2026-12-07', pay_date: '2026-12-07',
+    employees: [{
+      employee_id: 'E016', gross_pay: 1000, pay_frequency: 'WEEKLY',
+      federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false,
+      ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0,
+      state: 'NY', ny_filing_status: 'SINGLE', ny_allowances: 0,
+      ytd_ny_pfl_tax_before: 410
+    }]
+  });
+  const s16 = nyPflCapCrossing.employees[0];
+  const expectedNyPfl16 = 1.91;
+
   // Case 14: one multi-employee run covering all 8 v5 state tiers at once —
   // IL, PA, MI, CO, AZ, AK, WA, and one no-tax/no-employee-levy state (TX).
   // All expected values hand-derived directly from this file's own v5
@@ -1807,7 +1925,12 @@ export function payrollEngineSelfTestUS() {
     sTx.federal_income_tax > 0 &&
     sTx.employee_social_security > 0 &&
     multiStateCase.controls.employee_count === 8 &&
-    multiStateCase.controls.journal_balanced;
+    multiStateCase.controls.journal_balanced &&
+    s15.ny_pfl === expectedNyPfl15 &&
+    s15.ny_dbl === expectedNyDbl15 &&
+    nyPflOrdinary.controls.journal_balanced &&
+    s16.ny_pfl === expectedNyPfl16 &&
+    nyPflCapCrossing.controls.journal_balanced;
 
   return {
     ok,
@@ -1815,6 +1938,8 @@ export function payrollEngineSelfTestUS() {
     ssCase,
     addlMedicareCase,
     multiStateCase,
+    nyPflOrdinary,
+    nyPflCapCrossing,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
