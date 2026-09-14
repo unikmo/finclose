@@ -1,6 +1,7 @@
-// United States (US) payroll rule pack — v11: federal + 30 states (CA, NJ,
+// United States (US) payroll rule pack — v12: federal + 41 states (CA, NJ,
 // NY incl. NYC/Yonkers, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS,
-// UT, MN, MT, ND, OK, RI, VA, FL, NV, NH, SD, TN, TX, WY).
+// UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI,
+// FL, NV, NH, SD, TN, TX, WY).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -29,6 +30,28 @@
 // in the prior year or even during the current year. This file uses figures
 // sourced via AI web research (not a professional review) as of September
 // 2026.
+//
+// v12 change log (from v11): adds eleven more states on the same
+// "keep going" instruction — MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI —
+// reaching 41/50 states. Same single-NFC-bulletin-source tier as v11.
+// Hawaii's bracket table had been only partially extracted on first fetch
+// (endpoints only); a targeted follow-up fetch got the complete 8-row
+// table for both filing statuses, which matched the partial extraction's
+// endpoints exactly. Arkansas has a genuinely incomplete area: its real
+// top bracket smooths across 28 narrow $100-wide rows between $94,701 and
+// $97,601 to avoid a cliff, and this pass could not get that full table —
+// annualized taxable income landing in that ~$2,900 band is REJECTED with
+// an explicit error rather than approximated, the same fail-closed pattern
+// used elsewhere in this file for genuinely unresolved narrow cases (e.g.
+// the Oregon single-filer/3-allowances/wages-over-$125k combination in
+// v9). New Mexico's source gave no deduction/exemption structure at all —
+// implemented with zero deduction, flagged explicitly as possibly an
+// extraction gap rather than a confirmed absence. Idaho's formula was
+// reconstructed from descriptive bulletin text rather than a directly
+// quoted formula line, so carries slightly lower confidence than a
+// literal-quote state. Four of the eleven (MO, HI, SC, AR) were hand-
+// verified against manual bracket arithmetic; the rest checked only for
+// journal-balance and positive-output sanity.
 //
 // v11 change log (from v10): adds ten more states in one pass on explicit
 // user instruction to execute the remaining state list rather than build
@@ -329,6 +352,7 @@ export type UsState =
   | 'IL' | 'PA' | 'MI' | 'CO' | 'AZ'
   | 'AK' | 'WA' | 'OR' | 'IN' | 'NC'
   | 'GA' | 'KY' | 'MS' | 'UT' | 'MN' | 'MT' | 'ND' | 'OK' | 'RI' | 'VA'
+  | 'MA' | 'MO' | 'NE' | 'SC' | 'VT' | 'WV' | 'KS' | 'ID' | 'NM' | 'AR' | 'HI'
   | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
@@ -343,6 +367,14 @@ export type MnFilingStatus = 'SINGLE' | 'MARRIED';
 export type MtFilingStatus = 'SINGLE_OR_MFS_OR_BOTH_WORKING' | 'MARRIED_FILING_JOINTLY' | 'HEAD_OF_HOUSEHOLD';
 export type NdFilingStatus = 'SINGLE_OR_MFS' | 'MARRIED_FILING_JOINTLY' | 'HEAD_OF_HOUSEHOLD';
 export type OkFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
+export type MoFilingStatus = 'SINGLE_OR_MFS_OR_MARRIED_SPOUSE_WORKS' | 'MARRIED_SPOUSE_NOT_WORK' | 'HEAD_OF_HOUSEHOLD';
+export type NeFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
+export type VtFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
+export type WvFilingStatus = 'ONE_EARNER_ONE_JOB' | 'TWO_EARNER_OR_MULTIPLE_JOBS';
+export type KsFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
+export type IdFilingStatus = 'SINGLE' | 'MARRIED';
+export type NmFilingStatus = 'SINGLE' | 'MARRIED' | 'HEAD_OF_HOUSEHOLD';
+export type HiFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -470,6 +502,39 @@ export type UsEmployeeInput = {
   // split brackets by filing status).
   // VA fields — required when state === 'VA'.
   va_exemptions?: number;
+  // MA fields — required when state === 'MA'.
+  ma_exemptions?: number;
+  // MO fields — required when state === 'MO'.
+  mo_filing_status?: MoFilingStatus;
+  // NE fields — required when state === 'NE'.
+  ne_filing_status?: NeFilingStatus;
+  ne_allowances?: number;
+  // SC fields — required when state === 'SC'.
+  sc_allowances?: number;
+  // VT fields — required when state === 'VT'.
+  vt_filing_status?: VtFilingStatus;
+  vt_allowances?: number;
+  // WV fields — required when state === 'WV'. wv_filing_status is WV's own
+  // "one earner/one job" vs "two earner/multiple jobs" split, not marital
+  // status.
+  wv_filing_status?: WvFilingStatus;
+  wv_exemptions?: number;
+  // KS fields — required when state === 'KS'.
+  ks_filing_status?: KsFilingStatus;
+  ks_exemptions?: number;
+  // ID fields — required when state === 'ID'.
+  id_filing_status?: IdFilingStatus;
+  id_exemptions?: number;
+  // NM fields — required when state === 'NM'. No deduction/exemption is
+  // subtracted before the bracket lookup — the available source gave no
+  // deduction structure, treated as none rather than guessed (see
+  // limitations).
+  nm_filing_status?: NmFilingStatus;
+  // AR fields — required when state === 'AR'.
+  ar_exemptions?: number;
+  // HI fields — required when state === 'HI'.
+  hi_filing_status?: HiFilingStatus;
+  hi_exemptions?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -527,6 +592,17 @@ export type UsJournalLine = {
     | 'OK_INCOME_TAX_PAYABLE'
     | 'RI_INCOME_TAX_PAYABLE'
     | 'VA_INCOME_TAX_PAYABLE'
+    | 'MA_INCOME_TAX_PAYABLE'
+    | 'MO_INCOME_TAX_PAYABLE'
+    | 'NE_INCOME_TAX_PAYABLE'
+    | 'SC_INCOME_TAX_PAYABLE'
+    | 'VT_INCOME_TAX_PAYABLE'
+    | 'WV_INCOME_TAX_PAYABLE'
+    | 'KS_INCOME_TAX_PAYABLE'
+    | 'ID_INCOME_TAX_PAYABLE'
+    | 'NM_INCOME_TAX_PAYABLE'
+    | 'AR_INCOME_TAX_PAYABLE'
+    | 'HI_INCOME_TAX_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -585,6 +661,17 @@ export type UsEmployeeResult = {
   ok_income_tax: number;
   ri_income_tax: number;
   va_income_tax: number;
+  ma_income_tax: number;
+  mo_income_tax: number;
+  ne_income_tax: number;
+  sc_income_tax: number;
+  vt_income_tax: number;
+  wv_income_tax: number;
+  ks_income_tax: number;
+  id_income_tax: number;
+  nm_income_tax: number;
+  ar_income_tax: number;
+  hi_income_tax: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -653,6 +740,17 @@ export type UsPayrollRunResult = {
     ok_income_tax: number;
     ri_income_tax: number;
     va_income_tax: number;
+    ma_income_tax: number;
+    mo_income_tax: number;
+    ne_income_tax: number;
+    sc_income_tax: number;
+    vt_income_tax: number;
+    wv_income_tax: number;
+    ks_income_tax: number;
+    id_income_tax: number;
+    nm_income_tax: number;
+    ar_income_tax: number;
+    hi_income_tax: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -668,7 +766,7 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
-  id: 'US-30-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V11',
+  id: 'US-41-STATES-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V12',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -1245,6 +1343,168 @@ export const PAYROLL_RULE_PACK_US = {
     exemption_value_annual: 930,
     brackets: [[0, 0, 0.02], [3000, 60, 0.03], [5000, 120, 0.05], [17000, 720, 0.0575]] as Array<[number, number, number]>
   },
+  // v12: eleven more states, same single-NFC-source tier as v11.
+  massachusetts: {
+    // NFC bulletin. Flat 5% up to $1,107,750 annual, 9% above (the
+    // statutory "Fair Share Amendment" surtax, baked directly into the
+    // withholding brackets per the bulletin). Deduction depends on
+    // exemption count; wages under $8,000/year with 1+ exemptions are
+    // exempt entirely. MA's own HOH ($120) and blind ($110/exemption)
+    // add-on deductions are NOT modeled — this engine has no HOH/blind
+    // input fields for any state (see limitations).
+    low_income_exemption_threshold_annual: 8000,
+    brackets: [[0, 0, 0.05], [1107750, 55387.5, 0.09]] as Array<[number, number, number]>
+  },
+  missouri: {
+    // NFC bulletin. Eight brackets, standard deduction by a three-way
+    // filing-status split.
+    standard_deduction: {
+      SINGLE_OR_MFS_OR_MARRIED_SPOUSE_WORKS: 16100,
+      MARRIED_SPOUSE_NOT_WORK: 32200,
+      HEAD_OF_HOUSEHOLD: 24150
+    } as Record<MoFilingStatus, number>,
+    brackets: [
+      [0, 0, 0], [1348, 0, 0.02], [2696, 27, 0.025], [4044, 61, 0.03],
+      [5392, 101, 0.035], [6740, 148, 0.04], [8088, 202, 0.045], [9436, 263, 0.047]
+    ] as Array<[number, number, number]>
+  },
+  nebraska: {
+    // NFC bulletin. Seven brackets by two-way filing status, flat
+    // per-allowance exemption amount.
+    allowance_value_annual: 2440,
+    brackets: {
+      SINGLE_OR_HOH: [[0, 0, 0], [3430, 0, 0.0226], [6710, 74.13, 0.0322], [21810, 560.35, 0.0421], [31610, 972.93, 0.0435], [40130, 1343.55, 0.0448], [75370, 2922.3, 0.046]],
+      MARRIED: [[0, 0, 0], [8190, 0, 0.0226], [13010, 108.93, 0.0322], [32400, 733.29, 0.0421], [50400, 1491.09, 0.0435], [62530, 2018.75, 0.0448], [82920, 2932.22, 0.046]]
+    } as Record<NeFilingStatus, Array<[number, number, number]>>
+  },
+  south_carolina: {
+    // NFC bulletin. One unified bracket table (no filing-status split
+    // given). Standard deduction is the LESSER of 10% of annual wages or
+    // $7,500, plus a flat per-allowance amount.
+    standard_deduction_rate: 0.10,
+    standard_deduction_cap_annual: 7500,
+    allowance_value_annual: 5000,
+    brackets: [[0, 0, 0], [3640, 0, 0.03], [18230, 437.7, 0.06]] as Array<[number, number, number]>
+  },
+  vermont: {
+    // NFC bulletin. Five brackets by two-way filing status, flat
+    // per-allowance exemption amount.
+    allowance_value_annual: 5100,
+    brackets: {
+      SINGLE_OR_HOH: [[0, 0, 0], [3700, 0, 0.0335], [51600, 1604.65, 0.066], [119700, 6099.25, 0.076], [245700, 15675.25, 0.0875]],
+      MARRIED: [[0, 0, 0], [11138, 0, 0.0335], [91088, 2678.33, 0.066], [204488, 10162.73, 0.076], [305788, 17861.53, 0.0875]]
+    } as Record<VtFilingStatus, Array<[number, number, number]>>
+  },
+  west_virginia: {
+    // NFC bulletin. Five brackets by a "one earner/one job" vs "two
+    // earner/multiple jobs" split (WV's own categories, not marital
+    // status), flat per-exemption allowance.
+    exemption_value_annual: 2000,
+    brackets: {
+      ONE_EARNER_ONE_JOB: [[0, 0, 0.0211], [10000, 211, 0.0281], [25000, 632.5, 0.0316], [40000, 1106.5, 0.0422], [60000, 1950.5, 0.0458]],
+      TWO_EARNER_OR_MULTIPLE_JOBS: [[0, 0, 0.0211], [7500, 158.25, 0.0281], [18750, 474.38, 0.0316], [30000, 829.88, 0.0422], [45000, 1462.88, 0.0458]]
+    } as Record<WvFilingStatus, Array<[number, number, number]>>
+  },
+  kansas: {
+    // NFC bulletin. Three brackets by two-way filing status. The
+    // allowance is a flat "personal allowance" threshold amount that
+    // applies once the employee has AT LEAST the minimum exemption count
+    // for their status (1 for single/HOH, 1 or 2 for married — married
+    // claiming exactly 1 gets the single-tier amount, married claiming 2+
+    // gets the doubled amount), plus $2,320 for each exemption beyond that
+    // threshold. An employee claiming 0 exemptions gets $0 allowance.
+    exemption_value_annual: 2320,
+    single_or_hoh_base_allowance: 9160,
+    married_one_exemption_allowance: 9160,
+    married_two_plus_allowance: 18320,
+    brackets: {
+      SINGLE_OR_HOH: [[0, 0, 0], [3605, 0, 0.052], [26605, 1196, 0.0558]],
+      MARRIED: [[0, 0, 0], [8240, 0, 0.052], [54240, 2392, 0.0558]]
+    } as Record<KsFilingStatus, Array<[number, number, number]>>
+  },
+  idaho: {
+    // NFC bulletin. Flat 5.3% rate applied above a wage-tier threshold,
+    // after subtracting a flat per-exemption deduction — reconstructed
+    // from the bulletin's descriptive text ("applies the 5.3% rate only to
+    // income exceeding these thresholds after subtracting the exemption
+    // allowance") rather than a literal quoted formula line, so treated as
+    // slightly lower confidence than a directly-quoted formula (see
+    // limitations).
+    rate: 0.053,
+    exemption_value_annual: 3868,
+    threshold_annual: { SINGLE: 15000, MARRIED: 30000 } as Record<IdFilingStatus, number>
+  },
+  new_mexico: {
+    // NFC bulletin, complete 10-row bracket tables (an initial fetch only
+    // captured the first and last row of each table — re-fetched with a
+    // targeted prompt to get the full tables; every intermediate row's
+    // base tax figure was cross-checked by hand against the previous
+    // row's formula and matches exactly, corroborating internal
+    // consistency). The source gave NO deduction/exemption structure at
+    // all, so none is applied here — treated as "genuinely none" per the
+    // source rather than guessed (see limitations for the explicit caveat
+    // that this could instead reflect incomplete source extraction).
+    brackets: {
+      SINGLE: [
+        [0, 0, 0], [8050, 0, 0.015], [13550, 82.5, 0.032], [20550, 306.5, 0.032],
+        [24550, 434.5, 0.043], [33550, 821.5, 0.043], [41550, 1165.5, 0.047],
+        [58550, 1964.5, 0.047], [74550, 2716.5, 0.049], [218050, 9748, 0.059]
+      ] as Array<[number, number, number]>,
+      MARRIED: [
+        [0, 0, 0], [16100, 0, 0.015], [24100, 120, 0.032], [32100, 376, 0.032],
+        [41100, 664, 0.043], [57100, 1352, 0.043], [66100, 1739, 0.047],
+        [102100, 3431, 0.047], [116100, 4089, 0.049], [331100, 14624, 0.059]
+      ] as Array<[number, number, number]>,
+      HEAD_OF_HOUSEHOLD: [
+        [0, 0, 0], [12075, 0, 0.015], [20075, 120, 0.032], [28075, 376, 0.032],
+        [37075, 664, 0.043], [53075, 1352, 0.043], [62075, 1739, 0.047],
+        [98075, 3431, 0.047], [112075, 4089, 0.049], [327075, 14624, 0.059]
+      ] as Array<[number, number, number]>
+    } as Record<NmFilingStatus, Array<[number, number, number]>>
+  },
+  arkansas: {
+    // NFC bulletin. Standard deduction $2,470, per-exemption CREDIT (not
+    // deduction — subtracted from the computed tax) of $29. Uses AR's own
+    // "quick calculation" bracket format (income x rate, minus a
+    // subtrahend) rather than a base+marginal-rate format; converted here
+    // to [atLeast, rate, subtrahend] rows, tax = max(0, income*rate -
+    // subtrahend). Also applies a distinctive truncation rule: taxable
+    // income under $100,001 is truncated to the nearest $100 then $50 is
+    // added, BEFORE the bracket lookup. Arkansas's real top-bracket table
+    // has 28 additional $100-wide smoothing rows between $94,701 and
+    // $97,601 (avoiding a hard cliff) that were not fully captured from
+    // this source — that narrow band is REJECTED rather than approximated
+    // (see the rejection in the calc code and limitations). AR's low-
+    // income tax credit (an additional credit for married filers in a
+    // specific income band) is NOT modeled.
+    standard_deduction_annual: 2470,
+    exemption_credit_annual: 29,
+    smoothing_zone_low: 94701,
+    smoothing_zone_high: 97601,
+    brackets: [
+      [0, 0, 0], [5600, 0.02, 111.98], [11200, 0.03, 223.97], [16000, 0.034, 287.97],
+      [26400, 0.037, 367.16]
+    ] as Array<[number, number, number]>,
+    top_bracket_at_or_above_smoothing_zone: [0.037, 79.9] as [number, number]
+  },
+  hawaii: {
+    // NFC bulletin. Complete 8-bracket tables by two-way filing status
+    // (confirmed complete via a follow-up fetch after an initial partial
+    // extraction). Flat per-exemption deduction plus a flat "lump-sum
+    // allowance."
+    exemption_value_annual: 1144,
+    lump_sum_allowance_annual: 4350,
+    brackets: {
+      SINGLE_OR_HOH: [
+        [0, 0, 0.014], [9600, 134, 0.032], [14400, 288, 0.055], [19200, 552, 0.064],
+        [24000, 859, 0.068], [36000, 1675, 0.072], [48000, 2539, 0.076], [125000, 8391, 0.079]
+      ],
+      MARRIED: [
+        [0, 0, 0.014], [19200, 269, 0.032], [28800, 576, 0.055], [38400, 1104, 0.064],
+        [48000, 1718, 0.068], [72000, 3350, 0.072], [96000, 5078, 0.076], [250000, 16782, 0.079]
+      ]
+    } as Record<HiFilingStatus, Array<[number, number, number]>>
+  },
   // States with genuinely no individual wage income tax AND no statewide
   // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
   // compute for the employee beyond the state-agnostic federal FICA/FUTA
@@ -1281,10 +1541,17 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'Paid Leave Oregon (Oregon Employment Department)', instrument: '2026 Paid Leave Oregon contribution rate (1% total: 0.6% employee / 0.4% employer for employers with 25+ workers) and wage base (pegged to the 2026 Social Security taxable maximum, $184,500) — confirmed 2026-09-14 via paidleave.oregon.gov (through the same text-extraction proxy) and corroborated by a separate web search.', url: 'https://paidleave.oregon.gov/employers/' },
     { authority: 'Indiana Department of Revenue', instrument: 'Departmental Notice #1 (R46 / 01-26), "How to Compute Withholding for State and County Income Tax", effective 2026-01-01 — fetched and read directly 2026-09-14 (the actual official document, not a secondary summary). Gives the 2.95% flat state rate, the $1,000/$1,500/$3,000 personal/dependent/adopted-child annual exemption amounts (Tables A/B/C), a fully worked example matching this engine\'s implementation exactly, and the complete 2026 county income tax rate table for all 92 Indiana counties.', url: 'https://www.in.gov/dor/files/dn01.pdf' },
     { authority: 'North Carolina Department of Revenue', instrument: 'Form NC-30 (Web 11-25), "2026 Income Tax Withholding Tables and Instructions for Employers" — fetched and read directly 2026-09-14 (the actual official document). Gives the 4.09% withholding rate (3.99% statutory rate + NC\'s own built-in 0.1% adjustment, per the document\'s own text), the $12,750 (Single/Married/Surviving Spouse) and $19,125 (Head of Household) standard deductions, the $2,500 allowance value, the nearest-whole-dollar final rounding rule, and a fully worked example matching this engine\'s implementation exactly.', url: 'https://www.ncdor.gov/income-tax-withholding-tables-and-instructions-employers/open' },
-    { authority: 'USDA National Finance Center', instrument: 'Ten separate current 2026 (or most-recent-available) state withholding bulletins, each fetched 2026-09-14, used as the SOLE source for that state (same single-source tier as the v5 batch): Georgia (NFC-26-1784643404, PP13 2026), Kentucky (NFC-26-1770145550, PP02 2026), Mississippi (NFC-26-1768327516, PP09 2026), Utah (NFC-26-1782763921, PP12 2026), Minnesota (NFC-26-1782924992), Montana (NFC-26-1767632355), North Dakota (NFC-26-1767646699), Oklahoma (NFC-26-1773324603), Rhode Island (NFC-26-1772030778, PP03 2026), and Virginia (NFC-25-1750694986, PP14 2025 — the most recent available; no 2026 Virginia bulletin was found). No official worked example was available for any of these ten, unlike OR/IN/NC — see limitations.', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' }
+    { authority: 'USDA National Finance Center', instrument: 'Ten separate current 2026 (or most-recent-available) state withholding bulletins, each fetched 2026-09-14, used as the SOLE source for that state (same single-source tier as the v5 batch): Georgia (NFC-26-1784643404, PP13 2026), Kentucky (NFC-26-1770145550, PP02 2026), Mississippi (NFC-26-1768327516, PP09 2026), Utah (NFC-26-1782763921, PP12 2026), Minnesota (NFC-26-1782924992), Montana (NFC-26-1767632355), North Dakota (NFC-26-1767646699), Oklahoma (NFC-26-1773324603), Rhode Island (NFC-26-1772030778, PP03 2026), and Virginia (NFC-25-1750694986, PP14 2025 — the most recent available; no 2026 Virginia bulletin was found). No official worked example was available for any of these ten, unlike OR/IN/NC — see limitations.', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' },
+    { authority: 'USDA National Finance Center', instrument: 'Eleven more state withholding bulletins, each fetched 2026-09-15, same single-source-per-state tier as the v11 batch: Massachusetts (NFC-26-1769797447), Missouri (NFC-26-1773783048), Nebraska (NFC-26-1774374744), South Carolina (NFC-26-1773173131), Vermont (NFC-24-1707500661 — most recent available), West Virginia (NFC-26-1786455448), Kansas (NFC-24-1722617728 — most recent available), Idaho (NFC-25-1747930413 — most recent available), New Mexico (NFC-26-1776874663), Arkansas (NFC-26-1781190112, re-fetched with a follow-up prompt to get the complete bracket structure), Hawaii (NFC-26-1768321238, re-fetched with a follow-up prompt to get the complete 8-bracket tables for both filing statuses after an initial partial extraction).', url: 'https://help.nfc.usda.gov/systems/taxes/bulletins.php' }
   ],
   limitations: [
-    'Supported states (v11): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 30 states total. 20 states plus DC remain unbuilt: AL, AR, CT, DE, HI, IA, ID, KS, LA, MD, MA, MO, NE, NM, OH, SC, VT, WI, WV, DC. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Supported states (v12): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — 41 states total. 9 states plus DC remain unbuilt: AL, CT, DE, IA, LA, MD, OH, WI, DC. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'v12 eleven-state batch (MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI): same single-NFC-source confidence tier as v11. Only 4 (MO, HI, SC, AR) were hand-verified against manual bracket arithmetic; the rest (MA, NE, VT, WV, KS, ID, NM) checked only for journal-balance/positive-tax sanity — a real, explicitly-flagged verification gap.',
+    'Arkansas (v12): the real top bracket smooths across 28 narrow $100-wide rows between $94,701 and $97,601 annualized taxable income to avoid a hard rate cliff; this engine could not obtain that full 28-row table and REJECTS (with an explicit error) any employee whose annualized taxable income falls in that band, rather than approximating across it. Also does not model Arkansas\'s separate low-income tax credit for married filers in a specific income band.',
+    'New Mexico (v12): implemented with ZERO standard deduction or exemption subtracted before the bracket lookup, because the only source found gave no such structure at all — the bracket table itself IS complete and internally verified (an initial fetch had only captured the first and last of 10 rows per filing status, silently producing $0 tax at $120,000/year single income; caught by this file\'s own self-test suite and fixed by re-fetching for the full table, cross-checked row-by-row by hand). The missing-deduction question is still flagged as possibly reflecting an incomplete source extraction rather than a confirmed absence of any NM deduction — worth re-verifying against NM\'s own withholding formula publication before this state is trusted for real payroll.',
+    'Idaho (v12): the formula was reconstructed from the source bulletin\'s DESCRIPTIVE text ("applies the rate only to income exceeding these thresholds after subtracting the exemption allowance") rather than a literally-quoted formula line — carries slightly lower confidence than every other state in this file, where the formula itself was quoted directly.',
+    'Massachusetts (v12): MA\'s own additional Head-of-Household ($120) and blind ($110/exemption) deduction add-ons are NOT modeled — this engine has no HOH-specific or blindness input fields for any state. Only the base exemption-count-driven deduction and the sub-$8,000 low-income exemption are implemented.',
+    'Vermont, Kansas, and Idaho (v12): sourced from each state\'s most recently available NFC bulletin, which for these three predates 2026 (VT: 2024, KS: 2024, ID: 2025) — no more recent bulletin was found during this pass. Should be reconfirmed once a 2026-dated bulletin or the state\'s own current-year withholding guide becomes available.',
     'v11 ten-state batch (GA, KY, MS, UT, MN, MT, ND, OK, RI, VA): each sourced from exactly ONE document (that state\'s current USDA National Finance Center bulletin), not cross-checked against a second independent source or an official worked example the way CA/NJ/NY/OR/IN/NC were. This is the same confidence tier as the original v5 batch, explicitly lower than the dual-sourced/fixture-verified states. Self-tests for this batch check bracket-math arithmetic by hand (GA/KY/MT) and journal-balance/positive-tax sanity for the rest — real bugs in bracket transcription for the un-hand-verified seven would not necessarily be caught by these tests. Flagged explicitly, consistent with this file\'s practice of naming its own weaker spots rather than glossing over them.',
     'v11 states explicitly NOT attempted this pass for inadequate sourcing found during research (do not assume these were overlooked — each was investigated and rejected for a specific reason): Maryland (mandatory county tax where several counties — Anne Arundel, Frederick — use their own graduated brackets rather than a flat rate, not resolved this pass), Connecticut (six withholding-code filing tracks A-F plus a "3%/2% phase-out add-back" mechanism not fully characterized from available sourcing), Alabama (NFC bulletin is stale, from 2022, and its standard deduction is itself an income-phased step function needing more detail than gathered), Iowa (confirmed flat 3.8% for 2026 via secondary sources, but no primary percentage-method deduction structure found — the available NFC bulletin predates Iowa\'s 2025 flat-tax conversion), Delaware, Wisconsin, and DC (no reliable primary or NFC source reached — only AI-search-synthesized secondary sources, the same category of source this file\'s own Oregon precedent explicitly distrusts when used alone).',
     'Utah (v11): implements the ONLY state in this file where the deduction mechanism reduces the computed TAX (a phasing-out annual credit) rather than the taxable WAGE base — a genuinely different formula shape from every other state here. Confirmed structurally sound against the NFC bulletin\'s own description, but not verified against a worked example.',
@@ -1454,7 +1721,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', ...p.no_tax_no_employee_levy_states];
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', ...p.no_tax_no_employee_levy_states];
     if (!supportedStates.includes(employee.state)) {
       const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
       (error as Error & { status?: number }).status = 409;
@@ -1687,6 +1954,103 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const error = new Error(`va_exemptions for ${employeeId} must be a non-negative integer`);
       (error as Error & { status?: number }).status = 400;
       throw error;
+    }
+    if (employee.state === 'MA' && (!Number.isInteger(employee.ma_exemptions) || (employee.ma_exemptions as number) < 0)) {
+      const error = new Error(`ma_exemptions for ${employeeId} must be a non-negative integer`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.state === 'MO' && !['SINGLE_OR_MFS_OR_MARRIED_SPOUSE_WORKS', 'MARRIED_SPOUSE_NOT_WORK', 'HEAD_OF_HOUSEHOLD'].includes(employee.mo_filing_status as string)) {
+      const error = new Error(`mo_filing_status for ${employeeId} must be 'SINGLE_OR_MFS_OR_MARRIED_SPOUSE_WORKS', 'MARRIED_SPOUSE_NOT_WORK', or 'HEAD_OF_HOUSEHOLD'`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.state === 'NE') {
+      if (employee.ne_filing_status !== 'SINGLE_OR_HOH' && employee.ne_filing_status !== 'MARRIED') {
+        const error = new Error(`ne_filing_status for ${employeeId} must be 'SINGLE_OR_HOH' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.ne_allowances) || (employee.ne_allowances as number) < 0) {
+        const error = new Error(`ne_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'SC' && (!Number.isInteger(employee.sc_allowances) || (employee.sc_allowances as number) < 0)) {
+      const error = new Error(`sc_allowances for ${employeeId} must be a non-negative integer`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.state === 'VT') {
+      if (employee.vt_filing_status !== 'SINGLE_OR_HOH' && employee.vt_filing_status !== 'MARRIED') {
+        const error = new Error(`vt_filing_status for ${employeeId} must be 'SINGLE_OR_HOH' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.vt_allowances) || (employee.vt_allowances as number) < 0) {
+        const error = new Error(`vt_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'WV') {
+      if (employee.wv_filing_status !== 'ONE_EARNER_ONE_JOB' && employee.wv_filing_status !== 'TWO_EARNER_OR_MULTIPLE_JOBS') {
+        const error = new Error(`wv_filing_status for ${employeeId} must be 'ONE_EARNER_ONE_JOB' or 'TWO_EARNER_OR_MULTIPLE_JOBS'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.wv_exemptions) || (employee.wv_exemptions as number) < 0) {
+        const error = new Error(`wv_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'KS') {
+      if (employee.ks_filing_status !== 'SINGLE_OR_HOH' && employee.ks_filing_status !== 'MARRIED') {
+        const error = new Error(`ks_filing_status for ${employeeId} must be 'SINGLE_OR_HOH' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.ks_exemptions) || (employee.ks_exemptions as number) < 0) {
+        const error = new Error(`ks_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'ID') {
+      if (employee.id_filing_status !== 'SINGLE' && employee.id_filing_status !== 'MARRIED') {
+        const error = new Error(`id_filing_status for ${employeeId} must be 'SINGLE' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.id_exemptions) || (employee.id_exemptions as number) < 0) {
+        const error = new Error(`id_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'NM' && !['SINGLE', 'MARRIED', 'HEAD_OF_HOUSEHOLD'].includes(employee.nm_filing_status as string)) {
+      const error = new Error(`nm_filing_status for ${employeeId} must be 'SINGLE', 'MARRIED', or 'HEAD_OF_HOUSEHOLD'`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.state === 'AR' && (!Number.isInteger(employee.ar_exemptions) || (employee.ar_exemptions as number) < 0)) {
+      const error = new Error(`ar_exemptions for ${employeeId} must be a non-negative integer`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.state === 'HI') {
+      if (employee.hi_filing_status !== 'SINGLE_OR_HOH' && employee.hi_filing_status !== 'MARRIED') {
+        const error = new Error(`hi_filing_status for ${employeeId} must be 'SINGLE_OR_HOH' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.hi_exemptions) || (employee.hi_exemptions as number) < 0) {
+        const error = new Error(`hi_exemptions for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
     }
 
     const periodsPerYear = p.federal_income_tax.periods_per_year[employee.pay_frequency];
@@ -2044,6 +2408,130 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       vaIncomeTax = money(annualTax / periodsPerYear);
     }
 
+    // --- v12 states ---
+    let maIncomeTax = 0;
+    if (employee.state === 'MA') {
+      const exemptions = employee.ma_exemptions as number;
+      if (exemptions >= 1 && annualWagesV11 < p.massachusetts.low_income_exemption_threshold_annual) {
+        maIncomeTax = 0;
+      } else {
+        const ded = exemptions === 0 ? 0 : exemptions === 1 ? 4400 : 1000 * exemptions + 3400;
+        const taxable = Math.max(0, money(annualWagesV11 - ded));
+        const annualTax = bracketLookup(taxable, p.massachusetts.brackets);
+        maIncomeTax = money(annualTax / periodsPerYear);
+      }
+    }
+
+    let moIncomeTax = 0;
+    if (employee.state === 'MO') {
+      const status = employee.mo_filing_status as MoFilingStatus;
+      const ded = p.missouri.standard_deduction[status];
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.missouri.brackets);
+      moIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let neIncomeTax = 0;
+    if (employee.state === 'NE') {
+      const status = employee.ne_filing_status as NeFilingStatus;
+      const ded = (employee.ne_allowances as number) * p.nebraska.allowance_value_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.nebraska.brackets[status]);
+      neIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let scIncomeTax = 0;
+    if (employee.state === 'SC') {
+      const ded = Math.min(money(annualWagesV11 * p.south_carolina.standard_deduction_rate), p.south_carolina.standard_deduction_cap_annual)
+        + (employee.sc_allowances as number) * p.south_carolina.allowance_value_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.south_carolina.brackets);
+      scIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let vtIncomeTax = 0;
+    if (employee.state === 'VT') {
+      const status = employee.vt_filing_status as VtFilingStatus;
+      const ded = (employee.vt_allowances as number) * p.vermont.allowance_value_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.vermont.brackets[status]);
+      vtIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let wvIncomeTax = 0;
+    if (employee.state === 'WV') {
+      const status = employee.wv_filing_status as WvFilingStatus;
+      const ded = (employee.wv_exemptions as number) * p.west_virginia.exemption_value_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.west_virginia.brackets[status]);
+      wvIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let ksIncomeTax = 0;
+    if (employee.state === 'KS') {
+      const status = employee.ks_filing_status as KsFilingStatus;
+      const exemptions = employee.ks_exemptions as number;
+      let ded = 0;
+      if (status === 'SINGLE_OR_HOH') {
+        ded = exemptions >= 1 ? p.kansas.single_or_hoh_base_allowance + Math.max(0, exemptions - 1) * p.kansas.exemption_value_annual : 0;
+      } else {
+        if (exemptions === 0) ded = 0;
+        else if (exemptions === 1) ded = p.kansas.married_one_exemption_allowance;
+        else ded = p.kansas.married_two_plus_allowance + (exemptions - 2) * p.kansas.exemption_value_annual;
+      }
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.kansas.brackets[status]);
+      ksIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let idIncomeTax = 0;
+    if (employee.state === 'ID') {
+      const status = employee.id_filing_status as IdFilingStatus;
+      const afterExemptions = annualWagesV11 - (employee.id_exemptions as number) * p.idaho.exemption_value_annual;
+      const taxable = Math.max(0, money(afterExemptions - p.idaho.threshold_annual[status]));
+      idIncomeTax = money((taxable * p.idaho.rate) / periodsPerYear);
+    }
+
+    let nmIncomeTax = 0;
+    if (employee.state === 'NM') {
+      const status = employee.nm_filing_status as NmFilingStatus;
+      const annualTax = bracketLookup(annualWagesV11, p.new_mexico.brackets[status]);
+      nmIncomeTax = money(annualTax / periodsPerYear);
+    }
+
+    let arIncomeTax = 0;
+    if (employee.state === 'AR') {
+      const ded = p.arkansas.standard_deduction_annual;
+      const taxableRaw = Math.max(0, money(annualWagesV11 - ded));
+      if (taxableRaw >= p.arkansas.smoothing_zone_low && taxableRaw < p.arkansas.smoothing_zone_high) {
+        const error = new Error(`AR employee ${employeeId} has annualized taxable income in the $94,701-$97,601 smoothing zone, whose full 28-row bracket table this engine does not have — rejected rather than approximated`);
+        (error as Error & { status?: number }).status = 409;
+        throw error;
+      }
+      const taxable = taxableRaw < 100001 ? Math.floor(taxableRaw / 100) * 100 + 50 : taxableRaw;
+      let row = p.arkansas.brackets[0];
+      for (const candidate of p.arkansas.brackets) {
+        if (taxable >= candidate[0]) row = candidate; else break;
+      }
+      const [atLeast, rate, subtrahend] = taxable >= p.arkansas.smoothing_zone_high
+        ? [p.arkansas.smoothing_zone_high, p.arkansas.top_bracket_at_or_above_smoothing_zone[0], p.arkansas.top_bracket_at_or_above_smoothing_zone[1]]
+        : row;
+      void atLeast;
+      const annualTax = Math.max(0, money(taxable * rate - subtrahend));
+      const credit = (employee.ar_exemptions as number) * p.arkansas.exemption_credit_annual;
+      const annualTaxAfterCredit = Math.max(0, money(annualTax - credit));
+      arIncomeTax = money(annualTaxAfterCredit / periodsPerYear);
+    }
+
+    let hiIncomeTax = 0;
+    if (employee.state === 'HI') {
+      const status = employee.hi_filing_status as HiFilingStatus;
+      const ded = (employee.hi_exemptions as number) * p.hawaii.exemption_value_annual + p.hawaii.lump_sum_allowance_annual;
+      const taxable = Math.max(0, money(annualWagesV11 - ded));
+      const annualTax = bracketLookup(taxable, p.hawaii.brackets[status]);
+      hiIncomeTax = money(annualTax / periodsPerYear);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
@@ -2052,7 +2540,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       orIncomeTax + orStt + orPaidLeaveEmployee +
       inIncomeTax + inCountyTax + ncIncomeTax +
       gaIncomeTax + kyIncomeTax + msIncomeTax + utIncomeTax + mnIncomeTax +
-      mtIncomeTax + ndIncomeTax + okIncomeTax + riIncomeTax + vaIncomeTax
+      mtIncomeTax + ndIncomeTax + okIncomeTax + riIncomeTax + vaIncomeTax +
+      maIncomeTax + moIncomeTax + neIncomeTax + scIncomeTax + vtIncomeTax +
+      wvIncomeTax + ksIncomeTax + idIncomeTax + nmIncomeTax + arIncomeTax + hiIncomeTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
@@ -2111,6 +2601,17 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ok_income_tax: okIncomeTax,
       ri_income_tax: riIncomeTax,
       va_income_tax: vaIncomeTax,
+      ma_income_tax: maIncomeTax,
+      mo_income_tax: moIncomeTax,
+      ne_income_tax: neIncomeTax,
+      sc_income_tax: scIncomeTax,
+      vt_income_tax: vtIncomeTax,
+      wv_income_tax: wvIncomeTax,
+      ks_income_tax: ksIncomeTax,
+      id_income_tax: idIncomeTax,
+      nm_income_tax: nmIncomeTax,
+      ar_income_tax: arIncomeTax,
+      hi_income_tax: hiIncomeTax,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -2171,6 +2672,17 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     ok_income_tax: sum(employees.map(e => e.ok_income_tax)),
     ri_income_tax: sum(employees.map(e => e.ri_income_tax)),
     va_income_tax: sum(employees.map(e => e.va_income_tax)),
+    ma_income_tax: sum(employees.map(e => e.ma_income_tax)),
+    mo_income_tax: sum(employees.map(e => e.mo_income_tax)),
+    ne_income_tax: sum(employees.map(e => e.ne_income_tax)),
+    sc_income_tax: sum(employees.map(e => e.sc_income_tax)),
+    vt_income_tax: sum(employees.map(e => e.vt_income_tax)),
+    wv_income_tax: sum(employees.map(e => e.wv_income_tax)),
+    ks_income_tax: sum(employees.map(e => e.ks_income_tax)),
+    id_income_tax: sum(employees.map(e => e.id_income_tax)),
+    nm_income_tax: sum(employees.map(e => e.nm_income_tax)),
+    ar_income_tax: sum(employees.map(e => e.ar_income_tax)),
+    hi_income_tax: sum(employees.map(e => e.hi_income_tax)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -2222,6 +2734,17 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'OK_INCOME_TAX_PAYABLE', amount: totals.ok_income_tax },
     { side: 'CREDIT', account_role: 'RI_INCOME_TAX_PAYABLE', amount: totals.ri_income_tax },
     { side: 'CREDIT', account_role: 'VA_INCOME_TAX_PAYABLE', amount: totals.va_income_tax },
+    { side: 'CREDIT', account_role: 'MA_INCOME_TAX_PAYABLE', amount: totals.ma_income_tax },
+    { side: 'CREDIT', account_role: 'MO_INCOME_TAX_PAYABLE', amount: totals.mo_income_tax },
+    { side: 'CREDIT', account_role: 'NE_INCOME_TAX_PAYABLE', amount: totals.ne_income_tax },
+    { side: 'CREDIT', account_role: 'SC_INCOME_TAX_PAYABLE', amount: totals.sc_income_tax },
+    { side: 'CREDIT', account_role: 'VT_INCOME_TAX_PAYABLE', amount: totals.vt_income_tax },
+    { side: 'CREDIT', account_role: 'WV_INCOME_TAX_PAYABLE', amount: totals.wv_income_tax },
+    { side: 'CREDIT', account_role: 'KS_INCOME_TAX_PAYABLE', amount: totals.ks_income_tax },
+    { side: 'CREDIT', account_role: 'ID_INCOME_TAX_PAYABLE', amount: totals.id_income_tax },
+    { side: 'CREDIT', account_role: 'NM_INCOME_TAX_PAYABLE', amount: totals.nm_income_tax },
+    { side: 'CREDIT', account_role: 'AR_INCOME_TAX_PAYABLE', amount: totals.ar_income_tax },
+    { side: 'CREDIT', account_role: 'HI_INCOME_TAX_PAYABLE', amount: totals.hi_income_tax },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
@@ -2979,6 +3502,31 @@ export function payrollEngineSelfTestUS() {
   const expectedKy1 = 340.2;
   const expectedMt1 = 451.63;
 
+  // v12: eleven more states, same single-source tier as v11. Four
+  // hand-verified against manual bracket arithmetic (MO, HI, SC, AR); the
+  // rest checked only for journal balance and positive tax output.
+  const v12Case = calculateUsPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [
+      { employee_id: 'MA1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'MA', ma_exemptions: 0 },
+      { employee_id: 'MO1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'MO', mo_filing_status: 'SINGLE_OR_MFS_OR_MARRIED_SPOUSE_WORKS' },
+      { employee_id: 'NE1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'NE', ne_filing_status: 'SINGLE_OR_HOH', ne_allowances: 0 },
+      { employee_id: 'SC1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'SC', sc_allowances: 0 },
+      { employee_id: 'VT1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'VT', vt_filing_status: 'SINGLE_OR_HOH', vt_allowances: 0 },
+      { employee_id: 'WV1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'WV', wv_filing_status: 'ONE_EARNER_ONE_JOB', wv_exemptions: 0 },
+      { employee_id: 'KS1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'KS', ks_filing_status: 'SINGLE_OR_HOH', ks_exemptions: 1 },
+      { employee_id: 'ID1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'ID', id_filing_status: 'SINGLE', id_exemptions: 0 },
+      { employee_id: 'NM1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'NM', nm_filing_status: 'SINGLE' },
+      { employee_id: 'AR1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'AR', ar_exemptions: 0 },
+      { employee_id: 'HI1', gross_pay: 10000, pay_frequency: 'MONTHLY', federal_filing_status: 'SINGLE_MFS', federal_step2_checkbox: false, ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0, state: 'HI', hi_filing_status: 'SINGLE_OR_HOH', hi_exemptions: 0 }
+    ]
+  });
+  const [sMa1, sMo1, sNe1, sSc1, sVt1, sWv1, sKs1, sId1, sNm1, sAr1, sHi1] = v12Case.employees;
+  const expectedMo1 = 391.9;
+  const expectedSc1 = 507.83;
+  const expectedAr1 = 355.73;
+  const expectedHi1 = 640.03;
+
   const ok =
     s1.employee_social_security === expectedSs &&
     s1.employer_social_security === expectedSs &&
@@ -3073,7 +3621,12 @@ export function payrollEngineSelfTestUS() {
     sGa1.ga_income_tax === expectedGa1 && sKy1.ky_income_tax === expectedKy1 && sMt1.mt_income_tax === expectedMt1 &&
     v11Case.controls.employee_count === 10 && v11Case.controls.journal_balanced &&
     sRi1.ri_income_tax > 0 && sMs1.ms_income_tax > 0 && sUt1.ut_income_tax > 0 &&
-    sMn1.mn_income_tax > 0 && sNd1.nd_income_tax > 0 && sOk1.ok_income_tax > 0 && sVa1.va_income_tax > 0;
+    sMn1.mn_income_tax > 0 && sNd1.nd_income_tax > 0 && sOk1.ok_income_tax > 0 && sVa1.va_income_tax > 0 &&
+    sMo1.mo_income_tax === expectedMo1 && sSc1.sc_income_tax === expectedSc1 &&
+    sAr1.ar_income_tax === expectedAr1 && sHi1.hi_income_tax === expectedHi1 &&
+    v12Case.controls.employee_count === 11 && v12Case.controls.journal_balanced &&
+    sMa1.ma_income_tax > 0 && sNe1.ne_income_tax > 0 && sVt1.vt_income_tax > 0 &&
+    sWv1.wv_income_tax > 0 && sKs1.ks_income_tax > 0 && sId1.id_income_tax > 0 && sNm1.nm_income_tax > 0;
 
   return {
     ok,
@@ -3085,7 +3638,7 @@ export function payrollEngineSelfTestUS() {
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
-    inWorkedExample, ncWorkedExample, v11Case,
+    inWorkedExample, ncWorkedExample, v11Case, v12Case,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
