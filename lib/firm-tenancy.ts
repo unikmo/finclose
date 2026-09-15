@@ -156,6 +156,28 @@ export async function firmMembershipFor(firmId: string, userId: string) {
   return { ...value, role: cleanFirmRole(value.role) } as Record<string, unknown> & { role: FirmRole };
 }
 
+// Lists the ACTIVE firms a user belongs to, with their role in each --
+// the entry point a "which firm am I in" UI (e.g. the portfolio
+// dashboard's firm picker) needs before it can call anything else in
+// this file. Reads the finclose_user_firms/{userId} mirror index that
+// createFirm/addFirmMember/removeFirmMember already maintain.
+export async function listFirmsForUser(userId: string) {
+  const snap = await realtimeDatabase().ref('finclose_user_firms/' + userId).once('value');
+  const val = (snap.val() || {}) as Record<string, { firm_id: string; role: string; status: string }>;
+  const activeFirmIds = Object.values(val).filter(m => m.status === 'ACTIVE').map(m => m.firm_id);
+  const db = realtimeDatabase();
+  const results: Array<{ firm_id: string; name: unknown; role: FirmRole }> = [];
+  for (const firmId of activeFirmIds) {
+    const membership = await firmMembershipFor(firmId, userId);
+    if (!membership) continue; // mirror index and membership record disagree -- trust the membership record, skip
+    const firmSnap = await db.ref('finclose_firms/' + firmId).once('value');
+    if (!firmSnap.exists()) continue;
+    const firm = firmSnap.val() as Record<string, unknown>;
+    results.push({ firm_id: firmId, name: firm.name, role: membership.role });
+  }
+  return results;
+}
+
 export async function requireFirmRole(firmId: string, user: ManagedUser, minimum: FirmRole = 'REVIEWER') {
   const membership = await firmMembershipFor(firmId, user.user_id);
   if (!membership) throw httpError('you do not have access to this firm', 403);

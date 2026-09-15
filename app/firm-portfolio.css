@@ -1,0 +1,52 @@
+/* Firm Workspace portfolio dashboard — visually aligned with the FinClose
+   home shell (same ink/brass palette) rather than introducing a new look. */
+.fp-shell{min-height:100vh;color:var(--fc-parchment);background:radial-gradient(circle at 88% -8%,rgba(141,183,227,.18),transparent 32rem),radial-gradient(circle at 12% 18%,rgba(214,173,87,.07),transparent 24rem),var(--fc-ink);padding:0 32px 48px}
+.fp-nav{width:min(1180px,100%);height:86px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(141,183,227,.18)}
+.fp-brand{display:flex;align-items:center;gap:13px;color:var(--fc-parchment);font-size:16px;font-weight:700}
+.fp-brand em{font-style:normal;color:var(--fc-brass);font-weight:750}
+.fp-logo{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:var(--fc-brass);color:var(--fc-ink);font-size:15px;font-weight:900}
+.fp-firm-select{min-height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(141,183,227,.27);background:rgba(255,255,255,.02);color:var(--fc-parchment);font-size:12px;font-weight:700}
+.fp-loading,.fp-note{width:min(1180px,100%);margin:24px auto;color:var(--fc-parchment-dim);font-size:13px}
+.fp-empty{width:min(560px,100%);margin:80px auto;text-align:center;padding:36px 28px;border:1px solid var(--fc-line);border-radius:20px;background:linear-gradient(145deg,rgba(23,62,107,.98),rgba(18,52,90,.96))}
+.fp-empty h1{font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif;font-size:26px;font-weight:600;margin:0 0 10px}
+.fp-empty p{color:var(--fc-parchment-dim);font-size:13px;line-height:1.6;margin:0 0 18px}
+.fp-empty-inline{margin:24px auto;padding:24px}
+.fp-link{color:var(--fc-brass);font-weight:750;font-size:13px}
+.fp-body{width:min(1180px,100%);margin:0 auto;padding-top:32px}
+.fp-title-row{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.fp-title-row h1{font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif;font-size:32px;font-weight:600;margin:0}
+.fp-role-pill{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:5px 11px;border-radius:999px;border:1px solid rgba(141,183,227,.3);color:var(--fc-parchment-dim)}
+.fp-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:28px}
+.fp-summary-item{padding:16px 14px;border-radius:16px;border:1px solid var(--fc-line);background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:4px}
+.fp-summary-item strong{font-size:26px;font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif}
+.fp-summary-item span{font-size:11px;color:var(--fc-parchment-dim);font-weight:700}
+.fp-summary-green strong{color:#3ecf8e}
+.fp-summary-yellow strong{color:var(--fc-brass)}
+.fp-summary-red strong{color:#e06767}
+.fp-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--fc-line);border-radius:16px;overflow:hidden}
+.fp-table thead th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fc-parchment-dim);padding:12px 16px;background:rgba(7,24,46,.4);border-bottom:1px solid var(--fc-line)}
+.fp-table tbody td{padding:13px 16px;font-size:13px;border-bottom:1px solid rgba(141,183,227,.1)}
+.fp-row{cursor:pointer;transition:background .15s ease}
+.fp-row:hover{background:rgba(255,255,255,.03)}
+.fp-row-red{background:rgba(224,103,103,.06)}
+.fp-client-cell{font-weight:700;display:flex;align-items:baseline;gap:8px}
+.fp-country{font-size:10px;color:var(--fc-parchment-dim);font-weight:700}
+.fp-dot{display:inline-block;font-size:14px;line-height:1}
+.fp-dot-green{color:#3ecf8e}
+.fp-dot-yellow{color:var(--fc-brass)}
+.fp-dot-red{color:#e06767}
+.fp-dot-na{color:rgba(184,199,218,.35);font-size:12px}
+.fp-status-pill{font-size:11px;font-weight:750;padding:5px 11px;border-radius:999px}
+.fp-status-green{background:rgba(62,207,142,.15);color:#3ecf8e}
+.fp-status-yellow{background:rgba(214,173,87,.18);color:var(--fc-brass)}
+.fp-status-red{background:rgba(224,103,103,.18);color:#e06767}
+.fp-status-not_started{background:rgba(184,199,218,.12);color:var(--fc-parchment-dim)}
+.fp-drill-row td{background:rgba(7,24,46,.3);padding:14px 16px}
+.fp-drill-empty{margin:0;color:var(--fc-parchment-dim);font-size:12px}
+.fp-drill-list{margin:0;padding-left:18px;color:var(--fc-parchment-dim);font-size:12px;line-height:1.8;font-family:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace}
+@media(max-width:760px){
+  .fp-shell{padding:0 16px 32px}
+  .fp-nav{height:70px}
+  .fp-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .fp-table{display:block;overflow-x:auto}
+}

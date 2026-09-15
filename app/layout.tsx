@@ -4,6 +4,7 @@ import './service-start.css';
 import './account-first.css';
 import './payroll-onboarding.css';
 import './payroll-v028-polish.css';
+import './firm-portfolio.css';
 
 export const metadata: Metadata = {
   title: 'FinClose — Bookkeeping, Payroll & Close Support',
