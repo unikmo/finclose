@@ -197,7 +197,17 @@ export const PAYROLL_RULE_PACK_CA = {
   // ceiling per employee; this engine does the period-proration/YTD-
   // capping/journal posting. Both optional, default "not computed" —
   // exact backward compatibility for every pre-v3 caller.
-  id: 'CA-2026-FEDERAL-PLUS-12-NONQC-JURISDICTIONS-DRAFT-V3',
+  //
+  // v4 (2026-09-15, found by the weekly policy-change monitor's first
+  // manual run): CPP1's BASE rate is cut from 4.95% to 4.75% (each side)
+  // effective pay dates on/after 2027-01-01, under Bill C-30 (the Spring
+  // Economic Update 2026 Implementation Act) -- Royal Assent 2026-06-18,
+  // corroborated by OSFI's Chief Actuary's 33rd Actuarial Report
+  // certifying the cut. Selected by pay_date, not the date the payroll is
+  // actually run, so back-dated/late-processed 2026 runs still use the
+  // pre-cut rate. Only the base portion moves; CPP1's "additional"
+  // (enhanced) 1% piece and CPP2 are both unaffected by this change.
+  id: 'CA-2026-FEDERAL-PLUS-12-NONQC-JURISDICTIONS-DRAFT-V4',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'CAD',
   federal: {
@@ -225,8 +235,17 @@ export const PAYROLL_RULE_PACK_CA = {
     ybe_annual: 3500, // basic exemption
     ympe_annual: 74600, // year's maximum pensionable earnings (CPP1 ceiling / CPP2 floor)
     yampe_annual: 85000, // year's additional maximum pensionable earnings (CPP2 ceiling)
-    rate: 0.0595, // CPP1 total, employee and employer each
-    base_rate: 0.0495, // CPP1 "base" portion -- generates the K2 federal/provincial tax CREDIT
+    // v3: the CPP1 BASE rate is cut from 4.95% to 4.75% (employee and
+    // employer each) effective 2027-01-01, under Bill C-30 (the Spring
+    // Economic Update 2026 Implementation Act), which received Royal
+    // Assent 2026-06-18 -- already enacted law, not a proposal, confirmed
+    // via the federal government's own announcement and corroborated by
+    // OSFI's Chief Actuary's 33rd Actuarial Report (2026-05-28) certifying
+    // the base CPP can support the cut. Selected by pay_date below; the
+    // "additional"/enhanced 1% portion (CPP1's F5A-deducted piece) and
+    // CPP2 are both UNCHANGED by this cut -- only the base rate moves.
+    base_rate_before_2027: 0.0495, // CPP1 "base" portion -- generates the K2 federal/provincial tax CREDIT
+    base_rate_from_2027: 0.0475, // Bill C-30 cut, effective pay dates on/after 2027-01-01
     additional_rate: 0.0100, // CPP1 "first additional" (enhanced) portion -- DEDUCTED from taxable income A (the F5A adjustment), not credited
     cpp2_rate: 0.04 // CPP2, employee and employer each
   },
@@ -306,11 +325,13 @@ export const PAYROLL_RULE_PACK_CA = {
     { authority: 'Canada Revenue Agency', instrument: 'T4127 122nd Edition, effective January 1, 2026 (BPAF/BPAMB/BPAYT taper endpoints)', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas/t4127-jan/t4127-jan-payroll-deductions-formulas-computer-programs.html' },
     { authority: 'BC Ministry of Finance', instrument: 'BC Option 1 Jul-Dec 2026 reduction S exact boundary values', url: 'https://www2.gov.bc.ca/gov/content/taxes/employer-health-tax/employer-health-tax-overview' },
     { authority: 'User-supplied reference', instrument: '"Canada 2026 Payroll Implementation Reference" (as of 14 Sep 2026) — the source document this pack was built from; parameters not independently re-fetched from canada.ca directly this pass.', url: 'file: Canada_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' },
-    { authority: 'User-supplied CRA T4127 golden-fixture pack', instrument: '"Canada 2026 Payroll Golden Fixtures" (JSON, verified through 2026-09-14) — 4 independent non-Quebec worked examples (AB/BC/NT/NU) with full CPP/EI/federal/provincial traces, used to catch and root-cause the v2 CPP/federal/provincial fix; all 4 fixtures reproduced to the exact cent except AB provincial (off by $0.01, attributed to the unmodeled K5P credit).', url: 'file: Canada_2026_Payroll_QA_Golden_Pack (user-supplied, 2026-09-15)' }
+    { authority: 'User-supplied CRA T4127 golden-fixture pack', instrument: '"Canada 2026 Payroll Golden Fixtures" (JSON, verified through 2026-09-14) — 4 independent non-Quebec worked examples (AB/BC/NT/NU) with full CPP/EI/federal/provincial traces, used to catch and root-cause the v2 CPP/federal/provincial fix; all 4 fixtures reproduced to the exact cent except AB provincial (off by $0.01, attributed to the unmodeled K5P credit).', url: 'file: Canada_2026_Payroll_QA_Golden_Pack (user-supplied, 2026-09-15)' },
+    { authority: 'Government of Canada / Parliament of Canada', instrument: 'Bill C-30 (Spring Economic Update 2026 Implementation Act) — Royal Assent 2026-06-18, cutting the CPP1 base contribution rate from 4.95% to 4.75% (each side) effective 2027-01-01. Corroborated by OSFI Chief Actuary Assia Billig\'s 33rd Actuarial Report supplementing the Revised 32nd Actuarial Report on the CPP (submitted 2026-05-28), certifying the base plan can support the cut.', url: 'https://www.osfi-bsif.gc.ca/en/oca/actuarial-reports/33rd-actuarial-report-supplementing-revised-32nd-actuarial-report-canada-pension-plan' }
   ],
   limitations: [
     'v2. QUEBEC IS ENTIRELY REJECTED, not approximated — province_of_employment "QC" throws an explicit error. Quebec requires a wholly separate Revenu Quebec formula engine (TP-1015.F-V) for provincial tax, QPP/QPP2, QPIP, and reduced EI, none of which is implemented; the source document itself insists on this separation.',
     'v2 FIX (real bug found via a user-supplied CRA T4127 golden-fixture pack, 2026-09-15): CPP\'s $3,500 annual exemption is now correctly applied as a PERIOD-PRORATED subtraction every pay period, not front-loaded via YTD banding (the v1 method, which badly understated CPP for any payroll starting mid-year from YTD=0). Federal AND provincial income tax now implement the BPA (K1), CPP-base (K2), EI (K3) credits at the jurisdiction\'s own lowest rate, plus a federal-only Canada Employment Amount credit (K4) and a deduction of CPP\'s enhanced/"additional" 1% portion from taxable income (F5A) — reconstructed from the fixtures\' own traces and verified to the exact cent against 4 independent CRA fixtures (AB/BC/NT/NU). Still an annualize-and-divide approximation of T4127 Option 1, not the true cumulative-averaging Option 2.',
+    'v4 (2026-09-15, found by the weekly policy-change monitor\'s first manual run): CPP1\'s base rate is cut from 4.95% to 4.75% (each side) for pay dates on/after 2027-01-01, per Bill C-30 (enacted, Royal Assent 2026-06-18). The engine selects the correct rate from pay_date automatically -- callers do not need to pass anything new. Only the base portion (which generates the K2 credit) changes; the "additional" enhanced 1% portion (F5A-deducted) and CPP2 are unaffected. This was NOT caught by any golden fixture (all 4 CRA fixtures this pack was verified against are dated July 2026, before the cut takes effect) -- it was caught by an explicit web search for confirmed/enacted upcoming rate changes, not by fixture testing, which is exactly the gap the weekly policy monitor exists to narrow.',
     'Alberta\'s own additional K5P supplemental credit (((K1P+K2P)-$4,896) x 25%) remains UNMODELED — it produced a $0.01 residual on the one AB fixture available this pass, and may matter more at other income levels. Every other province\'s own possible K2P/K3P-equivalent variations (if any differ from the generic "credit at that province\'s lowest rate" pattern used here) are also unconfirmed beyond the BC/NT/NU fixtures that did match exactly.',
     'CPP1, CPP2, and EI are all computed on gross pay treated as fully pensionable and fully insurable, sharing one YTD accumulator (ytd_earnings_before) — no pay-component-level taxability/pensionability/insurability classification, which the source document explicitly warns against doing. CPT30 (age 65-69 stop-CPP election), age 18/70 proration, and the EI Premium Reduction Program (employer-specific reduced multiple, standard is 1.4x) are not modeled — standard ages/rates are assumed for every employee.',
     'Ontario surtax and Ontario Health Premium (both embedded in provincial withholding per T4127 Step 5) are NOT implemented — Ontario tax for high earners will be understated. Manitoba\'s labour-sponsored-fund credit and every other province\'s "formula-specific difference" (Nova Scotia\'s labour-sponsored fund credit, etc.) are also not implemented.',
@@ -440,7 +461,17 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     const periodExemption = money(p.cpp.ybe_annual / periodsPerYear);
     const pensionableThisPeriod = Math.max(0, Math.min(grossPay, p.cpp.ympe_annual - ytdBefore));
     const cpp1ContributoryEarnings = Math.max(0, money(pensionableThisPeriod - periodExemption));
-    const employeeCpp1 = money(cpp1ContributoryEarnings * p.cpp.rate);
+    // Bill C-30 base-rate cut (see the cpp rule-pack comment above):
+    // selected by pay_date, not calendar date of the run, so a payroll
+    // whose pay_date is still in 2026 uses the pre-cut rate even if
+    // processed in early 2027, and vice versa.
+    const cppBaseRate = input.pay_date >= '2027-01-01' ? p.cpp.base_rate_from_2027 : p.cpp.base_rate_before_2027;
+    // NOT money() -- that helper rounds to cents and would corrupt a
+    // fractional rate (0.0575 -> 0.06). Rates are combined with plain
+    // addition; both operands are exact-enough decimal literals that
+    // floating-point drift isn't a real concern at this magnitude.
+    const cppTotalRate = cppBaseRate + p.cpp.additional_rate;
+    const employeeCpp1 = money(cpp1ContributoryEarnings * cppTotalRate);
     const employerCpp1 = employeeCpp1;
     const employeeCpp2 = bandedContribution(ytdBefore, grossPay, p.cpp.ympe_annual, p.cpp.yampe_annual, p.cpp.cpp2_rate);
     const employerCpp2 = employeeCpp2;
@@ -459,7 +490,7 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     // approximation of Option 1, not true cumulative Option 2 -- see
     // limitations.
     const annualGross = money(grossPay * periodsPerYear);
-    const cpp1BaseAnnual = money(cpp1ContributoryEarnings * p.cpp.base_rate * periodsPerYear);
+    const cpp1BaseAnnual = money(cpp1ContributoryEarnings * cppBaseRate * periodsPerYear);
     const cpp1AdditionalAnnual = money(cpp1ContributoryEarnings * p.cpp.additional_rate * periodsPerYear);
     const annualTaxableIncomeA = Math.max(0, money(annualGross - cpp1AdditionalAnnual));
     const federalGross = federalTaxBeforeCredit(annualTaxableIncomeA, p.federal.brackets);
@@ -663,6 +694,24 @@ export function payrollEngineSelfTestCA() {
   });
   const eNoWcb = noWcb.employees[0];
 
+  // v4 test: Bill C-30 CPP base-rate cut. Same AB $5,000/month case as
+  // the golden fixture above, but pay_date in 2027 -> base rate 4.75%
+  // instead of 4.95%. periodExemption = 3500/12 = 291.67; contributory
+  // earnings = 5000-291.67 = 4708.33; total rate = 4.75%+1.00% = 5.75%;
+  // employeeCpp1 = 4708.33*0.0575 = 270.73 (vs 280.15 at the pre-2027 rate).
+  const cppCut2027 = calculateCaPayroll({
+    pay_period_start: '2027-01-01', pay_period_end: '2027-01-31', pay_date: '2027-01-31',
+    employees: [{ employee_id: 'AB2027', gross_pay: 5000, pay_frequency: 'MONTHLY', province_of_employment: 'AB', ytd_earnings_before: 0 }]
+  });
+  const eCppCut = cppCut2027.employees[0];
+  // Same case but pay_date still in 2026 -> must be unaffected (uses the
+  // pre-cut 4.95% base rate, matching the eAb fixture exactly).
+  const cppPreCut2026 = calculateCaPayroll({
+    pay_period_start: '2026-12-01', pay_period_end: '2026-12-31', pay_date: '2026-12-31',
+    employees: [{ employee_id: 'AB2026', gross_pay: 5000, pay_frequency: 'MONTHLY', province_of_employment: 'AB', ytd_earnings_before: 0 }]
+  });
+  const eCppPreCut = cppPreCut2026.employees[0];
+
   const ok =
     eAb.federal_income_tax === 444.86 && eAb.employee_cpp1 === 280.15 && eAb.employee_ei === 81.5 &&
     eAb.employer_cpp1 === 280.15 && eAb.employer_ei === 114.1 &&
@@ -676,7 +725,9 @@ export function payrollEngineSelfTestCA() {
     bc.controls.journal_balanced &&
     rejected &&
     eWcb.employer_wcb === 60 && eWcb.ytd_wcb_assessable_earnings_after === 110000 && wcb.controls.journal_balanced &&
-    eNoWcb.employer_wcb === 0 && noWcb.controls.journal_balanced;
+    eNoWcb.employer_wcb === 0 && noWcb.controls.journal_balanced &&
+    eCppCut.employee_cpp1 === 270.73 && eCppCut.employer_cpp1 === 270.73 && cppCut2027.controls.journal_balanced &&
+    eCppPreCut.employee_cpp1 === 280.15 && cppPreCut2026.controls.journal_balanced;
 
-  return { ok, ab, bc, wcb };
+  return { ok, ab, bc, wcb, cppCut2027, cppPreCut2026 };
 }

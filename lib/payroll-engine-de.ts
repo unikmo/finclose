@@ -170,7 +170,14 @@ export type DePayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_DE = {
-  id: 'DE-2026-GRUNDTARIF-KLASSE-I-DRAFT-V4',
+  // v5 (2026-09-15, found by the weekly policy-change monitor's first
+  // manual run): 2027-01-01+ pay dates are now explicitly REJECTED rather
+  // than silently computed on stale 2026 KV/PV ceiling figures -- see the
+  // fail-closed check and its comment in calculateGermanyPayroll for the
+  // full reasoning (an enacted law raises the 2027 ceiling by more than
+  // normal indexation, but the exact final euro figure isn't officially
+  // published yet).
+  id: 'DE-2026-GRUNDTARIF-KLASSE-I-DRAFT-V5',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'EUR',
   income_tax: {
@@ -229,6 +236,7 @@ export const PAYROLL_RULE_PACK_DE = {
     'Long-term care insurance uses the standard (non-Sachsen) employer/employee split. Sachsen’s different split is not implemented; Sachsen employees are rejected.',
     'The statutory health-insurance employee/employer split uses a published national average additional contribution (Zusatzbeitrag), not the employee’s actual fund rate. (The private-insurance employer subsidy formula does not use the Zusatzbeitrag average at all, per statute — validated against real payslips.)',
     'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official BMF Programmablaufplan, Sozialversicherungs-Rechengrößenverordnung and SolZG before this pack is marked VERIFIED_BASIC_RULES.',
+    'v5 (2026-09-15): pay dates on/after 2027-01-01 are REJECTED with an explicit error rather than silently computed on the 2026 KV/PV contribution ceiling. The GKV-Beitragssatzstabilisierungsgesetz (Bundesgesetzblatt, published 2026-07-29) enacts an extra increase to that ceiling for 2027 beyond the normal annual wage-indexed adjustment, and separately raises the long-term-care (Pflegeversicherung) ceiling to match the health-insurance ceiling for the first time (this file currently assumes they are always equal, via one shared health_ceiling_annual figure — that assumption itself needs re-confirming once the real 2027 ceilings are known, not just the euro value). Secondary sources estimate roughly EUR 72,450/year, but every one explicitly warns the final number isn\'t official yet and isn\'t a simple sum of the regular indexation and the special increase. Reconfirm against the actual Sozialversicherungs-Rechengrößenverordnung for 2027 (typically published autumn/winter) before removing this rejection.',
     'This engine prepares payroll and accounting outputs only. It does not submit tax or social-insurance filings and does not initiate payments.'
   ]
 };
@@ -307,6 +315,29 @@ export function calculateGermanyPayroll(input: DePayrollRunInput): DePayrollRunR
   if (!Array.isArray(input.employees) || input.employees.length === 0) {
     const error = new Error('at least one employee is required');
     (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  // Found by the weekly policy-change monitor's first manual run
+  // (2026-09-15): the GKV-Beitragssatzstabilisierungsgesetz (published in
+  // the Bundesgesetzblatt 2026-07-29) enacts an EXTRA increase to the
+  // KV/PV contribution ceiling for 2027 on top of the regular annual
+  // wage-indexed adjustment, plus harmonizes the PV ceiling up to the KV
+  // ceiling (they currently share one figure in this file, health_
+  // ceiling_annual, but from 2027 that assumption needs re-confirming
+  // too). Multiple secondary sources converge on roughly EUR 72,450/yr
+  // for KV/PV, but EVERY one explicitly cautions the regular indexation
+  // and the special increase are NOT simply additive and the real 2027
+  // figure is only final once officially published (expected via the
+  // Sozialversicherungs-Rechengrößenverordnung, typically autumn/winter).
+  // Rather than ship an unconfirmed number as if it were current law (the
+  // exact mistake this monitor exists to catch), 2027+ pay dates are
+  // rejected outright here until the real ceilings are confirmed and
+  // hard-coded — the same fail-closed pattern already used elsewhere in
+  // this codebase for a known-but-not-yet-quantified future change (e.g.
+  // Rwanda's pension rate schedule in payroll-engine-rw.ts).
+  if (input.pay_date >= '2027-01-01') {
+    const error = new Error('Germany payroll for pay dates on/after 2027-01-01 is not supported yet: the GKV-Beitragssatzstabilisierungsgesetz (Bundesgesetzblatt 2026-07-29) enacts an extra increase to the 2027 KV/PV contribution ceiling beyond regular indexation, and the exact final euro figure has not yet been officially published — this engine still uses the 2026 ceiling (EUR 69,750/yr) and running 2027 payroll on it would silently understate KV/PV contributions once the real, higher ceiling takes effect. Reconfirm against the Sozialversicherungs-Rechengrößenverordnung for 2027 and update social_insurance.health_ceiling_annual before enabling 2027 pay dates.');
+    (error as Error & { status?: number }).status = 409;
     throw error;
   }
 
@@ -691,6 +722,23 @@ export function payrollEngineSelfTestDE() {
   const expectedPrivateHealthSubsidy = money((4987.5 * sv.health_general_rate_total) / 2); // = 364.09, same as the real 2023 figure
   const expectedPrivateCareSubsidy = money((4987.5 * sv.care_rate_total) / 2); // = 89.78 at 2026's 3.6% (real 2023 figure was 84.79 at 3.4%)
 
+  // v5 test: a 2027 pay date must be rejected outright (unconfirmed KV/PV
+  // ceiling -- see the fail-closed check in calculateGermanyPayroll), while
+  // a 2026-12-31 pay date must still work normally.
+  let rejected2027 = false;
+  try {
+    calculateGermanyPayroll({
+      pay_period_start: '2027-01-01', pay_period_end: '2027-01-31', pay_date: '2027-01-31',
+      employees: [{ employee_id: 'E2027', taxable_gross_pay: 4000, sv_gross_pay: 4000, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: false, ytd_sv_gross_before: 0, insurance_type: 'STATUTORY' }]
+    });
+  } catch {
+    rejected2027 = true;
+  }
+  const stillWorks2026 = calculateGermanyPayroll({
+    pay_period_start: '2026-12-01', pay_period_end: '2026-12-31', pay_date: '2026-12-31',
+    employees: [{ employee_id: 'E2026', taxable_gross_pay: 4000, sv_gross_pay: 4000, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: false, ytd_sv_gross_before: 0, insurance_type: 'STATUTORY' }]
+  });
+
   return {
     ok:
       e.employee_pension_insurance === expectedPension &&
@@ -729,7 +777,9 @@ export function payrollEngineSelfTestDE() {
       pv.employer_care_insurance === expectedPrivateCareSubsidy &&
       pv.employee_health_insurance === money(900 - expectedPrivateHealthSubsidy) &&
       pv.employee_care_insurance === money(200 - expectedPrivateCareSubsidy) &&
-      privateCase.controls.journal_balanced,
+      privateCase.controls.journal_balanced &&
+      rejected2027 &&
+      stillWorks2026.controls.journal_balanced,
     sample,
     dualBasisCase,
     pensionCeilingCase,
