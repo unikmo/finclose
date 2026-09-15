@@ -7,27 +7,30 @@
 // rules-based, explainable reason-code list behind every color -- never a
 // manually-set decoration field.
 //
-// SCOPE OF THIS PASS: the color-derivation rules (deriveCloseStatus) are
-// real, pure, and fully tested below. The firm-portfolio ASSEMBLY
-// (combineFirmPortfolio) is also real and wired to the already-built
-// lib/firm-tenancy.ts + lib/tenancy.ts. What is NOT wired yet: pulling
-// each client company's actual latest close record live. That requires
-// resolving company_id -> its service deployment(s) -> deployment.
-// latest_monthly_close_id -> finclose_monthly_closes/{id}, and there is
-// currently no company_id -> deployment_id index in this codebase
-// (lib/service-deployments.ts deployments are only fetchable by their own
-// id). Adding that index means writing to the live deployment-creation
-// path (startServiceDeployment / linkDeploymentCompany), which this pass
-// deliberately did not touch without a dedicated review -- FinClose is a
-// LIVE controlled PILOT, and guessing at a change to a write path that
-// active real companies depend on is a materially different risk than
-// adding a new read-only aggregation layer. `resolveCompanyCloseStatus`
-// below is therefore left as an injected function (a real caller supplies
-// it once that index exists) rather than a hard dependency on a lookup
-// this file would otherwise have to invent unsafely.
+// UPDATE (same day): the company_id -> deployment_id gap this file
+// originally flagged is now closed. lib/onboarding-history.ts's
+// linkDeploymentCompany() writes a small, purely additive reverse index
+// (finclose_company_deployments/{companyId}/{deploymentId}) alongside its
+// existing fields in the same atomic update -- no existing field, record
+// shape, or control flow changed. lib/service-deployments.ts exposes it
+// as listDeploymentsForCompany(). resolveCompanyCloseStatusLive() below
+// uses that index to implement a REAL CompanyCloseStatusResolver: for
+// each of a company's linked deployments, follow deployment.
+// latest_monthly_close_id -> finclose_monthly_closes/{id} (a record
+// finance-cycle-engine.ts's evaluateMonthlyClose() already produces and
+// persists), and return the most recently updated one. A company that
+// existed before this index was added returns null (NOT_STARTED) until
+// it next links or re-links a service -- a real, disclosed limitation,
+// not a silent gap.
+//
+// deriveCloseStatus and combineFirmPortfolio remain exactly as designed
+// below: pure rules over whatever close record they're handed, agnostic
+// to where that record came from.
 
+import { realtimeDatabase } from './finclose-backend';
 import { listOrganizationCompanies } from './tenancy';
 import { listFirmClientOrganizations } from './firm-tenancy';
+import { listDeploymentsForCompany, getServiceDeployment } from './service-deployments';
 
 export type PortfolioStatusColor = 'GREEN' | 'YELLOW' | 'RED' | 'NOT_STARTED';
 
@@ -98,9 +101,42 @@ export type PortfolioRow = {
 
 // Injected: given a company_id (and its service_scope, for convenience),
 // return that company's latest close record (or null if none exists
-// yet -> NOT_STARTED). See the file header for why this is injected
-// rather than hard-wired to a live lookup in this pass.
+// yet -> NOT_STARTED). Kept as an injected function rather than a hard
+// import inside combineFirmPortfolio so the pure assembly logic stays
+// testable without touching Firebase -- resolveCompanyCloseStatusLive
+// below is the real implementation a caller supplies in production.
 export type CompanyCloseStatusResolver = (companyId: string, serviceScope: unknown) => Promise<{ exceptions?: string[]; control_status?: string; close_status?: string } | null>;
+
+// Real implementation of CompanyCloseStatusResolver. A company can have
+// more than one linked deployment (e.g. a service was re-registered);
+// this checks every one of them and returns the close record with the
+// most recent updated_at, since that is the one most likely to reflect
+// the company's current close cycle. Returns null (-> NOT_STARTED) if
+// the company has no linked deployment yet, or none of its deployments
+// has produced a close.
+export const resolveCompanyCloseStatusLive: CompanyCloseStatusResolver = async (companyId) => {
+  const deploymentRefs = await listDeploymentsForCompany(companyId);
+  if (!deploymentRefs.length) return null;
+
+  let best: { exceptions?: string[]; control_status?: string; close_status?: string; updated_at?: number } | null = null;
+
+  for (const ref of deploymentRefs) {
+    let deployment: Record<string, unknown>;
+    try {
+      deployment = await getServiceDeployment(ref.deployment_id) as Record<string, unknown>;
+    } catch {
+      continue; // a stale index entry pointing at a deleted deployment should not break the whole sweep
+    }
+    const closeId = String(deployment.latest_monthly_close_id || '');
+    if (!closeId) continue;
+    const closeSnap = await realtimeDatabase().ref(`finclose_monthly_closes/${closeId}`).once('value');
+    if (!closeSnap.exists()) continue;
+    const close = closeSnap.val() as { exceptions?: string[]; control_status?: string; close_status?: string; updated_at?: number };
+    if (!best || Number(close.updated_at || 0) > Number(best.updated_at || 0)) best = close;
+  }
+
+  return best;
+};
 
 export async function combineFirmPortfolio(firmId: string, resolveCompanyCloseStatus: CompanyCloseStatusResolver): Promise<PortfolioRow[]> {
   const delegatedClients = await listFirmClientOrganizations(firmId);

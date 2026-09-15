@@ -48,6 +48,13 @@ export async function linkDeploymentCompany(deploymentId: string, companyId: str
     [`finclose_service_deployments/${deploymentId}/initialization_status`]: 'INITIALIZED_COMPANY_LINKED',
     [`finclose_service_deployments/${deploymentId}/status`]: 'INITIALIZED_HISTORY_REQUIRED',
     [`finclose_service_deployments/${deploymentId}/updated_at`]: now,
+    // Purely additive reverse index (company_id -> its deployment ids), so
+    // a company's deployments can be resolved without scanning every
+    // deployment. Added for the Firm Workspace portfolio-status engine
+    // (lib/portfolio-status.ts) -- see listDeploymentsForCompany below.
+    // Writes alongside the existing fields in this same atomic update;
+    // does not change any existing field, record shape, or control flow.
+    [`finclose_company_deployments/${companyId}/${deploymentId}`]: { deployment_id: deploymentId, service: deployment.service || null, linked_at: now },
     [`finclose_audit_events/${auditKey}`]: {
       event: 'SERVICE_INITIALIZED_COMPANY_LINKED',
       organization_id: deployment.organization_id || null,
