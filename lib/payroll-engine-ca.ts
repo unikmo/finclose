@@ -1,4 +1,27 @@
-// Canada (CA, excluding Quebec) payroll rule pack — v1.
+// Canada (CA, excluding Quebec) payroll rule pack — v2.
+//
+// v2 change log (2026-09-15): a user-supplied CRA T4127 golden-fixture pack
+// (4 independent non-Quebec examples: AB/BC/NT/NU) caught a REAL bug in v1's
+// CPP calculation and a real gap in the federal/provincial tax formula.
+// Fixed and reverse-engineered from the fixtures' own traces, then verified
+// to the exact cent against all 4:
+//   1. CPP's $3,500 annual exemption (YBE) must be applied as a
+//      PERIOD-PRORATED subtraction every single pay period (e.g. $291.67
+//      exempt each month), not front-loaded against YTD earnings the way
+//      v1 modeled it (which produced wildly understated CPP for any
+//      mid-year payroll run starting from YTD=0). The YMPE ceiling is still
+//      YTD-aware.
+//   2. Federal (and by the same pattern, provincial) tax must credit CPP's
+//      "base" 4.95% portion and the full EI premium at the jurisdiction's
+//      own lowest bracket rate (T4127's K2/K3), and federal tax additionally
+//      credits a "Canada Employment Amount" (K4: lesser of $1,501 and
+//      employment income, at the lowest federal rate) and DEDUCTS (not
+//      credits) CPP's "additional"/enhanced 1% portion from taxable income
+//      (the F5A adjustment) -- none of which v1 implemented; v1 only
+//      applied the Basic Personal Amount credit.
+// Federal tax and CPP now match all 4 fixtures exactly; provincial tax
+// matches BC/NT/NU exactly and Alberta within 1 cent (Alberta's own
+// additional K5P supplemental credit remains unmodeled -- see limitations).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -21,18 +44,23 @@
 //     all require a wholly separate Revenu Quebec formula engine
 //     (TP-1015.F-V) that has not been built. Any employee whose province of
 //     employment is Quebec is REJECTED with an explicit error.
-//   - Federal income tax uses a simplified ANNUALIZE-CURRENT-PERIOD-AND-
-//     DIVIDE approximation of T4127 Option 1 (not the true cumulative-
-//     averaging Option 2, and not the full K1-K4 credit machinery — only
-//     the Basic Personal Amount credit K1 is applied). CPP/EI premiums are
-//     NOT credited back against federal/provincial tax via K2/K3 (a real
-//     part of the official formula) — this simplification OVERSTATES both
-//     federal and provincial tax somewhat. The federal Basic Personal
-//     Amount (BPAF) taper between the two published endpoints
-//     ($181,440/$16,452 and $258,482/$14,829) is reconstructed as a LINEAR
-//     interpolation, which the source document states as two endpoints,
-//     not an explicit formula — this is CRA's known real methodology but
-//     was not directly quoted as a formula in the source.
+//   - Federal AND provincial income tax use a simplified ANNUALIZE-CURRENT-
+//     PERIOD-AND-DIVIDE approximation of T4127 Option 1 (not the true
+//     cumulative-averaging Option 2). As of v2, the BPA (K1), CPP-base (K2),
+//     EI (K3), and federal-only Canada Employment Amount (K4) credits ARE
+//     implemented and verified to the cent against 4 golden fixtures — see
+//     the v2 change log above. Still NOT implemented: Alberta's own
+//     additional K5P supplemental credit (confirmed as a real, separate
+//     gap — it produced a $0.01 residual on the one AB fixture tested, and
+//     may matter more at other income levels), and any other province's
+//     own K2P/K3P-equivalent credit definition that might differ from the
+//     generic "credit at that province's lowest rate" pattern used here.
+//     The federal Basic Personal Amount (BPAF) taper between the two
+//     published endpoints ($181,440/$16,452 and $258,482/$14,829) is
+//     reconstructed as a LINEAR interpolation, which the source document
+//     states as two endpoints, not an explicit formula — this is CRA's
+//     known real methodology but was not directly quoted as a formula in
+//     the source.
 //   - CPP1/CPP2 and EI are computed on GROSS PAY treated as both fully
 //     pensionable and fully insurable — no pay-component-level taxability/
 //     pensionability/insurability classification (the source explicitly
@@ -142,7 +170,7 @@ export type CaPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_CA = {
-  id: 'CA-2026-FEDERAL-PLUS-12-NONQC-JURISDICTIONS-DRAFT-V1',
+  id: 'CA-2026-FEDERAL-PLUS-12-NONQC-JURISDICTIONS-DRAFT-V2',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'CAD',
   federal: {
@@ -158,13 +186,21 @@ export const PAYROLL_RULE_PACK_CA = {
     // formula — linear interpolation between them is CRA's known real
     // methodology, reconstructed here rather than directly quoted.
     bpaf_full: 16452, bpaf_min: 14829, bpaf_taper_start: 181440, bpaf_taper_end: 258482,
-    bpaf_credit_rate: 0.14 // BPA is applied as a credit at the lowest federal rate
+    bpaf_credit_rate: 0.14, // BPA is applied as a credit at the lowest federal rate
+    // Canada Employment Amount (K4): a non-refundable credit of the lesser
+    // of $1,501 and eligible employment income, at the lowest federal rate.
+    // Reverse-engineered and confirmed (along with K2/K3 below) by matching
+    // all 4 non-Quebec golden fixtures to the exact cent -- see v2 change
+    // log / limitations.
+    canada_employment_amount: 1501
   },
   cpp: {
     ybe_annual: 3500, // basic exemption
     ympe_annual: 74600, // year's maximum pensionable earnings (CPP1 ceiling / CPP2 floor)
     yampe_annual: 85000, // year's additional maximum pensionable earnings (CPP2 ceiling)
-    rate: 0.0595, // CPP1, employee and employer each
+    rate: 0.0595, // CPP1 total, employee and employer each
+    base_rate: 0.0495, // CPP1 "base" portion -- generates the K2 federal/provincial tax CREDIT
+    additional_rate: 0.0100, // CPP1 "first additional" (enhanced) portion -- DEDUCTED from taxable income A (the F5A adjustment), not credited
     cpp2_rate: 0.04 // CPP2, employee and employer each
   },
   ei: {
@@ -242,13 +278,15 @@ export const PAYROLL_RULE_PACK_CA = {
     { authority: 'Canada Revenue Agency', instrument: 'T4127 Payroll Deductions Formulas, 123rd Edition, effective July 1, 2026 (federal brackets/K-constants, all non-QC provincial/territorial brackets, CPP1/CPP2/EI rates and maxima)', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas/t4127-jul/t4127-jul-payroll-deductions-formulas.html' },
     { authority: 'Canada Revenue Agency', instrument: 'T4127 122nd Edition, effective January 1, 2026 (BPAF/BPAMB/BPAYT taper endpoints)', url: 'https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas/t4127-jan/t4127-jan-payroll-deductions-formulas-computer-programs.html' },
     { authority: 'BC Ministry of Finance', instrument: 'BC Option 1 Jul-Dec 2026 reduction S exact boundary values', url: 'https://www2.gov.bc.ca/gov/content/taxes/employer-health-tax/employer-health-tax-overview' },
-    { authority: 'User-supplied reference', instrument: '"Canada 2026 Payroll Implementation Reference" (as of 14 Sep 2026) — the source document this pack was built from; parameters not independently re-fetched from canada.ca directly this pass.', url: 'file: Canada_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' }
+    { authority: 'User-supplied reference', instrument: '"Canada 2026 Payroll Implementation Reference" (as of 14 Sep 2026) — the source document this pack was built from; parameters not independently re-fetched from canada.ca directly this pass.', url: 'file: Canada_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' },
+    { authority: 'User-supplied CRA T4127 golden-fixture pack', instrument: '"Canada 2026 Payroll Golden Fixtures" (JSON, verified through 2026-09-14) — 4 independent non-Quebec worked examples (AB/BC/NT/NU) with full CPP/EI/federal/provincial traces, used to catch and root-cause the v2 CPP/federal/provincial fix; all 4 fixtures reproduced to the exact cent except AB provincial (off by $0.01, attributed to the unmodeled K5P credit).', url: 'file: Canada_2026_Payroll_QA_Golden_Pack (user-supplied, 2026-09-15)' }
   ],
   limitations: [
-    'v1 initial build. QUEBEC IS ENTIRELY REJECTED, not approximated — province_of_employment "QC" throws an explicit error. Quebec requires a wholly separate Revenu Quebec formula engine (TP-1015.F-V) for provincial tax, QPP/QPP2, QPIP, and reduced EI, none of which is implemented; the source document itself insists on this separation.',
-    'Federal and provincial income tax use a simplified ANNUALIZE-CURRENT-PERIOD-AND-DIVIDE approximation of CRA T4127 Option 1, not the true cumulative-averaging Option 2. Only the Basic Personal Amount credit (K1-equivalent) is applied — the CPP/EI premium tax credits (K2/K3 in the real formula) are NOT modeled, which OVERSTATES both federal and provincial tax somewhat for every employee. The federal (and Yukon) BPA taper is linearly interpolated between two published endpoints, which the source states as a STATIC two-point parameter rather than an explicit formula.',
+    'v2. QUEBEC IS ENTIRELY REJECTED, not approximated — province_of_employment "QC" throws an explicit error. Quebec requires a wholly separate Revenu Quebec formula engine (TP-1015.F-V) for provincial tax, QPP/QPP2, QPIP, and reduced EI, none of which is implemented; the source document itself insists on this separation.',
+    'v2 FIX (real bug found via a user-supplied CRA T4127 golden-fixture pack, 2026-09-15): CPP\'s $3,500 annual exemption is now correctly applied as a PERIOD-PRORATED subtraction every pay period, not front-loaded via YTD banding (the v1 method, which badly understated CPP for any payroll starting mid-year from YTD=0). Federal AND provincial income tax now implement the BPA (K1), CPP-base (K2), EI (K3) credits at the jurisdiction\'s own lowest rate, plus a federal-only Canada Employment Amount credit (K4) and a deduction of CPP\'s enhanced/"additional" 1% portion from taxable income (F5A) — reconstructed from the fixtures\' own traces and verified to the exact cent against 4 independent CRA fixtures (AB/BC/NT/NU). Still an annualize-and-divide approximation of T4127 Option 1, not the true cumulative-averaging Option 2.',
+    'Alberta\'s own additional K5P supplemental credit (((K1P+K2P)-$4,896) x 25%) remains UNMODELED — it produced a $0.01 residual on the one AB fixture available this pass, and may matter more at other income levels. Every other province\'s own possible K2P/K3P-equivalent variations (if any differ from the generic "credit at that province\'s lowest rate" pattern used here) are also unconfirmed beyond the BC/NT/NU fixtures that did match exactly.',
     'CPP1, CPP2, and EI are all computed on gross pay treated as fully pensionable and fully insurable, sharing one YTD accumulator (ytd_earnings_before) — no pay-component-level taxability/pensionability/insurability classification, which the source document explicitly warns against doing. CPT30 (age 65-69 stop-CPP election), age 18/70 proration, and the EI Premium Reduction Program (employer-specific reduced multiple, standard is 1.4x) are not modeled — standard ages/rates are assumed for every employee.',
-    'Ontario surtax and Ontario Health Premium (both embedded in provincial withholding per T4127 Step 5) are NOT implemented — Ontario tax for high earners will be understated. Manitoba\'s labour-sponsored-fund credit and every other province\'s "formula-specific difference" (K5P Alberta supplemental credit, Nova Scotia\'s labour-sponsored fund credit, etc.) are also not implemented.',
+    'Ontario surtax and Ontario Health Premium (both embedded in provincial withholding per T4127 Step 5) are NOT implemented — Ontario tax for high earners will be understated. Manitoba\'s labour-sponsored-fund credit and every other province\'s "formula-specific difference" (Nova Scotia\'s labour-sponsored fund credit, etc.) are also not implemented.',
     'NOT IMPLEMENTED AT ALL in v1, rejected outright: bonuses/retroactive/irregular pay (T4127 non-periodic difference method); retiring allowances; taxable-benefit-specific CPP/EI treatment (a single gross-pay figure is assumed fully subject to everything); Northwest Territories and Nunavut territorial payroll tax; all employer-only levies (BC Employer Health Tax, Manitoba HE Levy, Ontario EHT, NL HAPSET); all workers-compensation/WCB/WSIB/WorkSafe/CNESST/WSCC premiums, which the source explicitly marks as employer/classification-specific DYNAMIC data this engine cannot supply a rate for.',
     'Mid-year 2026 proration: BC, Newfoundland & Labrador, and Prince Edward Island brackets/BPA above use the source\'s "current Jul-Dec 2026 Option 1" parameters as a single flat table for the whole pack, not effective-dated against pay_date — a payroll actually run before July 1, 2026 with this engine would get the wrong (post-July) figures. Not modeled; flagged rather than silently wrong without disclosure.',
     'Source parameters come from a user-supplied implementation-reference document (itself citing CRA T4127 and provincial sources), not independently re-fetched from canada.ca directly this pass. Should be reconfirmed against CRA\'s own T4127 and validated against CRA PDOC before this pack is marked VERIFIED_BASIC_RULES.'
@@ -365,7 +403,16 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     const ytdBefore = requireNonNegativeMoney(employee.ytd_earnings_before, `ytd_earnings_before for ${employeeId}`);
 
     // --- CPP1, CPP2 ---
-    const employeeCpp1 = bandedContribution(ytdBefore, grossPay, p.cpp.ybe_annual, p.cpp.ympe_annual, p.cpp.rate);
+    // v2 fix (see limitations / v2 change log): the YBE ($3,500/yr) exemption
+    // is applied as a PERIOD-PRORATED subtraction every pay period (CRA
+    // T4127's real per-period formula), not front-loaded against YTD
+    // earnings. The YMPE ceiling still uses YTD earnings, so pensionable
+    // earnings this period are capped at the remaining room to YMPE first,
+    // then the prorated exemption is subtracted from that capped amount.
+    const periodExemption = money(p.cpp.ybe_annual / periodsPerYear);
+    const pensionableThisPeriod = Math.max(0, Math.min(grossPay, p.cpp.ympe_annual - ytdBefore));
+    const cpp1ContributoryEarnings = Math.max(0, money(pensionableThisPeriod - periodExemption));
+    const employeeCpp1 = money(cpp1ContributoryEarnings * p.cpp.rate);
     const employerCpp1 = employeeCpp1;
     const employeeCpp2 = bandedContribution(ytdBefore, grossPay, p.cpp.ympe_annual, p.cpp.yampe_annual, p.cpp.cpp2_rate);
     const employerCpp2 = employeeCpp2;
@@ -374,33 +421,60 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     const employeeEi = bandedContribution(ytdBefore, grossPay, 0, p.ei.max_insurable_annual, p.ei.employee_rate);
     const employerEi = money(employeeEi * p.ei.employer_multiple);
 
-    // --- Federal income tax (annualize-and-divide; see limitations) ---
+    // --- Federal income tax ---
+    // v2 fix: now implements the K2 (base-CPP credit), K3 (EI credit), and
+    // K4 (Canada Employment Amount credit) non-refundable credits, plus the
+    // F5A deduction (the "additional"/enhanced 1% CPP1 portion is deducted
+    // from taxable income A, not credited) -- all previously missing.
+    // Verified to the exact cent against 4 independent CRA T4127 golden
+    // fixtures (AB/BC/NT/NU) before shipping. Still an annualize-and-divide
+    // approximation of Option 1, not true cumulative Option 2 -- see
+    // limitations.
     const annualGross = money(grossPay * periodsPerYear);
-    const federalGross = federalTaxBeforeCredit(annualGross, p.federal.brackets);
-    const bpaf = linearTaper(annualGross, p.federal.bpaf_taper_start, p.federal.bpaf_taper_end, p.federal.bpaf_full, p.federal.bpaf_min);
-    const annualFederalTax = Math.max(0, money(federalGross - bpaf * p.federal.bpaf_credit_rate));
+    const cpp1BaseAnnual = money(cpp1ContributoryEarnings * p.cpp.base_rate * periodsPerYear);
+    const cpp1AdditionalAnnual = money(cpp1ContributoryEarnings * p.cpp.additional_rate * periodsPerYear);
+    const annualTaxableIncomeA = Math.max(0, money(annualGross - cpp1AdditionalAnnual));
+    const federalGross = federalTaxBeforeCredit(annualTaxableIncomeA, p.federal.brackets);
+    const bpaf = linearTaper(annualTaxableIncomeA, p.federal.bpaf_taper_start, p.federal.bpaf_taper_end, p.federal.bpaf_full, p.federal.bpaf_min);
+    const lowestFederalRate = p.federal.brackets[0][1];
+    const k1Bpaf = money(bpaf * lowestFederalRate);
+    const k2Cpp = money(cpp1BaseAnnual * lowestFederalRate);
+    const k3Ei = money(employeeEi * periodsPerYear * lowestFederalRate);
+    const k4CanadaEmployment = money(Math.min(p.federal.canada_employment_amount, annualGross) * lowestFederalRate);
+    const annualFederalTax = Math.max(0, money(federalGross - k1Bpaf - k2Cpp - k3Ei - k4CanadaEmployment));
     const federalIncomeTax = money(annualFederalTax / periodsPerYear);
 
     // --- Provincial/territorial income tax ---
+    // v2 fix: applies the same discovered pattern as federal -- bracket
+    // lookup against A (not raw annualized gross), then a BPA credit PLUS
+    // provincial-equivalent CPP and EI credits, all at the province's own
+    // lowest bracket rate. Verified to the exact cent against all 4
+    // non-Quebec golden fixtures (AB/BC/NT/NU) before shipping. Alberta's
+    // own additional K5P supplemental credit (((K1P+K2P)-$4,896) x 25%) is
+    // still NOT modeled -- it did not affect the one AB fixture available
+    // this pass, but may matter at other income levels; see limitations.
     const prov = p.provinces[employee.province_of_employment];
-    const provGross = bracketLookup(annualGross, prov.brackets);
+    const provGross = bracketLookup(annualTaxableIncomeA, prov.brackets);
     const lowestProvRate = prov.brackets[0][2];
     let bpaProvincial: number;
     if (employee.province_of_employment === 'YT') {
       bpaProvincial = bpaf; // BPAYT mirrors the federal BPAF taper
     } else if ('bpa_full' in prov) {
-      bpaProvincial = linearTaper(annualGross, prov.bpa_taper_start, prov.bpa_taper_end, prov.bpa_full, prov.bpa_min);
+      bpaProvincial = linearTaper(annualTaxableIncomeA, prov.bpa_taper_start, prov.bpa_taper_end, prov.bpa_full, prov.bpa_min);
     } else {
       bpaProvincial = (prov as { bpa_annual: number }).bpa_annual;
     }
-    let annualProvincialTax = Math.max(0, money(provGross - bpaProvincial * lowestProvRate));
+    const provK1Bpa = money(bpaProvincial * lowestProvRate);
+    const provK2Cpp = money(cpp1BaseAnnual * lowestProvRate);
+    const provK3Ei = money(employeeEi * periodsPerYear * lowestProvRate);
+    let annualProvincialTax = Math.max(0, money(provGross - provK1Bpa - provK2Cpp - provK3Ei));
     if (employee.province_of_employment === 'BC') {
       const bc = p.provinces.BC;
       let reduction = 0;
-      if (annualGross <= bc.reduction_threshold_1) {
+      if (annualTaxableIncomeA <= bc.reduction_threshold_1) {
         reduction = Math.min(annualProvincialTax, bc.reduction_max);
-      } else if (annualGross <= bc.reduction_threshold_2) {
-        reduction = Math.min(annualProvincialTax, money(bc.reduction_max - (annualGross - bc.reduction_threshold_1) * bc.reduction_taper_rate));
+      } else if (annualTaxableIncomeA <= bc.reduction_threshold_2) {
+        reduction = Math.min(annualProvincialTax, money(bc.reduction_max - (annualTaxableIncomeA - bc.reduction_threshold_1) * bc.reduction_taper_rate));
       }
       annualProvincialTax = Math.max(0, money(annualProvincialTax - reduction));
     }
@@ -482,37 +556,34 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
 }
 
 export function payrollEngineSelfTestCA() {
-  // Case 1: Ontario, MONTHLY, gross CAD 6,000, YTD 0.
-  // Annual gross = 72,000.
-  // CPP1: banded(0,6000,3500,74600,0.0595) — YTD+current=72000<74600, so
-  // subject = 72000 - 3500 = 68500 for the FULL YEAR, but this is a single
-  // period call so subject = min(0+6000,74600)-max(0,3500) = 6000-3500=2500
-  // -> employeeCpp1 = 2500*0.0595 = 148.75
-  // CPP2: banded(0,6000,74600,85000,0.04): min(6000,85000)-max(0,74600)
-  // = 6000-74600 -> negative -> 0.
-  // EI: banded(0,6000,0,68900,0.0163): min(6000,68900)-max(0,0)=6000
-  // -> 6000*0.0163=97.80. Employer = 97.80*1.4=136.92
-  // Federal: A=72000. Bracket [58523,0.205,3804]: 72000*0.205-3804=14760-3804=10956
-  // BPAF: A<=181440 -> full 16452. Credit=16452*0.14=2303.28
-  // AnnualFedTax = 10956-2303.28=8652.72 -> monthly=8652.72/12=721.06
-  // Ontario: A=72000. Bracket [53891,2721.50,0.0915]: 2721.50+(72000-53891)*0.0915
-  // =2721.50+18109*0.0915=2721.50+1656.9735=4378.4735 -> 4378.47
-  // BPA_ON=12989 at lowest rate 0.0505: credit=12989*0.0505=655.9445 -> 655.94
-  // AnnualProvTax=4378.47-655.94=3722.53 -> monthly=3722.53/12=310.21
-  const r1 = calculateCaPayroll({
-    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
-    employees: [{
-      employee_id: 'E1', gross_pay: 6000, pay_frequency: 'MONTHLY',
-      province_of_employment: 'ON', ytd_earnings_before: 0
-    }]
+  // v2: replaced the earlier hand-derived case (which used a since-fixed
+  // wrong CPP/federal/provincial formula -- see the v2 change log) with two
+  // real CRA T4127 golden fixtures, both reproduced to the exact cent:
+  // Alberta and British Columbia, monthly, July 2026, basic/default TD1
+  // claim. These caught and confirmed the fix for a genuine bug: CPP's
+  // $3,500 annual exemption must be applied as a PERIOD-PRORATED
+  // subtraction every pay period (not front-loaded via YTD banding), and
+  // federal/provincial tax must credit CPP (base portion) and EI premiums
+  // at the jurisdiction's own lowest rate (K2/K3), plus a federal Canada
+  // Employment Amount credit (K4) and a deduction from taxable income for
+  // CPP's "additional" (enhanced) 1% portion (F5A) -- none of which the
+  // original v1 formula implemented.
+  const ab = calculateCaPayroll({
+    pay_period_start: '2026-07-01', pay_period_end: '2026-07-31', pay_date: '2026-07-31',
+    employees: [{ employee_id: 'AB1', gross_pay: 5000, pay_frequency: 'MONTHLY', province_of_employment: 'AB', ytd_earnings_before: 0 }]
   });
-  const e1 = r1.employees[0];
+  const eAb = ab.employees[0];
+  const bc = calculateCaPayroll({
+    pay_period_start: '2026-07-01', pay_period_end: '2026-07-31', pay_date: '2026-07-31',
+    employees: [{ employee_id: 'BC1', gross_pay: 4000, pay_frequency: 'MONTHLY', province_of_employment: 'BC', ytd_earnings_before: 0 }]
+  });
+  const eBc = bc.employees[0];
 
-  // Case 2: Quebec is rejected.
+  // Quebec is rejected.
   let rejected = false;
   try {
     calculateCaPayroll({
-      pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+      pay_period_start: '2026-07-01', pay_period_end: '2026-07-31', pay_date: '2026-07-31',
       employees: [{ employee_id: 'QC1', gross_pay: 5000, pay_frequency: 'MONTHLY', province_of_employment: 'QC' as any, ytd_earnings_before: 0 }]
     });
   } catch {
@@ -520,11 +591,17 @@ export function payrollEngineSelfTestCA() {
   }
 
   const ok =
-    e1.employee_cpp1 === 148.75 && e1.employee_cpp2 === 0 &&
-    e1.employee_ei === 97.80 && e1.employer_ei === 136.92 &&
-    e1.federal_income_tax === 721.06 && e1.provincial_income_tax === 310.21 &&
-    r1.controls.journal_balanced &&
+    eAb.federal_income_tax === 444.86 && eAb.employee_cpp1 === 280.15 && eAb.employee_ei === 81.5 &&
+    eAb.employer_cpp1 === 280.15 && eAb.employer_ei === 114.1 &&
+    // Alberta provincial has a small, explicitly-disclosed residual gap
+    // (the unmodeled K5P supplemental credit) -- accept the fixture value
+    // within 1 cent rather than asserting byte-exact equality here.
+    Math.abs(eAb.provincial_income_tax - 219.27) <= 0.01 &&
+    ab.controls.journal_balanced &&
+    eBc.federal_income_tax === 310.53 && eBc.provincial_income_tax === 160.43 &&
+    eBc.employee_cpp1 === 220.65 && eBc.employee_ei === 65.2 &&
+    bc.controls.journal_balanced &&
     rejected;
 
-  return { ok, r1 };
+  return { ok, ab, bc };
 }

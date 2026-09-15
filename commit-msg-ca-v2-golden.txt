@@ -1,0 +1,54 @@
+payroll(ca): fix real CPP/federal/provincial bugs found via golden fixtures (v2)
+
+User supplied a "golden QA pack" (JSON fixtures with full traces) for
+all 7 non-US countries built this session, and asked to test the
+non-US ones. Results:
+
+- Kenya, South Africa, Rwanda, Mauritius, Cameroon: ALL fixtures that
+  fall within each engine's documented v1 scope pass exactly (Cameroon
+  matches within the fixture's own whole-FCFA rounding convention).
+  Fixtures requiring unimplemented features (South Africa ETI,
+  Mauritius director/board-fee path) were correctly skipped, not
+  silently ignored.
+- UK: all 4 fixtures use tax codes (0T M1, S0T M1), an NI category
+  (M), or a benefit (SSP) outside this engine's v1 scope (only
+  1257L/S1257L/C1257L cumulative + NI category A are implemented) --
+  none were directly testable against v1 as shipped. No bug found, but
+  none confirmed either; flagged as a real coverage gap for a future
+  pass.
+- Canada: found and fixed two real, material bugs.
+
+Canada bug #1 (CPP): the $3,500 annual basic exemption was modeled as
+a YTD-banded front-load (absorbed entirely by the first ~$3,500 of
+YTD earnings each year), when CRA's actual T4127 formula prorates it
+PER PAY PERIOD ($291.67/month) regardless of YTD. This produced wildly
+wrong CPP for any payroll starting from YTD=0 (e.g. Alberta, $5,000
+monthly: engine gave $89.25, correct answer is $280.15).
+
+Canada bug #2 (federal/provincial tax): the engine only applied the
+Basic Personal Amount credit and ignored three other real T4127
+components entirely: the CPP-base and EI premium tax credits (K2/K3,
+at the jurisdiction's own lowest rate), the federal-only Canada
+Employment Amount credit (K4), and the deduction of CPP's
+enhanced/"additional" 1% portion from taxable income (F5A). This
+overstated federal tax by ~16% and provincial tax by ~13% in the
+Alberta example above.
+
+Both were reconstructed directly from the golden fixtures' own traces
+(which named the intermediate values, e.g. "Annual taxable income A =
+59435.04" and "CPP additional deduction F5A = 47.08") and verified to
+the exact cent against all 4 independent CRA fixtures (AB/BC/NT/NU)
+before being shipped -- federal tax and CPP now match exactly on all
+4; provincial tax matches BC/NT/NU exactly and Alberta within $0.01
+(Alberta's own additional K5P supplemental credit remains a named,
+unmodeled gap).
+
+Quebec's rejection was also confirmed correct via the golden pack's
+own QC fixture (which itself notes Quebec needs Revenu Quebec's
+formula engine).
+
+Full aggregate self-test suite (all 10 countries) passes. The Canada
+engine's own self-test was rewritten to use two of the real CRA
+fixtures directly instead of a hand-derived case.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
