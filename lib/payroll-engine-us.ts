@@ -464,6 +464,18 @@ export type UsEmployeeInput = {
   ytd_ss_wages_before: number;
   ytd_medicare_wages_before: number;
   ytd_futa_wages_before: number;
+  // State Unemployment Insurance (SUI), employer-paid only. Both fields
+  // optional — omit both to leave SUI uncomputed (same as before v19).
+  // If either is supplied, the other becomes required. sui_rate is this
+  // employee's employer's own experience-rated percentage for the
+  // relevant state, as issued on that employer's annual rate notice
+  // (this engine has no statutory default for it — see limitations).
+  // sui_wage_base is that state's annual taxable wage base per employee,
+  // also off the employer's own rate notice or the state agency's
+  // current-year published figure.
+  sui_rate?: number;
+  sui_wage_base?: number;
+  ytd_sui_wages_before?: number;
   state: UsState;
   // CA fields — required when state === 'CA'.
   ca_filing_status?: UsCaFilingStatus;
@@ -672,6 +684,7 @@ export type UsJournalLine = {
     | 'FEDERAL_INCOME_TAX_PAYABLE'
     | 'FICA_PAYABLE'
     | 'FUTA_PAYABLE'
+    | 'SUI_PAYABLE'
     | 'CA_INCOME_TAX_PAYABLE'
     | 'CA_SDI_PAYABLE'
     | 'NJ_INCOME_TAX_PAYABLE'
@@ -751,6 +764,7 @@ export type UsEmployeeResult = {
   employer_medicare: number;
   employee_additional_medicare: number;
   employer_futa: number;
+  employer_sui: number;
   ca_income_tax: number;
   ca_sdi: number;
   nj_income_tax: number;
@@ -816,6 +830,7 @@ export type UsEmployeeResult = {
   ytd_ss_wages_after: number;
   ytd_medicare_wages_after: number;
   ytd_futa_wages_after: number;
+  ytd_sui_wages_after: number;
   ytd_nj_ui_wf_wages_after: number;
   ytd_nj_tdi_fli_wages_after: number;
   ytd_co_famli_wages_after: number;
@@ -840,6 +855,7 @@ export type UsPayrollRunResult = {
     fica_employee: number;
     fica_employer: number;
     futa: number;
+    sui: number;
     ca_income_tax: number;
     ca_sdi: number;
     nj_income_tax: number;
@@ -915,11 +931,27 @@ export type UsPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_US = {
+  // v19: adds employer-side State Unemployment Insurance (SUI). Unlike
+  // every other figure in this file, SUI's RATE is not a published
+  // statutory constant -- each state assigns every employer its own
+  // experience-rated percentage annually via that employer's own rate
+  // notice, and the taxable WAGE BASE, while state-published, also
+  // changes state-by-state every year. Rather than embed 50 more
+  // AI-researched, easily-stale numbers (the exact risk this file's own
+  // FUTA-credit-reduction and SS-wage-base caveats already flag), this
+  // engine requires the CALLER to supply both sui_rate and
+  // sui_wage_base per employee straight off their own state rate
+  // notice, then does the part that's actually error-prone to hand-roll
+  // correctly: period proration, YTD wage-base capping (ceilingContribution,
+  // same primitive as FICA/FUTA), multi-employee aggregation, and journal
+  // posting. Both fields are OPTIONAL and default to "not computed" --
+  // every existing caller/self-test that doesn't pass them is unaffected
+  // (employer_sui: 0), preserving exact backward compatibility.
   // v18: fixed Ohio -- a real dated rate change (HB 96, eff. 2026-08-01)
   // caught by cross-checking this file against a user-supplied formula
   // pack. All other states/federal figures in that pack were checked
   // and matched what was already here. See limitations for detail.
-  id: 'US-50-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V18',
+  id: 'US-50-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V19',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -1948,7 +1980,7 @@ export const PAYROLL_RULE_PACK_US = {
     'AZ: only the employee\'s own percentage election (az_election_percent) is modeled. The statutory "default 2.0% if no A-4 timely filed" employer-side default behavior is NOT implemented — the caller must always supply the employee\'s actual election (or explicit 0% if validly elected) rather than relying on this engine to apply the default.',
     'Only 2020-or-later Form W-4 revisions are supported (Steps 1-4) for federal withholding. Pre-2020 allowances-based W-4s are rejected, not approximated via the IRS computational bridge.',
     'Only weekly, biweekly, semimonthly, and monthly pay frequencies are supported.',
-    'State Unemployment Insurance (SUI) is not calculated for either state — both California (EDD) and New Jersey (NJDOL) assign each employer an individual experience rate, which this engine has no statutory default for. Callers must compute and post employer-side SUI/UI separately. (New Jersey\'s EMPLOYEE-side UI/Workforce Development contribution, which does have a flat statutory rate, IS calculated — see nj_ui_wf_swf below.)',
+    'State Unemployment Insurance (SUI), employer-side (v19): computed ONLY when the caller supplies both sui_rate and sui_wage_base per employee, straight off that employer\'s own annual state rate notice — every state assigns each employer its own experience-rated percentage annually (there is no statutory default this engine could embed the way it does for federal FICA/FUTA), and the taxable wage base, while state-published, changes state-by-state every year. Omitting both fields leaves SUI uncomputed (employer_sui: 0), the same behavior as every version before v19 — full backward compatibility. What this engine DOES do once both are supplied: correctly prorates and caps the taxable wage base across pay periods using the same ceilingContribution primitive as FICA/FUTA (ytd_sui_wages_before/ytd_sui_wages_after), aggregates across employees, and posts a SUI_PAYABLE journal credit — the parts of SUI that are genuinely easy to get wrong by hand. SUI wages are assumed to follow the same base as FUTA (gross minus Section 125 deductions only) — a reasonable default since most states mirror FUTA\'s wage definition, but this has NOT been independently confirmed state-by-state and should be verified before real payroll for any given state. This engine does not track state reciprocity, multi-state employee wage-base credit transfers (crediting SUI already paid to a prior employer or a different state in the same year), new-employer vs. experience-rated status, or voluntary contribution elections — all remain the caller\'s responsibility. (New Jersey\'s EMPLOYEE-side UI/Workforce Development contribution, which does have a flat statutory rate, IS calculated separately — see nj_ui_wf_swf below — and is unaffected by this SUI feature.)',
     'California Employment Training Tax (ETT) is not calculated.',
     'New Jersey: only NJ-W4 Rate Tables A and B are implemented (the two most common cases — see the file for which NJ-W4 filing-status boxes map to each). Rate Tables C, D, and E, which an employee may elect via the NJ-W4 wage chart in dual-income or multi-job households, are not implemented and are rejected if requested.',
     'New Jersey: the Newark payroll tax (an employer-paid 1% tax on total payroll for businesses with 50+ employees working in Newark) is NOT calculated — directly relevant to this pack\'s ~50-employee target segment if any client has a Newark work location, and flagged here rather than silently ignored.',
@@ -2083,6 +2115,20 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     const ytdSsBefore = requireNonNegativeMoney(employee.ytd_ss_wages_before, `ytd_ss_wages_before for ${employeeId}`);
     const ytdMedicareBefore = requireNonNegativeMoney(employee.ytd_medicare_wages_before, `ytd_medicare_wages_before for ${employeeId}`);
     const ytdFutaBefore = requireNonNegativeMoney(employee.ytd_futa_wages_before, `ytd_futa_wages_before for ${employeeId}`);
+    const suiRateProvided = employee.sui_rate !== undefined;
+    const suiWageBaseProvided = employee.sui_wage_base !== undefined;
+    if (suiRateProvided !== suiWageBaseProvided) {
+      const error = new Error(`${employeeId}: sui_rate and sui_wage_base must both be supplied together, or both omitted`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (suiRateProvided && ((employee.sui_rate as number) < 0 || (employee.sui_rate as number) > 1)) {
+      const error = new Error(`sui_rate for ${employeeId} must be between 0 and 1 (a fraction, e.g. 0.034 for 3.4%)`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    const suiWageBase = suiWageBaseProvided ? requireNonNegativeMoney(employee.sui_wage_base, `sui_wage_base for ${employeeId}`) : 0;
+    const ytdSuiBefore = requireNonNegativeMoney(employee.ytd_sui_wages_before ?? 0, `ytd_sui_wages_before for ${employeeId}`);
 
     if (!['WEEKLY', 'BIWEEKLY', 'SEMIMONTHLY', 'MONTHLY'].includes(employee.pay_frequency)) {
       const error = new Error(`pay_frequency for ${employeeId} must be WEEKLY, BIWEEKLY, SEMIMONTHLY, or MONTHLY`);
@@ -2540,6 +2586,17 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     // --- FUTA (employer only, same wage base as FICA) ---
     const futaNetRate = p.futa.net_rate_by_state[employee.state] ?? p.futa.net_rate_default;
     const employerFuta = ceilingContribution(ytdFutaBefore, ficaAndFutaWages, p.futa.wage_base_annual, futaNetRate);
+
+    // --- SUI (State Unemployment Insurance, employer only — see the v19
+    // change log above). Only computed when the caller supplied both
+    // sui_rate and sui_wage_base; otherwise 0, same as before v19. Uses
+    // the same taxable-wage definition as FUTA (gross minus Section 125
+    // only) — a reasonable default since most states follow FUTA's own
+    // wage definition, but not independently confirmed state-by-state,
+    // so flagged in limitations rather than presented as verified.
+    const employerSui = suiRateProvided
+      ? ceilingContribution(ytdSuiBefore, ficaAndFutaWages, suiWageBase, employee.sui_rate as number)
+      : 0;
 
     // --- Federal income tax withholding (Worksheet 1A, annualized percentage method) ---
     const step3AnnualCredits = employee.federal_step3_annual_credits ?? 0;
@@ -3137,7 +3194,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       mdIncomeTax + mdCountyTax + ctIncomeTax + deIncomeTax + dcIncomeTax + wiIncomeTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
-    const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta);
+    const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta + employerSui);
 
     return {
       employee_id: employeeId,
@@ -3154,6 +3211,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       employer_medicare: employerMedicare,
       employee_additional_medicare: employeeAdditionalMedicare,
       employer_futa: employerFuta,
+      employer_sui: employerSui,
       ca_income_tax: caIncomeTax,
       ca_sdi: caSdi,
       nj_income_tax: njIncomeTax,
@@ -3219,6 +3277,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
       ytd_medicare_wages_after: medicareYtdAfter,
       ytd_futa_wages_after: money(ytdFutaBefore + Math.min(ficaAndFutaWages, Math.max(0, p.futa.wage_base_annual - ytdFutaBefore))),
+      ytd_sui_wages_after: suiRateProvided
+        ? money(ytdSuiBefore + Math.min(ficaAndFutaWages, Math.max(0, suiWageBase - ytdSuiBefore)))
+        : ytdSuiBefore,
       ytd_nj_ui_wf_wages_after: money(ytdNjUiWfBefore + Math.min(grossPay, Math.max(0, p.new_jersey.ui_wf_swf_wage_base_annual - ytdNjUiWfBefore))),
       ytd_nj_tdi_fli_wages_after: money(ytdNjTdiFliBefore + Math.min(grossPay, Math.max(0, p.new_jersey.tdi_fli_wage_base_annual - ytdNjTdiFliBefore))),
       ytd_co_famli_wages_after: money(ytdCoFamliBefore + Math.min(grossPay, Math.max(0, p.colorado.famli_wage_base_annual - ytdCoFamliBefore))),
@@ -3235,6 +3296,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     fica_employee: sum(employees.map(e => money(e.employee_social_security + e.employee_medicare + e.employee_additional_medicare))),
     fica_employer: sum(employees.map(e => money(e.employer_social_security + e.employer_medicare))),
     futa: sum(employees.map(e => e.employer_futa)),
+    sui: sum(employees.map(e => e.employer_sui)),
     ca_income_tax: sum(employees.map(e => e.ca_income_tax)),
     ca_sdi: sum(employees.map(e => e.ca_sdi)),
     nj_income_tax: sum(employees.map(e => e.nj_income_tax)),
@@ -3302,11 +3364,12 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
 
   const journal: UsJournalLine[] = [
     { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.gross_pay },
-    { side: 'DEBIT', account_role: 'EMPLOYER_PAYROLL_TAX_EXPENSE', amount: money(totals.fica_employer + totals.futa) },
+    { side: 'DEBIT', account_role: 'EMPLOYER_PAYROLL_TAX_EXPENSE', amount: money(totals.fica_employer + totals.futa + totals.sui) },
     { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: totals.net_pay },
     { side: 'CREDIT', account_role: 'FEDERAL_INCOME_TAX_PAYABLE', amount: totals.federal_income_tax },
     { side: 'CREDIT', account_role: 'FICA_PAYABLE', amount: money(totals.fica_employee + totals.fica_employer) },
     { side: 'CREDIT', account_role: 'FUTA_PAYABLE', amount: totals.futa },
+    { side: 'CREDIT', account_role: 'SUI_PAYABLE', amount: totals.sui },
     { side: 'CREDIT', account_role: 'CA_INCOME_TAX_PAYABLE', amount: totals.ca_income_tax },
     { side: 'CREDIT', account_role: 'CA_SDI_PAYABLE', amount: totals.ca_sdi },
     { side: 'CREDIT', account_role: 'NJ_INCOME_TAX_PAYABLE', amount: totals.nj_income_tax },
@@ -4345,8 +4408,62 @@ export function payrollEngineSelfTestUS() {
     sWi1.wi_income_tax === expectedWi1 && wiCase.controls.journal_balanced &&
     sOhV18.oh_income_tax === expectedOhV18 && ohV18Case.controls.journal_balanced;
 
+  // v19: SUI (State Unemployment Insurance, employer-only). Two employees
+  // exercising (a) mid-year wage-base crossing within a period and (b)
+  // omitting sui_rate/sui_wage_base entirely, to confirm backward
+  // compatibility (employer_sui must be exactly 0 when omitted).
+  const suiCase = calculateUsPayroll({
+    pay_period_start: '2026-03-01',
+    pay_period_end: '2026-03-31',
+    pay_date: '2026-03-31',
+    employees: [
+      {
+        // Hypothetical state SUI wage base $9,000 at a 3% experience rate,
+        // YTD already at $8,200 -> only $800 of this period's $2,000 gross
+        // remains taxable: 800 * 3% = 24.00.
+        employee_id: 'SUI-001',
+        gross_pay: 2000,
+        pay_frequency: 'MONTHLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 8200,
+        ytd_medicare_wages_before: 8200,
+        ytd_futa_wages_before: 7000,
+        ytd_sui_wages_before: 8200,
+        sui_rate: 0.03,
+        sui_wage_base: 9000,
+        state: 'TX'
+      },
+      {
+        // No sui_rate/sui_wage_base supplied -> employer_sui must be 0,
+        // exactly the pre-v19 behavior.
+        employee_id: 'SUI-002',
+        gross_pay: 2000,
+        pay_frequency: 'MONTHLY',
+        federal_filing_status: 'SINGLE_MFS',
+        federal_step2_checkbox: false,
+        ytd_ss_wages_before: 0,
+        ytd_medicare_wages_before: 0,
+        ytd_futa_wages_before: 0,
+        state: 'TX'
+      }
+    ]
+  });
+  const sSui1 = suiCase.employees[0];
+  const sSui2 = suiCase.employees[1];
+  const expectedSui1 = 24.0;
+  const okSui =
+    sSui1.employer_sui === expectedSui1 &&
+    sSui1.ytd_sui_wages_after === 9000 &&
+    sSui2.employer_sui === 0 &&
+    sSui2.ytd_sui_wages_after === 0 &&
+    suiCase.totals.sui === expectedSui1 &&
+    suiCase.controls.journal_balanced;
+
+  const ok2 = ok && okSui;
+
   return {
-    ok,
+    ok: ok2,
     sample,
     ssCase,
     addlMedicareCase,
@@ -4355,7 +4472,7 @@ export function payrollEngineSelfTestUS() {
     nyPflCapCrossing,
     goldenCa, goldenNy, goldenPa, goldenWa, goldenCo, goldenNj, goldenFedCap,
     goldenPaPhl, phlEffectiveDateEdge, goldenCoDen, goldenOr, orPaidLeaveCapEdge,
-    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case, v14Case, deCase, dcCase, wiCase, ohV18Case,
+    inWorkedExample, ncWorkedExample, v11Case, v12Case, v13Case, v14Case, deCase, dcCase, wiCase, ohV18Case, suiCase,
     pretaxCase,
     nyCaseSingle,
     nyCaseYonkersNonresident,
