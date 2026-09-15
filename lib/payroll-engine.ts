@@ -5,6 +5,10 @@ import { assertDateRangeOpenForCompany } from './close-governance-engine';
 import { calculateGermanyPayroll, payrollEngineSelfTestDE, PAYROLL_RULE_PACK_DE } from './payroll-engine-de';
 import type { DePayrollRunInput, DePayrollRunResult } from './payroll-engine-de';
 import { calculateUsPayroll, payrollEngineSelfTestUS, PAYROLL_RULE_PACK_US } from './payroll-engine-us';
+import { calculateUkPayroll, payrollEngineSelfTestUK, PAYROLL_RULE_PACK_UK } from './payroll-engine-uk';
+import type { UkPayrollRunInput, UkPayrollRunResult } from './payroll-engine-uk';
+import { calculateCaPayroll, payrollEngineSelfTestCA, PAYROLL_RULE_PACK_CA } from './payroll-engine-ca';
+import type { CaPayrollRunInput, CaPayrollRunResult } from './payroll-engine-ca';
 import type { UsPayrollRunInput, UsPayrollRunResult } from './payroll-engine-us';
 
 export type PayrollEmployeeInput = {
@@ -109,7 +113,8 @@ export const PAYROLL_RULE_PACKS = {
   // payroll/tax expertise has checked the figures and flips the status.
   DE: PAYROLL_RULE_PACK_DE,
   US: PAYROLL_RULE_PACK_US,
-  GB: { id: 'GB-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
+  GB: PAYROLL_RULE_PACK_UK,
+  CA: PAYROLL_RULE_PACK_CA,
   EE: { id: 'EE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
   CM: { id: 'CM-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' }
 } as const;
@@ -260,7 +265,7 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
   };
 }
 
-function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput) {
+function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput) {
   return JSON.stringify({
     pay_period_start: input.pay_period_start,
     pay_period_end: input.pay_period_end,
@@ -281,7 +286,7 @@ function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayro
   });
 }
 
-export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput) {
+export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   if (!['payroll', 'bookkeeping-payroll'].includes(String(deployment.service))) {
     const error = new Error('payroll engine is not enabled for this service');
@@ -314,12 +319,16 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
     throw error;
   }
 
-  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult =
+  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult | UkPayrollRunResult | CaPayrollRunResult =
     countryCode === 'DE'
       ? calculateGermanyPayroll(input as DePayrollRunInput)
       : countryCode === 'US'
         ? calculateUsPayroll(input as UsPayrollRunInput)
-        : calculateGeorgiaPayroll(input as PayrollRunInput);
+        : countryCode === 'GB'
+          ? calculateUkPayroll(input as UkPayrollRunInput)
+          : countryCode === 'CA'
+            ? calculateCaPayroll(input as CaPayrollRunInput)
+            : calculateGeorgiaPayroll(input as PayrollRunInput);
   if (!result.controls.journal_balanced) {
     const error = new Error('payroll journal failed balance control');
     (error as Error & { status?: number }).status = 500;
@@ -420,5 +429,7 @@ export function payrollEngineSelfTestAll() {
   const ge = payrollEngineSelfTest();
   const de = payrollEngineSelfTestDE();
   const us = payrollEngineSelfTestUS();
-  return { ok: ge.ok && de.ok && us.ok, georgia: ge, germany: de, unitedStates: us };
+  const uk = payrollEngineSelfTestUK();
+  const ca = payrollEngineSelfTestCA();
+  return { ok: ge.ok && de.ok && us.ok && uk.ok && ca.ok, georgia: ge, germany: de, unitedStates: us, unitedKingdom: uk, canada: ca };
 }

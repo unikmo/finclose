@@ -1,0 +1,492 @@
+// United Kingdom (GB) payroll rule pack — v1.
+//
+// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// not enable for real (PILOT/PRODUCTION) payroll runs until a person with
+// current UK payroll expertise has checked this against HMRC's own
+// Specification for PAYE Tax Table Routines, the NI software-developer
+// specification, and the Student Loan collection specification, and this
+// pack's outputs have been run against HMRC's official 2026/27 payroll test
+// data (not just this file's own hand-derived self-tests).
+//
+// Sourced from a user-supplied "UK 2026/27 Payroll Implementation
+// Reference" (verified 14 Sep 2026, citing HMRC/GOV.UK/Scottish Government/
+// The Pensions Regulator as primary authorities) — a genuine parameter
+// reference with real rates/thresholds attributed to named HMRC
+// publications, not a placeholder scaffold. Not independently re-fetched
+// from GOV.UK/HMRC directly this pass; treat as one step removed from
+// primary source, same tier as the original US IL/PA/MI/CO/AZ/AK/WA batch.
+//
+// DELIBERATE v1 SCOPE (rejected, not approximated, for anything not listed):
+//   - PAYE Income Tax: ONLY the standard cumulative tax codes 1257L
+//     (England & Northern Ireland), S1257L (Scotland), C1257L (Wales) are
+//     accepted — the ordinary case for the vast majority of employees with
+//     no other income, benefits, or under/over-payment adjustment. Every
+//     other tax code (BR, D0/D1, 0T, K codes, W1/M1/X non-cumulative
+//     operation, any other prefix/suffix) is REJECTED with an explicit
+//     error. HMRC's real PAYE routine also runs CUMULATIVELY across the
+//     tax year (this period's tax = cumulative-year tax to date minus tax
+//     already deducted). This engine instead uses a simplified
+//     annualize-current-period-and-divide approximation — the same
+//     approach and the same disclosed limitation already used for Germany's
+//     Lohnsteuer in payroll-engine-de.ts — which will diverge from the true
+//     cumulative HMRC figure whenever pay varies period to period. This is
+//     the single largest accuracy gap in this file; see limitations.
+//   - Class 1 National Insurance: ONLY category A (the standard employee
+//     category — the great majority of the workforce) is implemented.
+//     Categories B/C/D/E/F/H/I/J/K/L/M/N/S/V/Z (married-woman reduced rate,
+//     State Pension age, apprentices, veterans, Freeport/Investment Zone,
+//     deferment, under-21, directors) are REJECTED, not approximated.
+//     Directors' annual/alternative NI method is not implemented.
+//   - Student/Postgraduate Loans: the plain periodic-threshold-and-rate
+//     formula is implemented for Plans 1/2/4/5 plus PGL. Irregular pay
+//     periods and priority ordering against protected-earnings attachment
+//     orders are NOT implemented.
+//   - Workplace pension: a simple qualifying-earnings-band 5%/3%
+//     (employee/employer) calculation is implemented, gated on a
+//     caller-supplied pension_enrolled flag. Auto-enrolment ASSESSMENT
+//     (age/earnings trigger, postponement, opt-out/refund timing) is NOT
+//     implemented — the caller must already know and supply whether the
+//     employee is enrolled.
+//   - NOT IMPLEMENTED AT ALL, rejected if requested: statutory payments
+//     (SMP/SPP/SAP/ShPP/SPBP/SNCP/SSP and their employer recovery),
+//     Apprenticeship Levy, Employment Allowance, Class 1A/1B, benefits in
+//     kind/salary sacrifice, attachment/court order deductions, RTI
+//     (FPS/EPS) generation. This engine prepares payroll and accounting
+//     outputs only — it does not file with HMRC.
+
+export type UkNation = 'ENGLAND_OR_NI' | 'SCOTLAND' | 'WALES';
+export type UkTaxCode = '1257L' | 'S1257L' | 'C1257L';
+export type UkPayFrequency = 'WEEKLY' | 'MONTHLY';
+export type UkNiCategory = 'A';
+export type UkStudentLoanPlan = 'PLAN_1' | 'PLAN_2' | 'PLAN_4' | 'PLAN_5';
+
+export type UkEmployeeInput = {
+  employee_id: string;
+  name?: string;
+  gross_pay: number;
+  pay_frequency: UkPayFrequency;
+  tax_code: UkTaxCode;
+  ni_category: UkNiCategory;
+  student_loan_plan?: UkStudentLoanPlan;
+  postgraduate_loan: boolean;
+  pension_enrolled: boolean;
+};
+
+export type UkPayrollRunInput = {
+  pay_period_start: string;
+  pay_period_end: string;
+  pay_date: string;
+  employees: UkEmployeeInput[];
+};
+
+export type UkJournalLine = {
+  side: 'DEBIT' | 'CREDIT';
+  account_role:
+    | 'SALARY_EXPENSE'
+    | 'EMPLOYER_PENSION_EXPENSE'
+    | 'NET_PAYROLL_PAYABLE'
+    | 'PAYE_INCOME_TAX_PAYABLE'
+    | 'NATIONAL_INSURANCE_PAYABLE'
+    | 'STUDENT_LOAN_PAYABLE'
+    | 'PENSION_PAYABLE';
+  amount: number;
+};
+
+export type UkEmployeeResult = {
+  employee_id: string;
+  name?: string;
+  gross_pay: number;
+  nation: UkNation;
+  paye_income_tax: number;
+  employee_ni: number;
+  employer_ni: number;
+  student_loan_deduction: number;
+  postgraduate_loan_deduction: number;
+  employee_pension: number;
+  employer_pension: number;
+  net_pay: number;
+  employer_funded_total: number;
+};
+
+export type UkPayrollRunResult = {
+  rule_pack_id: string;
+  country_code: 'GB';
+  currency: 'GBP';
+  status: 'PREPARED';
+  pay_period_start: string;
+  pay_period_end: string;
+  pay_date: string;
+  employees: UkEmployeeResult[];
+  totals: {
+    gross_pay: number;
+    paye_income_tax: number;
+    employee_ni: number;
+    employer_ni: number;
+    student_loan_deduction: number;
+    postgraduate_loan_deduction: number;
+    employee_pension: number;
+    employer_pension: number;
+    net_pay: number;
+    employer_funded_total: number;
+  };
+  journal: UkJournalLine[];
+  controls: {
+    journal_balanced: boolean;
+    journal_debits: number;
+    journal_credits: number;
+    employee_count: number;
+  };
+  limitations: string[];
+};
+
+export const PAYROLL_RULE_PACK_UK = {
+  id: 'GB-2026-27-PAYE-CAT-A-STANDARD-CODES-DRAFT-V1',
+  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  currency: 'GBP',
+  income_tax: {
+    personal_allowance_annual: 12570,
+    // Annual TAXABLE-income brackets (after the Personal Allowance is
+    // already subtracted), as [atLeast, base, rate]. England/NI and Wales
+    // share one table (Wales' C-prefixed codes use the same rates as
+    // England per the source document); Scotland has its own.
+    brackets_england_or_ni: [
+      [0, 0, 0.20], [37700, 7540, 0.40], [125140, 42516, 0.45]
+    ] as Array<[number, number, number]>,
+    brackets_wales: [
+      [0, 0, 0.20], [37700, 7540, 0.40], [125140, 42516, 0.45]
+    ] as Array<[number, number, number]>,
+    // Derived from the source's gross-income-equivalent band boundaries
+    // (stated "assuming the standard GBP 12,570 Personal Allowance") minus
+    // that allowance, converting to pure taxable-income bands: starter
+    // 12,571-16,537 -> taxable 1-3,967; basic -> 3,968-16,956; intermediate
+    // -> 16,957-31,092; higher -> 31,093-62,430; advanced -> 62,431-112,570;
+    // top -> above 112,570. Each base amount hand-verified as the previous
+    // row's own formula extrapolated to that threshold.
+    brackets_scotland: [
+      [0, 0, 0.19], [3967, 753.73, 0.20], [16956, 3351.53, 0.21],
+      [31092, 6320.09, 0.42], [62430, 19482.05, 0.45], [112570, 42045.05, 0.48]
+    ] as Array<[number, number, number]>
+  },
+  ni: {
+    // Class 1, category A only. Thresholds per pay frequency (weekly/
+    // monthly), employee rate 8% between PT and UEL then 2% above UEL;
+    // employer rate 15% above ST (no special zero-rate band for category
+    // A/B/C/J per the source's employer-NI matrix).
+    primary_threshold: { WEEKLY: 242, MONTHLY: 1048 } as Record<UkPayFrequency, number>,
+    upper_earnings_limit: { WEEKLY: 967, MONTHLY: 4189 } as Record<UkPayFrequency, number>,
+    secondary_threshold: { WEEKLY: 96, MONTHLY: 417 } as Record<UkPayFrequency, number>,
+    employee_rate_to_uel: 0.08,
+    employee_rate_above_uel: 0.02,
+    employer_rate: 0.15
+  },
+  student_loan: {
+    // Periodic thresholds as published directly (not a simple division of
+    // the annual figure, to match HMRC's own stated periodic values
+    // exactly). Deduction = (earnings - threshold) x rate, rounded DOWN to
+    // the nearest whole pound per HMRC's own rounding rule.
+    thresholds: {
+      PLAN_1: { WEEKLY: 517.30, MONTHLY: 2241.66 },
+      PLAN_2: { WEEKLY: 565.09, MONTHLY: 2448.75 },
+      PLAN_4: { WEEKLY: 649.90, MONTHLY: 2816.25 },
+      PLAN_5: { WEEKLY: 480.76, MONTHLY: 2083.33 }
+    } as Record<UkStudentLoanPlan, Record<UkPayFrequency, number>>,
+    postgraduate_threshold: { WEEKLY: 403.84, MONTHLY: 1750.00 } as Record<UkPayFrequency, number>,
+    undergraduate_rate: 0.09,
+    postgraduate_rate: 0.06
+  },
+  pension: {
+    // Simple qualifying-earnings-band auto-enrolment minimum: 5% employee /
+    // 3% employer (8% total) of earnings between the lower and upper
+    // qualifying-earnings limits for the pay period, gated on a
+    // caller-supplied enrolment flag (assessment itself is not modeled).
+    qualifying_earnings_lower: { WEEKLY: 120, MONTHLY: 520 } as Record<UkPayFrequency, number>,
+    qualifying_earnings_upper: { WEEKLY: 967, MONTHLY: 4189 } as Record<UkPayFrequency, number>,
+    employee_rate: 0.05,
+    employer_rate: 0.03
+  },
+  evidence: [
+    { authority: 'HM Revenue & Customs / GOV.UK', instrument: 'Rates and thresholds for employers 2026 to 2027 (Personal Allowance GBP 12,570; England/NI/Wales bands 20%/40%/45%)', url: 'https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027' },
+    { authority: 'Scottish Government', instrument: 'Scottish Income Tax rates and bands 2026/27 (19%/20%/21%/42%/45%/48%)', url: 'https://www.gov.scot/publications/scottish-income-tax-rates-and-bands/pages/2026-to-2027/' },
+    { authority: 'HM Revenue & Customs', instrument: 'National Insurance software-developer specification 2026/27 (Class 1 category A thresholds/rates)', url: 'https://www.gov.uk/government/publications/payroll-technical-specifications-national-insurance' },
+    { authority: 'HM Revenue & Customs', instrument: 'Collection of student loans from 6 April 2026 (Plans 1/2/4/5, Postgraduate Loan thresholds/rates)', url: 'https://www.gov.uk/government/publications/payroll-technical-specifications-student-loans/collection-of-student-loans-from-6-april-2026' },
+    { authority: 'The Pensions Regulator', instrument: 'Qualifying earnings band and 3%/8% statutory minimum contribution basis', url: 'https://www.thepensionsregulator.gov.uk/en/business-advisers/automatic-enrolment-guide-for-business-advisers/minimum-contribution-increases-planned-by-law-phasing' },
+    { authority: 'User-supplied reference', instrument: '"UK 2026/27 Payroll Implementation Reference" (verified 14 Sep 2026) — the source document this pack was built from; parameters not independently re-fetched from GOV.UK/HMRC directly this pass.', url: 'file: UK_2026_27_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' }
+  ],
+  limitations: [
+    'v1 initial build. Only tax codes 1257L / S1257L / C1257L (standard cumulative, no other income/benefits/adjustments) are supported. All other codes (BR, D0/D1, 0T, K codes, non-cumulative W1/M1/X) are REJECTED with an explicit error.',
+    'PAYE Income Tax uses a simplified ANNUALIZE-CURRENT-PERIOD-AND-DIVIDE approximation, not HMRC\'s true cumulative PAYE routine (which compares cumulative year-to-date tax due against cumulative tax already deducted). This will diverge from the correct figure whenever an employee\'s pay varies from period to period — most divergent for a large one-off bonus or a mid-year pay change. The same approximation and the same disclosed limitation already exists for Germany\'s Lohnsteuer in payroll-engine-de.ts.',
+    'Only Class 1 National Insurance category A (standard employee) is implemented. Categories B/C/D/E/F/H/I/J/K/L/M/N/S/V/Z — married-woman reduced rate, State Pension age, Freeport/Investment Zone, apprentices under 25, veterans, under-21, deferment — are REJECTED, not approximated. Directors\' annual/alternative NI earnings-period method is not implemented; a director must not be run through this engine.',
+    'Student/Postgraduate Loans: only the ordinary periodic-threshold formula for a regular pay period is implemented. Irregular pay periods (HMRC\'s day-based/number-of-periods logic) and protected-earnings-order interaction are not implemented.',
+    'Workplace pension: implements only the 5%/3% qualifying-earnings-band minimum contribution, gated on a caller-supplied pension_enrolled flag. Auto-enrolment ASSESSMENT (age 22-to-State-Pension-Age, GBP 10,000 earnings trigger, postponement, opt-out/refund) is NOT modeled — the caller must already know whether the employee should be enrolled.',
+    'NOT IMPLEMENTED AT ALL in v1, rejected outright: statutory payments (SMP/SPP/SAP/ShPP/SPBP/SNCP/SSP) and their employer recovery; Apprenticeship Levy; Employment Allowance; Class 1A/1B (benefits in kind, termination awards, PAYE Settlement Agreements); salary sacrifice/benefits-in-kind wage adjustments; attachment of earnings / court order deductions; RTI (FPS/EPS) generation. This engine prepares payroll and accounting outputs only — it does not file with HMRC.',
+    'Source parameters come from a user-supplied implementation-reference document (itself citing HMRC/GOV.UK/Scottish Government/The Pensions Regulator), not independently re-fetched from GOV.UK/HMRC directly this pass. Should be reconfirmed against HMRC\'s own Specification for PAYE Tax Table Routines, NI specification, and Student Loan specification, and validated against HMRC\'s official 2026/27 payroll test data, before this pack is marked VERIFIED_BASIC_RULES.',
+    'This engine does not calculate National Minimum Wage / National Living Wage compliance, mileage/expense rates, or any employer-wide charge not listed above.'
+  ]
+};
+
+function money(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function requireIsoDate(value: string, field: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    const error = new Error(`${field} must be YYYY-MM-DD`);
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+}
+
+function requireNonNegativeMoney(value: unknown, field: string) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    const error = new Error(`${field} must be a non-negative number`);
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  return money(number);
+}
+
+function bracketLookup(amount: number, brackets: Array<[number, number, number]>) {
+  let row = brackets[0];
+  for (const candidate of brackets) {
+    if (amount >= candidate[0]) row = candidate;
+    else break;
+  }
+  const [atLeast, base, rate] = row;
+  return money(base + (amount - atLeast) * rate);
+}
+
+function nationAndBracketsForTaxCode(taxCode: UkTaxCode, p: typeof PAYROLL_RULE_PACK_UK): { nation: UkNation; brackets: Array<[number, number, number]> } {
+  if (taxCode === '1257L') return { nation: 'ENGLAND_OR_NI', brackets: p.income_tax.brackets_england_or_ni };
+  if (taxCode === 'S1257L') return { nation: 'SCOTLAND', brackets: p.income_tax.brackets_scotland };
+  return { nation: 'WALES', brackets: p.income_tax.brackets_wales };
+}
+
+export function calculateUkPayroll(input: UkPayrollRunInput): UkPayrollRunResult {
+  requireIsoDate(input.pay_period_start, 'pay_period_start');
+  requireIsoDate(input.pay_period_end, 'pay_period_end');
+  requireIsoDate(input.pay_date, 'pay_date');
+  if (input.pay_period_start > input.pay_period_end) {
+    const error = new Error('pay_period_start must not be after pay_period_end');
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  if (!Array.isArray(input.employees) || input.employees.length === 0) {
+    const error = new Error('at least one employee is required');
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+
+  const p = PAYROLL_RULE_PACK_UK;
+  const seen = new Set<string>();
+
+  const employees = input.employees.map(employee => {
+    const employeeId = String(employee.employee_id || '').trim();
+    if (!employeeId) {
+      const error = new Error('employee_id is required');
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (seen.has(employeeId)) {
+      const error = new Error(`duplicate employee_id: ${employeeId}`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    seen.add(employeeId);
+
+    if (employee.pay_frequency !== 'WEEKLY' && employee.pay_frequency !== 'MONTHLY') {
+      const error = new Error(`pay_frequency for ${employeeId} must be WEEKLY or MONTHLY`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.tax_code !== '1257L' && employee.tax_code !== 'S1257L' && employee.tax_code !== 'C1257L') {
+      const error = new Error(`tax_code for ${employeeId} must be 1257L, S1257L, or C1257L (only standard cumulative codes are implemented)`);
+      (error as Error & { status?: number }).status = 409;
+      throw error;
+    }
+    if (employee.ni_category !== 'A') {
+      const error = new Error(`ni_category for ${employeeId} must be 'A' (only NI category A is implemented)`);
+      (error as Error & { status?: number }).status = 409;
+      throw error;
+    }
+    if (employee.student_loan_plan !== undefined &&
+        employee.student_loan_plan !== 'PLAN_1' && employee.student_loan_plan !== 'PLAN_2' &&
+        employee.student_loan_plan !== 'PLAN_4' && employee.student_loan_plan !== 'PLAN_5') {
+      const error = new Error(`student_loan_plan for ${employeeId} must be PLAN_1, PLAN_2, PLAN_4, PLAN_5, or omitted`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (typeof employee.postgraduate_loan !== 'boolean') {
+      const error = new Error(`postgraduate_loan must be true or false for ${employeeId}`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (typeof employee.pension_enrolled !== 'boolean') {
+      const error = new Error(`pension_enrolled must be true or false for ${employeeId}`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+
+    const freq = employee.pay_frequency;
+    const periodsPerYear = freq === 'WEEKLY' ? 52 : 12;
+    const grossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
+
+    // --- PAYE income tax (simplified annualize-and-divide; see limitations) ---
+    const { nation, brackets } = nationAndBracketsForTaxCode(employee.tax_code, p);
+    const annualGross = money(grossPay * periodsPerYear);
+    const annualTaxable = Math.max(0, money(annualGross - p.income_tax.personal_allowance_annual));
+    const annualTax = bracketLookup(annualTaxable, brackets);
+    const payeIncomeTax = money(annualTax / periodsPerYear);
+
+    // --- Class 1 National Insurance, category A ---
+    const pt = p.ni.primary_threshold[freq];
+    const uel = p.ni.upper_earnings_limit[freq];
+    const st = p.ni.secondary_threshold[freq];
+    const toUelPortion = Math.max(0, Math.min(grossPay, uel) - pt);
+    const aboveUelPortion = Math.max(0, grossPay - uel);
+    const employeeNi = money(toUelPortion * p.ni.employee_rate_to_uel + aboveUelPortion * p.ni.employee_rate_above_uel);
+    const employerNi = money(Math.max(0, grossPay - st) * p.ni.employer_rate);
+
+    // --- Student Loan / Postgraduate Loan ---
+    let studentLoanDeduction = 0;
+    if (employee.student_loan_plan) {
+      const threshold = p.student_loan.thresholds[employee.student_loan_plan][freq];
+      const raw = Math.max(0, grossPay - threshold) * p.student_loan.undergraduate_rate;
+      studentLoanDeduction = Math.floor(raw);
+    }
+    let postgraduateLoanDeduction = 0;
+    if (employee.postgraduate_loan) {
+      const threshold = p.student_loan.postgraduate_threshold[freq];
+      const raw = Math.max(0, grossPay - threshold) * p.student_loan.postgraduate_rate;
+      postgraduateLoanDeduction = Math.floor(raw);
+    }
+
+    // --- Workplace pension (qualifying-earnings-band minimum) ---
+    let employeePension = 0;
+    let employerPension = 0;
+    if (employee.pension_enrolled) {
+      const lower = p.pension.qualifying_earnings_lower[freq];
+      const upper = p.pension.qualifying_earnings_upper[freq];
+      const qualifyingEarnings = Math.max(0, Math.min(grossPay, upper) - lower);
+      employeePension = money(qualifyingEarnings * p.pension.employee_rate);
+      employerPension = money(qualifyingEarnings * p.pension.employer_rate);
+    }
+
+    const netPay = money(grossPay - payeIncomeTax - employeeNi - studentLoanDeduction - postgraduateLoanDeduction - employeePension);
+    const employerFundedTotal = money(grossPay + employerNi + employerPension);
+
+    return {
+      employee_id: employeeId,
+      name: employee.name ? String(employee.name).trim() : undefined,
+      gross_pay: grossPay,
+      nation,
+      paye_income_tax: payeIncomeTax,
+      employee_ni: employeeNi,
+      employer_ni: employerNi,
+      student_loan_deduction: studentLoanDeduction,
+      postgraduate_loan_deduction: postgraduateLoanDeduction,
+      employee_pension: employeePension,
+      employer_pension: employerPension,
+      net_pay: netPay,
+      employer_funded_total: employerFundedTotal
+    };
+  });
+
+  function sum(values: number[]) {
+    return money(values.reduce((a, b) => a + b, 0));
+  }
+
+  const totals = {
+    gross_pay: sum(employees.map(e => e.gross_pay)),
+    paye_income_tax: sum(employees.map(e => e.paye_income_tax)),
+    employee_ni: sum(employees.map(e => e.employee_ni)),
+    employer_ni: sum(employees.map(e => e.employer_ni)),
+    student_loan_deduction: sum(employees.map(e => e.student_loan_deduction)),
+    postgraduate_loan_deduction: sum(employees.map(e => e.postgraduate_loan_deduction)),
+    employee_pension: sum(employees.map(e => e.employee_pension)),
+    employer_pension: sum(employees.map(e => e.employer_pension)),
+    net_pay: sum(employees.map(e => e.net_pay)),
+    employer_funded_total: sum(employees.map(e => e.employer_funded_total))
+  };
+
+  const journal: UkJournalLine[] = [
+    { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.gross_pay },
+    { side: 'DEBIT', account_role: 'EMPLOYER_PENSION_EXPENSE', amount: money(totals.employer_ni + totals.employer_pension) },
+    { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: totals.net_pay },
+    { side: 'CREDIT', account_role: 'PAYE_INCOME_TAX_PAYABLE', amount: totals.paye_income_tax },
+    { side: 'CREDIT', account_role: 'NATIONAL_INSURANCE_PAYABLE', amount: money(totals.employee_ni + totals.employer_ni) },
+    { side: 'CREDIT', account_role: 'STUDENT_LOAN_PAYABLE', amount: money(totals.student_loan_deduction + totals.postgraduate_loan_deduction) },
+    { side: 'CREDIT', account_role: 'PENSION_PAYABLE', amount: money(totals.employee_pension + totals.employer_pension) }
+  ];
+
+  const journalDebits = money(journal.filter(l => l.side === 'DEBIT').reduce((a, l) => a + l.amount, 0));
+  const journalCredits = money(journal.filter(l => l.side === 'CREDIT').reduce((a, l) => a + l.amount, 0));
+
+  return {
+    rule_pack_id: p.id,
+    country_code: 'GB',
+    currency: 'GBP',
+    status: 'PREPARED',
+    pay_period_start: input.pay_period_start,
+    pay_period_end: input.pay_period_end,
+    pay_date: input.pay_date,
+    employees,
+    totals,
+    journal,
+    controls: {
+      journal_balanced: Math.abs(journalDebits - journalCredits) < 0.005,
+      journal_debits: journalDebits,
+      journal_credits: journalCredits,
+      employee_count: employees.length
+    },
+    limitations: [...p.limitations]
+  };
+}
+
+export function payrollEngineSelfTestUK() {
+  // Case 1: England, 1257L, MONTHLY, gross GBP 4,000, category A, no loans,
+  // not pensioned.
+  // Annual gross = 48,000; taxable = 48,000-12,570 = 35,430 (within the
+  // 0-37,700 20% band) -> annual tax = 35,430*0.20 = 7,086 -> monthly = 590.50
+  // NI: PT=1048, UEL=4189. toUel = min(4000,4189)-1048 = 2952. aboveUel=0.
+  // employeeNI = 2952*0.08 = 236.16. employerNI = (4000-417)*0.15 = 537.45.
+  const r1 = calculateUkPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'E1', gross_pay: 4000, pay_frequency: 'MONTHLY', tax_code: '1257L',
+      ni_category: 'A', postgraduate_loan: false, pension_enrolled: false
+    }]
+  });
+  const e1 = r1.employees[0];
+
+  // Case 2: Scotland, S1257L, MONTHLY, gross GBP 8,000 (advanced-rate range),
+  // with Plan 2 student loan, PGL, and pension enrolled.
+  // Annual gross = 96,000; taxable = 96,000-12,570 = 83,430.
+  // Falls in the "advanced" band (62,430+ at 45%): base 19,482.05 +
+  // (83,430-62,430)*0.45 = 19,482.05+9,450 = 28,932.05
+  // -> monthly = 28,932.05/12 = 2,411.0041... -> 2411.00
+  // NI: toUel = min(8000,4189)-1048 = 3141. aboveUel = 8000-4189=3811.
+  // employeeNI = 3141*0.08 + 3811*0.02 = 251.28+76.22 = 327.50
+  // employerNI = (8000-417)*0.15 = 1137.45
+  // Student loan Plan 2: threshold 2448.75; (8000-2448.75)*0.09=499.6125 -> floor 499
+  // PGL: threshold 1750.00; (8000-1750)*0.06=375.00 -> floor 375
+  // Pension: qualifying = min(8000,4189)-520 = 3669; EE=3669*0.05=183.45; ER=3669*0.03=110.07
+  const r2 = calculateUkPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'E2', gross_pay: 8000, pay_frequency: 'MONTHLY', tax_code: 'S1257L',
+      ni_category: 'A', student_loan_plan: 'PLAN_2', postgraduate_loan: true, pension_enrolled: true
+    }]
+  });
+  const e2 = r2.employees[0];
+
+  const ok =
+    e1.paye_income_tax === 590.50 && e1.employee_ni === 236.16 && e1.employer_ni === 537.45 &&
+    r1.controls.journal_balanced &&
+    e2.paye_income_tax === 2411.00 && e2.employee_ni === 327.50 && e2.employer_ni === 1137.45 &&
+    e2.student_loan_deduction === 499 && e2.postgraduate_loan_deduction === 375 &&
+    e2.employee_pension === 183.45 && e2.employer_pension === 110.07 &&
+    r2.controls.journal_balanced;
+
+  return { ok, r1, r2 };
+}
