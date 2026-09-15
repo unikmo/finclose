@@ -704,6 +704,7 @@ export type UsJournalLine = {
     | 'CO_INCOME_TAX_PAYABLE'
     | 'CO_FAMLI_PAYABLE'
     | 'DENVER_OPT_PAYABLE'
+    | 'DENVER_BUSINESS_OPT_PAYABLE'
     | 'AZ_INCOME_TAX_PAYABLE'
     | 'AK_UI_PAYABLE'
     | 'WA_PFML_PAYABLE'
@@ -784,6 +785,7 @@ export type UsEmployeeResult = {
   co_income_tax: number;
   co_famli: number;
   denver_opt_employee: number;
+  denver_opt_employer: number;
   az_income_tax: number;
   ak_ui: number;
   wa_pfml: number;
@@ -875,6 +877,7 @@ export type UsPayrollRunResult = {
     co_income_tax: number;
     co_famli: number;
     denver_opt_employee: number;
+    denver_opt_employer: number;
     az_income_tax: number;
     ak_ui: number;
     wa_pfml: number;
@@ -951,7 +954,11 @@ export const PAYROLL_RULE_PACK_US = {
   // caught by cross-checking this file against a user-supplied formula
   // pack. All other states/federal figures in that pack were checked
   // and matched what was already here. See limitations for detail.
-  id: 'US-50-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V19',
+  // v20: adds Denver's employer-paid Business OPT ($4.00/month, same
+  // $500/month earnings-threshold gate as the employee OPT already
+  // modeled), closing a gap the v8 limitations had explicitly named as
+  // "an employer-side fixed cost this engine has no place to post."
+  id: 'US-50-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V20',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -1259,7 +1266,11 @@ export const PAYROLL_RULE_PACK_US = {
     // employer-paid liability this engine does NOT track (see limitations
     // — the same gap already exists for WA's employer PFML share).
     denver_opt_employee_monthly: 5.75,
-    denver_opt_monthly_earnings_threshold: 500
+    denver_opt_monthly_earnings_threshold: 500,
+    // Business OPT, v20: employer-paid, same $500/month earnings-threshold
+    // gate as the employee OPT, per the same denvergov.org Tax Guide
+    // Topic 61 already cited for the employee share.
+    denver_opt_employer_monthly: 4.00
   },
   arizona: {
     // Form A-4 employee election: a flat percentage of Arizona taxable
@@ -1929,7 +1940,7 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'New York State Paid Family Leave', instrument: '2026 NY PFL employee rate (0.432%) and annual dollar cap ($411.91), and NY DBL employee rate (0.5%) and weekly dollar cap ($0.60) — sourced from a second-generation "formula pack" cross-check document (2026_US_Payroll_Formula_Implementation_Guide.pdf, user-supplied 2026-09-14) that itself derives from the same secondary reference above, independently corroborating this file\'s NJ/AZ/CO/PA/AK/WA/CA-SDI figures in the process', url: 'https://paidfamilyleave.ny.gov/cost' },
     { authority: 'Golden-payslip QA fixture pack (user-supplied, 2026-09-14/15)', instrument: '"US_2026_Payroll_Golden_Payslip_QA_Pack.pdf" — deterministic golden payslips for CA, NY/NYC, PA (incl. Philadelphia local tax), WA, CO (incl. Denver OPT), NJ, and federal cap/bonus cases, checked directly against this engine\'s actual output rather than this file\'s own hand derivations. Found and led to the fix of the NJ $769 bracket bug documented in the v7 change log; every other assertion checked (NY, PA, WA, CO, NJ post-fix, federal cap) passed exactly. Primary sources cited within that pack for each figure: IRS Pub 15/15-T, CA EDD, NYS-50-T-NYS/NYC, NJ-WT/NJDOL, WA PFML/WA Cares, CO DR 1098/FAMLI.', url: 'file: US_2026_Payroll_Golden_Payslip_QA_Pack.pdf' },
     { authority: 'City of Philadelphia Department of Revenue', instrument: 'Earnings Tax — employee (resident and non-resident-working-in-Philadelphia) Wage Tax rates, independently fetched 2026-09-14: resident 3.740% through 2026-06-30, 3.735% from 2026-07-01; non-resident 3.43% through 2026-06-30, 3.425% from 2026-07-01. The resident figures corroborate the golden-payslip fixture exactly; the non-resident figures were not present in that fixture and are sourced here directly.', url: 'https://www.phila.gov/services/payments-assistance-taxes/taxes/income-taxes/earnings-tax-employees/' },
-    { authority: 'City and County of Denver, Department of Finance', instrument: 'Tax Guide Topic No. 61, Occupational Privilege Taxes (OPT or "Head Tax") — $5.75/month Employee OPT once an employee earns at least $500 in Denver-sourced compensation in a calendar month; $4.00/month Business OPT (employer-paid, NOT modeled by this engine). Independently fetched 2026-09-14 and corroborates the golden-payslip fixture\'s Denver figures exactly.', url: 'https://denver.prelive.opencities.com/files/assets/public/v/2/finance/documents/treasury/tax-guides/taxguidetopic61_occupationalprivilegetaxes.pdf' },
+    { authority: 'City and County of Denver, Department of Finance', instrument: 'Tax Guide Topic No. 61, Occupational Privilege Taxes (OPT or "Head Tax") — $5.75/month Employee OPT and $4.00/month Business OPT (employer-paid), both once an employee earns at least $500 in Denver-sourced compensation in a calendar month; both now modeled (v20). Independently fetched 2026-09-14 and corroborates the golden-payslip fixture\'s Denver figures exactly.', url: 'https://denver.prelive.opencities.com/files/assets/public/v/2/finance/documents/treasury/tax-guides/taxguidetopic61_occupationalprivilegetaxes.pdf' },
     { authority: 'Oregon Department of Revenue', instrument: 'Pub. 150-206-436 (Rev. 12-31-25), 2026 Oregon Withholding Tax Formulas — fetched via a text-extraction proxy (oregon.gov itself unreachable from this environment) and re-queried three times with independently-worded prompts 2026-09-14, producing identical figures each time: standard deductions ($2,910 narrow / $5,820 wide), exemption credit ($263/allowance), federal-subtraction phase-out schedule ($8,750 cap phasing to $0 between $125k-$145k single / $250k-$290k married), and the complete bracket tables for both the under-$50,000 and at-or-over-$50,000 annual-wage tiers.', url: 'https://www.oregon.gov/dor/forms/FormsPubs/withholding-tax-formulas_206-436_2026.pdf' },
     { authority: 'USDA National Finance Center', instrument: 'Federal payroll-processing bulletin reproducing Oregon\'s 2025 state withholding formula (effective Pay Period 06, 2025) — used by this pass as an INDEPENDENT second source (different organization, different document, prior tax year) to corroborate the 2026 Oregon DOR figures above: identical structural pattern (same bracket shape, same wage-tier split at $50,000, same "exemption credit equals bracket-1 base" design), with every 2025 dollar figure sitting ~2.6-2.9% below its 2026 counterpart — consistent with one year of routine inflation indexing, not independent transcription errors.', url: 'https://help.nfc.usda.gov/bulletins/2025/1743009231.htm' },
     { authority: 'Paid Leave Oregon (Oregon Employment Department)', instrument: '2026 Paid Leave Oregon contribution rate (1% total: 0.6% employee / 0.4% employer for employers with 25+ workers) and wage base (pegged to the 2026 Social Security taxable maximum, $184,500) — confirmed 2026-09-14 via paidleave.oregon.gov (through the same text-extraction proxy) and corroborated by a separate web search.', url: 'https://paidleave.oregon.gov/employers/' },
@@ -1973,7 +1984,7 @@ export const PAYROLL_RULE_PACK_US = {
     'Oregon (v9): the federal-tax-subtraction phase-out schedule is applied by FILING STATUS alone (single vs. married), independent of the allowance-count-driven bracket track. A SINGLE filer claiming 3+ allowances (who therefore uses the WIDE bracket track, same as a married filer) whose annual wages also reach $125,000+ (the point the single/married phase-out schedules start to diverge) hits a combination this engine\'s two sources don\'t clearly resolve — rejected with an explicit error rather than guessed. This is a narrow, rare combination for the ~50-employee freelancer/small-business target market, not a gap in the ordinary case. One number seen in the proxy-fetched Oregon DOR text ("$38,340" as a bracket lower bound) was NOT corroborated by the independent USDA NFC source and was discarded rather than used — see the v9 change log for the full reconciliation.',
     'Indiana was deliberately NOT added despite the secondary reference giving a headline state rate (2.95%), because that reference does not give the actual personal/dependent exemption amounts Indiana\'s real withholding formula subtracts before applying the rate — applying 2.95% to full gross would overstate every IN employee\'s withholding. Rejected rather than approximated. (Indiana county income tax, which is required in addition to the state amount, is unimplemented regardless for the same reason CA/NJ/NY local complexity was scoped state-by-state.)',
     'IL, PA, MI, CO, AZ, AK, and WA (added in v5) are sourced from a secondary cross-check reference document, not independently fetched from each state\'s own primary publication the way CA/NJ/NY were — see the evidence list above. This is a materially weaker sourcing chain and these seven states should be treated as lower-confidence than CA/NJ/NY until independently verified against each state\'s own official withholding-methods publication.',
-    'PA and CO local taxes (v8): Philadelphia Wage Tax (pa_philadelphia_resident / pa_philadelphia_nonresident_workplace, effective-dated by pay_date at the 2026-07-01 rate change) and Denver Occupational Privilege Tax employee share (co_denver_employee, MONTHLY-frequency-only, $5.75 flat once the $500/month earnings threshold is met) are now modeled and independently primary-sourced (phila.gov, denvergov.org) — see evidence. Denver\'s $4.00/month employer-paid Business OPT is explicitly NOT modeled (an employer-side fixed cost this engine has no place to post, the same pre-existing gap as WA\'s employer PFML share not appearing in employer_cost_total). All OTHER MI, CO (outside Denver), AZ, AK, and WA local/city income taxes (e.g. the many Michigan cities that levy their own income tax) remain unmodeled.',
+    'PA and CO local taxes (v8): Philadelphia Wage Tax (pa_philadelphia_resident / pa_philadelphia_nonresident_workplace, effective-dated by pay_date at the 2026-07-01 rate change) and Denver Occupational Privilege Tax employee share (co_denver_employee, MONTHLY-frequency-only, $5.75 flat once the $500/month earnings threshold is met) are now modeled and independently primary-sourced (phila.gov, denvergov.org) — see evidence. Denver\'s $4.00/month employer-paid Business OPT is ALSO now modeled (v20, denver_opt_employer, same gating as the employee OPT), closing the v8-era gap. All OTHER MI, CO (outside Denver), AZ, AK, and WA local/city income taxes (e.g. the many Michigan cities that levy their own income tax) remain unmodeled.',
     'California income tax (v7): for a given gross wage, this engine can differ from a result computed via EDD\'s OPTIONAL "annualize wages, apply the annual bracket table, divide by periods" method by a few cents, because this engine uses EDD\'s PRIMARY period-specific Method B tables (Tables 5-28) applied directly to the period\'s taxable income instead. Both methods are EDD-documented and both are "correct" — they can simply round differently at the margin. Confirmed via a user-supplied golden-payslip fixture (CA monthly $10,000/Single/0 allowances: this engine gives $647.84, the fixture\'s annualized-method calculation gives $647.90) — not treated as a bug, but flagged since a caller comparing this engine\'s output against a payslip built with the alternate method may see a few-cent difference at some wage levels.',
     'CO: the FAMLI employer-share/small-employer-exemption rules are DYNAMIC (employer-side only, don\'t affect the employee co_famli figure this engine computes) and not modeled.',
     'WA: PFML and WA Cares small-employer exemptions and WA Cares individual approved-exemption letters are DYNAMIC and not modeled — every WA employee is assumed subject to both at the flat statutory rates. A WA employee with an approved WA Cares exemption would be incorrectly charged the 0.58% contribution by this engine; callers with such employees must adjust outside this engine.',
@@ -2764,8 +2775,10 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     // Denver OPT (validated above as MONTHLY-only when set) — a flat
     // monthly amount once the $500 earnings threshold is met, not a rate.
     let denverOptEmployee = 0;
+    let denverOptEmployer = 0;
     if (employee.state === 'CO' && employee.co_denver_employee && grossPay >= p.colorado.denver_opt_monthly_earnings_threshold) {
       denverOptEmployee = p.colorado.denver_opt_employee_monthly;
+      denverOptEmployer = p.colorado.denver_opt_employer_monthly;
     }
 
     // --- Arizona: flat employee-elected percentage of gross wages ---
@@ -3194,7 +3207,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       mdIncomeTax + mdCountyTax + ctIncomeTax + deIncomeTax + dcIncomeTax + wiIncomeTax
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
-    const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta + employerSui);
+    const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta + employerSui + denverOptEmployer);
 
     return {
       employee_id: employeeId,
@@ -3231,6 +3244,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       co_income_tax: coIncomeTax,
       co_famli: coFamli,
       denver_opt_employee: denverOptEmployee,
+      denver_opt_employer: denverOptEmployer,
       az_income_tax: azIncomeTax,
       ak_ui: akUi,
       wa_pfml: waPfml,
@@ -3316,6 +3330,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     co_income_tax: sum(employees.map(e => e.co_income_tax)),
     co_famli: sum(employees.map(e => e.co_famli)),
     denver_opt_employee: sum(employees.map(e => e.denver_opt_employee)),
+    denver_opt_employer: sum(employees.map(e => e.denver_opt_employer)),
     az_income_tax: sum(employees.map(e => e.az_income_tax)),
     ak_ui: sum(employees.map(e => e.ak_ui)),
     wa_pfml: sum(employees.map(e => e.wa_pfml)),
@@ -3364,7 +3379,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
 
   const journal: UsJournalLine[] = [
     { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.gross_pay },
-    { side: 'DEBIT', account_role: 'EMPLOYER_PAYROLL_TAX_EXPENSE', amount: money(totals.fica_employer + totals.futa + totals.sui) },
+    { side: 'DEBIT', account_role: 'EMPLOYER_PAYROLL_TAX_EXPENSE', amount: money(totals.fica_employer + totals.futa + totals.sui + totals.denver_opt_employer) },
     { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: totals.net_pay },
     { side: 'CREDIT', account_role: 'FEDERAL_INCOME_TAX_PAYABLE', amount: totals.federal_income_tax },
     { side: 'CREDIT', account_role: 'FICA_PAYABLE', amount: money(totals.fica_employee + totals.fica_employer) },
@@ -3389,6 +3404,7 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'CO_INCOME_TAX_PAYABLE', amount: totals.co_income_tax },
     { side: 'CREDIT', account_role: 'CO_FAMLI_PAYABLE', amount: totals.co_famli },
     { side: 'CREDIT', account_role: 'DENVER_OPT_PAYABLE', amount: totals.denver_opt_employee },
+    { side: 'CREDIT', account_role: 'DENVER_BUSINESS_OPT_PAYABLE', amount: totals.denver_opt_employer },
     { side: 'CREDIT', account_role: 'AZ_INCOME_TAX_PAYABLE', amount: totals.az_income_tax },
     { side: 'CREDIT', account_role: 'AK_UI_PAYABLE', amount: totals.ak_ui },
     { side: 'CREDIT', account_role: 'WA_PFML_PAYABLE', amount: totals.wa_pfml },
@@ -4380,7 +4396,7 @@ export function payrollEngineSelfTestUS() {
     sGoldFedCap.employee_additional_medicare === 45 && goldenFedCap.controls.journal_balanced &&
     sGoldPaPhl.phl_wage_tax === 373.5 && sGoldPaPhl.net_pay === 7083.33 && goldenPaPhl.controls.journal_balanced &&
     sPhlEdge.phl_wage_tax === 374 && phlEffectiveDateEdge.controls.journal_balanced &&
-    sGoldCoDen.denver_opt_employee === 5.75 && sGoldCoDen.net_pay === 7301.25 && goldenCoDen.controls.journal_balanced &&
+    sGoldCoDen.denver_opt_employee === 5.75 && sGoldCoDen.denver_opt_employer === 4.00 && sGoldCoDen.net_pay === 7301.25 && goldenCoDen.controls.journal_balanced &&
     sGoldOr.or_income_tax === 763.35 && sGoldOr.or_stt === 10 && sGoldOr.or_paid_leave_employee === 60 &&
     sGoldOr.net_pay === 6937.48 && goldenOr.controls.journal_balanced &&
     sOrPlEdge.or_paid_leave_employee === 27 && orPaidLeaveCapEdge.controls.journal_balanced &&
