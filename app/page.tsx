@@ -1,34 +1,27 @@
 import Link from 'next/link';
 
-const choices = [
+const products = [
   {
     number: '01',
-    title: 'Help me balance my books',
-    description: 'Connect your accounting source and deploy only the reconciliation agent.',
+    title: 'Closing your books',
+    description: 'FinClose collects, classifies, and reconciles every account, then flags what needs a decision. Your accountant reviews, judges, and signs off — the close is never released without them.',
     href: '/start/balance-books',
-    tag: 'Close & reconcile'
+    tag: 'Book close',
+    steps: ['Collect & classify', 'Match & reconcile', 'Flag exceptions', 'Accountant reviews & signs off']
   },
   {
     number: '02',
-    title: 'Help me do payroll',
-    description: 'Set up only the payroll essentials and deploy the payroll agent.',
+    title: 'Payroll',
+    description: 'FinClose calculates and prepares every pay run across the jurisdictions you operate in. Your accountant or approver reviews it before anything is paid.',
     href: '/start/payroll',
-    tag: 'Payroll'
-  },
-  {
-    number: '03',
-    title: 'Do my bookkeeping',
-    description: 'Connect your accounting source and deploy ongoing bookkeeping without payroll.',
-    href: '/start/do-bookkeeping',
-    tag: 'Ongoing bookkeeping'
-  },
-  {
-    number: '04',
-    title: 'Bookkeeping & Payroll',
-    description: 'Deploy bookkeeping and payroll together under one coordinated FinClose service.',
-    href: '/start/bookkeeping-payroll',
-    tag: 'Combined service'
+    tag: 'Payroll',
+    steps: ['Calculate pay, tax & deductions', 'Prepare payslips & journal', 'Flag exceptions', 'Approver reviews & signs off']
   }
+];
+
+const secondaryPaths = [
+  { title: 'Ongoing bookkeeping without payroll', href: '/start/do-bookkeeping' },
+  { title: 'Bookkeeping & payroll together', href: '/start/bookkeeping-payroll' }
 ];
 
 export default function Home() {
@@ -47,30 +40,44 @@ export default function Home() {
       <section className="help-hero">
         <div className="help-intro">
           <h1>
-            How Can We
-            <span>Help?</span>
+            FinClose Does The
+            <span>Work.</span>
           </h1>
-          <p>Choose the job. FinClose deploys only the agent capability and connector access required for that service.</p>
+          <p>FinClose prepares the close and prepares payroll — every calculation, match, and reconciliation done for you. Your accountant reviews, judges, and approves. Nothing is released without a sign-off.</p>
           <div className="help-trust-row" aria-label="FinClose capabilities">
-            <span>Bookkeeping</span>
-            <span>Payroll</span>
-            <span>Monthly close</span>
-            <span>Year-end close</span>
+            <span>Prepared by FinClose</span>
+            <span>Reviewed by your accountant</span>
+            <span>Monthly & year-end close</span>
+            <span>Every pay run approved</span>
           </div>
         </div>
 
-        <div className="help-grid" aria-label="FinClose services">
-          {choices.map((choice) => (
-            <Link key={choice.number} href={choice.href} className="help-card">
+        <div className="help-grid help-grid-primary" aria-label="FinClose products">
+          {products.map((product) => (
+            <Link key={product.number} href={product.href} className="help-card help-card-primary">
               <div className="help-card-top">
-                <span className="help-number">{choice.number}</span>
-                <span className="help-tag">{choice.tag}</span>
+                <span className="help-number">{product.number}</span>
+                <span className="help-tag">{product.tag}</span>
               </div>
               <div className="help-card-copy">
-                <h2>{choice.title}</h2>
-                <p>{choice.description}</p>
+                <h2>{product.title}</h2>
+                <p>{product.description}</p>
+                <ul className="help-card-steps" aria-label={`How ${product.title} works`}>
+                  {product.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ul>
               </div>
               <span className="help-arrow" aria-hidden="true">→</span>
+            </Link>
+          ))}
+        </div>
+
+        <div className="help-secondary" aria-label="Other ways to start">
+          <span className="help-secondary-label">Need something else?</span>
+          {secondaryPaths.map((path) => (
+            <Link key={path.href} href={path.href} className="help-secondary-link">
+              {path.title} →
             </Link>
           ))}
         </div>
