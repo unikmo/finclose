@@ -6,7 +6,11 @@ import { isRealDataMode } from './runtime-mode';
 
 export type OrganizationRole = 'OWNER' | 'ADMIN' | 'ACCOUNTANT' | 'APPROVER' | 'VIEWER';
 
-const ROLE_LEVEL: Record<OrganizationRole, number> = {
+// Exported so other tenancy layers (e.g. lib/firm-tenancy.ts) can compute
+// role ceilings against the SAME canonical mapping instead of duplicating
+// it — duplication here is exactly the kind of drift that could silently
+// widen a permission boundary.
+export const ROLE_LEVEL: Record<OrganizationRole, number> = {
   VIEWER: 10,
   ACCOUNTANT: 30,
   APPROVER: 40,
