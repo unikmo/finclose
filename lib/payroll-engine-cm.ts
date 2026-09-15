@@ -63,6 +63,16 @@ export type CmEmployeeInput = {
   cnps_contributable_base?: number;
   basic_salary?: number;
   crtv_exempt: boolean;
+  // Benefit-in-kind flags, v2. All optional/default false — omitting all
+  // four leaves IRPP computed on gross_pay alone, unchanged from v1. Per
+  // the source document's own stated percentages of gross taxable salary:
+  // housing 15%, vehicle 10%, food 10%, telephone 5%. Affects the IRPP
+  // taxable base ONLY — CNPS/CFC/FNE/TDL/CRTV stay on their existing cash
+  // bases, since the source did not specify a BIK treatment for those.
+  housing_benefit?: boolean;
+  vehicle_benefit?: boolean;
+  food_benefit?: boolean;
+  telephone_benefit?: boolean;
 };
 
 export type CmPayrollRunInput = {
@@ -94,6 +104,7 @@ export type CmEmployeeResult = {
   employee_id: string;
   name?: string;
   gross_pay: number;
+  benefit_in_kind: number;
   irpp: number;
   cac: number;
   employee_cnps_pension: number;
@@ -120,6 +131,7 @@ export type CmPayrollRunResult = {
   employees: CmEmployeeResult[];
   totals: {
     gross_pay: number;
+    benefit_in_kind: number;
     irpp: number;
     cac: number;
     employee_cnps_pension: number;
@@ -145,7 +157,11 @@ export type CmPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_CM = {
-  id: 'CM-2026-IRPP-CNPS-CFC-FNE-TDL-CRTV-DRAFT-V1',
+  // v2: adds housing (15%)/vehicle (10%)/food (10%)/telephone (5%)
+  // benefit-in-kind additions to the IRPP taxable base, per the source
+  // document's own stated percentages (already cited in the v1
+  // limitations, just not implemented until now).
+  id: 'CM-2026-IRPP-CNPS-CFC-FNE-TDL-CRTV-BIK-DRAFT-V2',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'XAF',
   irpp: {
@@ -182,7 +198,7 @@ export const PAYROLL_RULE_PACK_CM = {
   limitations: [
     'v1 initial build, monthly payroll only. IRPP uses the source\'s own recommended "annualised statutory method" (annualize current gross pay, apply annual deductions/allowance/bands, divide by 12) rather than the obsolete DGI lookup table — but this is still NOT a true cumulative YTD-aware routine. The professional-expense annual cap (4,800,000 FCFA) and the 500,000 annual salary allowance are recomputed fresh each period from the annualized figure, not tracked as real running YTD totals — a genuinely irregular-pay employee will not have the true annual caps correctly enforced.',
     'Article 65 bis (exceptional/delayed income smoothing) is NOT implemented at all. Any bonus, retroactive payment, or other non-ordinary-salary amount run through this engine as ordinary gross pay will be taxed WRONG — this engine has no exceptional-income path and must not be used for such payments.',
-    'Taxable benefits in kind (housing 15%, vehicle 10%, food 10%, telephone 5%, etc. of gross taxable salary) are NOT computed — gross_pay is assumed to be cash remuneration only.',
+    'Taxable benefits in kind, v2: computed ONLY when the caller sets housing_benefit / vehicle_benefit / food_benefit / telephone_benefit to true, adding 15% / 10% / 10% / 5% of gross_pay respectively to the IRPP taxable base only, per the source\'s own stated percentages. CNPS/CFC/FNE/TDL/CRTV stay on their existing cash bases — the source did not specify a BIK treatment for those, and this engine does not guess. All four flags default to false/omitted, exactly matching v1 behavior for every existing caller. Other benefit types the source did not enumerate a percentage for are still not modeled.',
     'CNPS professional-expense exclusions (travel, milk, bicycle/moped, representation, meal/basket, transport, dirty-work, tool, and safety-promoter allowances, all specifically deductible from the CNPS contribution base per the source) are NOT modeled — the full cnps_contributable_base (default: gross_pay) is treated as fully contributable.',
     'CFC/FNE "salary-distribution base" and TDL "basic salary" both default to gross_pay when a separate basic_salary is not supplied. The real system may define these bases differently from total gross cash pay.',
     'NOT IMPLEMENTED AT ALL in v1, rejected outright: Article 31 IRPP exemption classification (family-character allowances, workplace-accident compensation, scholarships, etc.), the SMIG (minimum wage) CNPS contribution floor, and all statutory filing (DGI monthly IRPP/CAC/TDL remittance, CNPS teledeclaration, CFC/FNE/CRTV reporting). This engine prepares payroll and accounting outputs only — it does not file with the DGI or CNPS.',
@@ -300,10 +316,19 @@ export function calculateCmPayroll(input: CmPayrollRunInput): CmPayrollRunResult
     // --- CNPS occupational risk (employer-only, uncapped) ---
     const employerOccupationalRisk = money(cnpsBase * p.cnps.occupational_risk_rate[employee.cnps_risk_group]);
 
+    // --- Benefit in kind (v2; IRPP base only — see limitations) ---
+    const benefitInKind = money(
+      (employee.housing_benefit ? 0.15 : 0) * grossPay +
+      (employee.vehicle_benefit ? 0.10 : 0) * grossPay +
+      (employee.food_benefit ? 0.10 : 0) * grossPay +
+      (employee.telephone_benefit ? 0.05 : 0) * grossPay
+    );
+    const irppTaxableGrossPay = money(grossPay + benefitInKind);
+
     // --- IRPP (annualized statutory method; see limitations) ---
     let irpp = 0;
-    if (grossPay >= p.irpp.low_wage_threshold_monthly) {
-      const annualGrossTaxable = money(grossPay * 12);
+    if (irppTaxableGrossPay >= p.irpp.low_wage_threshold_monthly) {
+      const annualGrossTaxable = money(irppTaxableGrossPay * 12);
       const professionalDeductionAnnual = Math.min(money(annualGrossTaxable * p.irpp.professional_deduction_rate), p.irpp.professional_deduction_annual_cap);
       const employeeCnpsPensionAnnual = money(employeeCnpsPension * 12);
       const netSalaryCategoryAnnual = money(annualGrossTaxable - professionalDeductionAnnual - employeeCnpsPensionAnnual);
@@ -332,6 +357,7 @@ export function calculateCmPayroll(input: CmPayrollRunInput): CmPayrollRunResult
       employee_id: employeeId,
       name: employee.name ? String(employee.name).trim() : undefined,
       gross_pay: grossPay,
+      benefit_in_kind: benefitInKind,
       irpp,
       cac,
       employee_cnps_pension: employeeCnpsPension,
@@ -354,6 +380,7 @@ export function calculateCmPayroll(input: CmPayrollRunInput): CmPayrollRunResult
 
   const totals = {
     gross_pay: sum(employees.map(e => e.gross_pay)),
+    benefit_in_kind: sum(employees.map(e => e.benefit_in_kind)),
     irpp: sum(employees.map(e => e.irpp)),
     cac: sum(employees.map(e => e.cac)),
     employee_cnps_pension: sum(employees.map(e => e.employee_cnps_pension)),
@@ -459,6 +486,21 @@ export function payrollEngineSelfTestCM() {
     employees: [{ employee_id: 'X1', gross_pay: 1000000, sector_regime: 'GENERAL_OR_DOMESTIC', cnps_risk_group: 'A', employer_cfc_fne_exempt: true, crtv_exempt: false }]
   });
 
+  // v2 test: housing benefit pushes a below-threshold employee over the
+  // IRPP dispensation line, and correctly enters the IRPP base. Gross
+  // 60,000 (alone, below the 62,000 threshold) + 15% housing BIK (9,000)
+  // -> taxable 69,000, above threshold. CNPS pension stays on cash
+  // gross_pay only (60,000): 60,000*4.2%=2,520 (unaffected by BIK).
+  // annualGrossTaxable=828,000; professionalDeduction=min(248,400,4.8M)=
+  // 248,400; CNPS annual=30,240; netSalaryCategoryAnnual=549,360;
+  // annualTaxableSalary=49,360 (10% bracket) -> annual IRPP=4,936 ->
+  // monthly=411.33. CAC=41.13.
+  const housingBik = calculateCmPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{ employee_id: 'H1', gross_pay: 60000, sector_regime: 'GENERAL_OR_DOMESTIC', cnps_risk_group: 'A', employer_cfc_fne_exempt: false, crtv_exempt: false, housing_benefit: true }]
+  });
+  const eHousing = housingBik.employees[0];
+
   const ok =
     e1.employee_cnps_pension === 31500 && e1.employer_cnps_pension === 31500 &&
     e1.irpp === 144391.67 && e1.cac === 14439.17 &&
@@ -469,7 +511,9 @@ export function payrollEngineSelfTestCM() {
     belowThreshold.employees[0].irpp === 0 && belowThreshold.controls.journal_balanced &&
     cfc99999.employees[0].employee_cfc === 990 && cfc100001.employees[0].employee_cfc === 1000 &&
     exempt.employees[0].employer_cfc === 0 && exempt.employees[0].employer_fne === 0 && exempt.employees[0].employee_cfc === 10000 &&
-    exempt.controls.journal_balanced;
+    exempt.controls.journal_balanced &&
+    eHousing.benefit_in_kind === 9000 && eHousing.irpp === 411.33 && eHousing.cac === 41.13 &&
+    eHousing.employee_cnps_pension === 2520 && housingBik.controls.journal_balanced;
 
-  return { ok, r1, belowThreshold, cfc99999, cfc100001, exempt };
+  return { ok, r1, belowThreshold, cfc99999, cfc100001, exempt, housingBik };
 }

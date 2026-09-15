@@ -61,6 +61,15 @@ export type RwEmployeeInput = {
   oh_contribution_base?: number; // defaults to gross_pay if omitted
   rama_member: boolean;
   rama_basic_salary?: number; // required when rama_member is true
+  // Benefit-in-kind flags, v2. Both optional/default false — omitting both
+  // leaves PAYE computed on gross_pay alone, unchanged from v1. Per the
+  // source document: a vehicle benefit adds 10% of employment income to
+  // taxable income; an accommodation benefit adds 20%. Both affect PAYE
+  // only (RSSB pension/OH/maternity, RAMA, and CBHI stay on the gross-pay
+  // cash base — the source did not specify a BIK treatment for those, so
+  // this engine does not guess one; see limitations).
+  vehicle_benefit?: boolean;
+  accommodation_benefit?: boolean;
 };
 
 export type RwPayrollRunInput = {
@@ -89,6 +98,7 @@ export type RwEmployeeResult = {
   employee_id: string;
   name?: string;
   gross_pay: number;
+  benefit_in_kind: number;
   paye: number;
   employee_pension: number;
   employer_pension: number;
@@ -113,6 +123,7 @@ export type RwPayrollRunResult = {
   employees: RwEmployeeResult[];
   totals: {
     gross_pay: number;
+    benefit_in_kind: number;
     paye: number;
     employee_pension: number;
     employer_pension: number;
@@ -136,7 +147,12 @@ export type RwPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_RW = {
-  id: 'RW-2026-PAYE-RSSB-RAMA-CBHI-DRAFT-V1',
+  // v2: adds vehicle (10%) and accommodation (20%) benefit-in-kind
+  // additions to the PAYE taxable base, per the source document's own
+  // stated percentages (already cited in the v1 limitations, just not
+  // implemented until now). RSSB/RAMA/CBHI bases stay on cash gross_pay
+  // only — the source doesn't specify a BIK treatment for those.
+  id: 'RW-2026-PAYE-RSSB-RAMA-CBHI-BIK-DRAFT-V2',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'RWF',
   paye: {
@@ -166,7 +182,8 @@ export const PAYROLL_RULE_PACK_RW = {
     'RSSB pension is fixed at 6%/6% for all of 2026. The already-enacted 2027+ rate increases (14%, 16%, 18%, 20%) are deliberately NOT implemented — a payroll run dated 2027 or later will still use the 6%/6% rate, which will be WRONG once the increase takes effect. The source itself notes these future rates require Presidential Order revalidation before activation.',
     'CBHI (0.5%) is computed on this engine\'s own best reading of the source\'s recommended net-salary base (gross - PAYE - employee pension - employee maternity - employee RAMA if applicable). The source EXPLICITLY warns this base must be locked only after golden-testing against actual RSSB/RRA Ishema system output — this pass could not do that. Treat this pack\'s CBHI figure as UNVERIFIED against the real system, not merely lower-confidence.',
     'Occupational Hazards (OH) contribution base defaults to gross pay when no oh_contribution_base is separately supplied — the source notes OH has its own authority-defined base distinct from the pension base, but did not give that base numerically.',
-    'NOT IMPLEMENTED AT ALL in v1, rejected outright: vehicle benefit (10% of employment income), accommodation benefit (20%), low-interest employee advances, expense-reimbursement classification, and all statutory filing (Ishema monthly declarations). This engine prepares payroll and accounting outputs only — it does not file with RRA/RSSB.',
+    'Vehicle/accommodation benefit-in-kind, v2: computed ONLY when the caller sets vehicle_benefit and/or accommodation_benefit to true, adding 10% (vehicle) and/or 20% (accommodation) of gross_pay to the PAYE taxable base only, per the source\'s own stated percentages. RSSB pension/OH/maternity, RAMA, and CBHI stay on the cash gross_pay base — the source did not specify how (or whether) these benefits affect those bases, and this engine does not guess. Both flags default to false/omitted, exactly matching v1 behavior for every existing caller.',
+    'NOT IMPLEMENTED: low-interest employee advances, expense-reimbursement classification, and all statutory filing (Ishema monthly declarations). This engine prepares payroll and accounting outputs only — it does not file with RRA/RSSB.',
     'Source parameters come from a user-supplied implementation-reference document (itself citing RRA/RSSB), not independently re-fetched directly this pass. Should be reconfirmed against RRA\'s own PAYE guidance and RSSB\'s current rate notices before this pack is marked VERIFIED_BASIC_RULES.'
   ]
 };
@@ -259,14 +276,21 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
     const grossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
     const ohBase = requireNonNegativeMoney(employee.oh_contribution_base ?? grossPay, `oh_contribution_base for ${employeeId}`);
 
+    // --- Benefit in kind (v2; PAYE base only — see limitations) ---
+    const benefitInKind = money(
+      (employee.vehicle_benefit ? 0.10 : 0) * grossPay +
+      (employee.accommodation_benefit ? 0.20 : 0) * grossPay
+    );
+    const payeTaxableIncome = money(grossPay + benefitInKind);
+
     // --- PAYE ---
     let paye: number;
     if (employee.employee_type === 'CASUAL') {
-      paye = money(Math.max(0, grossPay - p.paye.casual_threshold) * p.paye.casual_rate_above);
+      paye = money(Math.max(0, payeTaxableIncome - p.paye.casual_threshold) * p.paye.casual_rate_above);
     } else if (employee.first_employer) {
-      paye = bracketLookup(grossPay, p.paye.brackets);
+      paye = bracketLookup(payeTaxableIncome, p.paye.brackets);
     } else {
-      paye = money(grossPay * p.paye.non_first_employer_flat_rate);
+      paye = money(payeTaxableIncome * p.paye.non_first_employer_flat_rate);
     }
     paye = Math.ceil(paye); // RRA rounding rule: round up to whole RWF
 
@@ -296,6 +320,7 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
       employee_id: employeeId,
       name: employee.name ? String(employee.name).trim() : undefined,
       gross_pay: grossPay,
+      benefit_in_kind: benefitInKind,
       paye,
       employee_pension: employeePension,
       employer_pension: employerPension,
@@ -316,6 +341,7 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
 
   const totals = {
     gross_pay: sum(employees.map(e => e.gross_pay)),
+    benefit_in_kind: sum(employees.map(e => e.benefit_in_kind)),
     paye: sum(employees.map(e => e.paye)),
     employee_pension: sum(employees.map(e => e.employee_pension)),
     employer_pension: sum(employees.map(e => e.employer_pension)),
@@ -392,17 +418,36 @@ export function payrollEngineSelfTestRW() {
     employees: [{ employee_id: 'R4', gross_pay: 500000, employee_type: 'REGULAR', first_employer: true, rama_member: true, rama_basic_salary: 400000 }]
   });
 
+  // v2 test: vehicle benefit. RWF300,000 gross + 10% vehicle BIK (30,000)
+  // -> PAYE taxable 330,000 -> bracket [200000,24000,0.30]: 24000 +
+  // 0.30*(330000-200000) = 63,000.
+  const vehicleBik = calculateRwPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{ employee_id: 'R5', gross_pay: 300000, employee_type: 'REGULAR', first_employer: true, rama_member: false, vehicle_benefit: true }]
+  });
+  // v2 test: both benefits. 300,000 + 30% (10%+20%) BIK (90,000) -> 390,000
+  // -> 24000 + 0.30*(390000-200000) = 81,000.
+  const bothBik = calculateRwPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{ employee_id: 'R6', gross_pay: 300000, employee_type: 'REGULAR', first_employer: true, rama_member: false, vehicle_benefit: true, accommodation_benefit: true }]
+  });
+
   const e1 = firstEmployer.employees[0];
   const e2 = secondEmployer.employees[0];
   const e3 = pensionMaternity.employees[0];
   const e4 = rama.employees[0];
+  const e5 = vehicleBik.employees[0];
+  const e6 = bothBik.employees[0];
 
   const ok =
     e1.paye === 54000 && firstEmployer.controls.journal_balanced &&
     e2.paye === 90000 && secondEmployer.controls.journal_balanced &&
     e3.employee_pension === 30000 && e3.employer_pension === 30000 &&
     e3.employee_maternity === 1500 && e3.employer_maternity === 1500 && pensionMaternity.controls.journal_balanced &&
-    e4.employee_rama === 30000 && e4.employer_rama === 30000 && rama.controls.journal_balanced;
+    e4.employee_rama === 30000 && e4.employer_rama === 30000 && rama.controls.journal_balanced &&
+    e5.benefit_in_kind === 30000 && e5.paye === 63000 && vehicleBik.controls.journal_balanced &&
+    e6.benefit_in_kind === 90000 && e6.paye === 81000 && bothBik.controls.journal_balanced &&
+    e1.benefit_in_kind === 0;
 
-  return { ok, firstEmployer, secondEmployer, pensionMaternity, rama };
+  return { ok, firstEmployer, secondEmployer, pensionMaternity, rama, vehicleBik, bothBik };
 }
