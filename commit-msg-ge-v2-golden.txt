@@ -1,0 +1,49 @@
+payroll(ge): add taxable-benefit/exempt-reimbursement support, verified via golden fixtures (v2)
+
+User supplied a Georgia (country) payroll implementation reference plus
+a matching golden-payslip QA pack. Georgia is the ONE country in this
+dispatcher marked VERIFIED_BASIC_RULES (production-ready) -- every
+other pack is DRAFT_NEEDS_LEGAL_REVIEW -- so this was the highest-
+stakes cross-check to run this session.
+
+Result: the existing core PIT (20% flat) / employee+employer funded
+pension (2%/2%) / State co-financing (2%/1%/0% at the GEL 24,000/
+60,000 YTD thresholds, including both threshold-crossing splits)
+logic reproduces the golden pack's own GE-001 through GE-004 fixtures
+and both boundary tests (GE-B01/GE-B02) exactly, to the tetri. No bug
+in the core calculation.
+
+But GE-005 (taxable non-cash housing benefit) and GE-006 (qualifying
+exempt cash reimbursement) exposed a real, structural gap: the
+PayrollEmployeeInput schema had only a single gross_pay field, with no
+way to represent a benefit that inflates the tax/pension base without
+being cash paid to the employee, or a reimbursement that's cash paid
+but excluded from that base. Given this is the one production-ready
+engine, and the fix is small and fully specified by the fixtures
+themselves, closed it now rather than just flagging it:
+
+- Added optional taxable_benefits and exempt_cash_reimbursements
+  employee inputs (both default to 0, exactly preserving prior
+  behavior for every existing caller).
+- taxable_salary (the PIT/pension base) = gross_pay + taxable_benefits.
+- cash_pay (what actually reaches the employee before withholding) =
+  gross_pay + exempt_cash_reimbursements.
+- net_pay = cash_pay - PIT - employee pension (the non-cash benefit
+  is taxed but never subtracted again, since it was never cash).
+- Journal debits SALARY_EXPENSE on cash_pay only, not the non-cash
+  benefit value -- the benefit's own expense (e.g. rent) is assumed
+  already booked elsewhere in the ledger; only its tax/pension effect
+  is captured here. Journal balance is preserved algebraically
+  regardless of benefit/reimbursement amounts (verified).
+
+Both new fixtures reproduce exactly: GE-005 (cash 3,000 + benefit 600
+-> taxable 3,600, PIT 720, pension 72/72/72, net 2,208) and GE-006
+(cash 3,000 + exempt reimbursement 500 -> taxable stays 3,000, PIT
+600, net 2,840). Wired into the permanent payrollEngineSelfTest()
+suite, not left as a scratch script. Rule pack bumped to
+GE-2026-BASIC-EMPLOYMENT-V2.
+
+Full aggregate self-test suite (all 10 countries) passes, confirming
+backward compatibility for every existing caller.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
