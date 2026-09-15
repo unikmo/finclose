@@ -1,0 +1,32 @@
+payroll(us): add Wisconsin -- full 50-state-plus-DC coverage (v17)
+
+Wisconsin was the last remaining gap. A prior pass this session (v16)
+deliberately declined to ship it after finding a top-bracket formula in
+the WI Form 1 ANNUAL RETURN instructions, correctly judging that
+mixing annual-return constants into a withholding calculation without
+confirming interchangeability was too risky.
+
+This pass found the actual answer: Wisconsin's own current Publication
+W-166 (1/26), "Withholding Tax Guide" -- the department's dedicated
+payroll-withholding publication, distinct from the annual-return
+instructions -- contains a section titled "ALTERNATE METHOD OF
+WITHHOLDING WISCONSIN INCOME TAX" with a complete percentage-method
+formula: a deduction phase-out by filing status (matching the figures
+already confirmed in an earlier pass), a flat $400-per-exemption
+subtraction, and a single 4-bracket schedule (3.54% / 4.65% / 5.30% /
+7.65%) that the guide's own worked examples confirm applies to both
+single and married filers alike.
+
+All 3 of the guide's own worked examples are reproduced exactly by
+this implementation; the self-test suite hand-verifies Example 3
+(married, biweekly $1,000, 3 exemptions -> $22.08) end-to-end through
+the actual calculateUsPayroll() function, not just the bracket math in
+isolation. Treated as a high-confidence, primary-sourced,
+worked-example-verified state, comparable to IN/NC/IA/DE.
+
+Full self-test suite (all v1-v17 cases) passes. This closes out
+state-by-state US payroll coverage: 50 states plus DC, each sourced
+and self-tested, with every remaining confidence gap named explicitly
+in this file's own limitations array rather than glossed over.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

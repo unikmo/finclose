@@ -1,0 +1,51 @@
+payroll(uk,ca): add UK and Canada payroll engines (v1 draft, DRAFT_NEEDS_LEGAL_REVIEW)
+
+Two new country payroll rule packs, stacked on the existing Germany/US
+work (same pattern as US-on-DE): lib/payroll-engine-uk.ts and
+lib/payroll-engine-ca.ts, wired into the shared dispatcher in
+lib/payroll-engine.ts alongside the existing Georgia/Germany/US packs.
+
+Both are built from user-supplied "Payroll Implementation Reference"
+documents (UK 2026/27 and Canada 2026) -- genuine parameter references
+citing HMRC/GOV.UK/Scottish Government/The Pensions Regulator (UK) and
+CRA T4127/Revenu Quebec/provincial sources (Canada), with real
+brackets, rates, and constants attributed to named government
+publications. Neither was independently re-fetched from the primary
+government source directly this pass -- same sourcing tier as the
+original US IL/PA/MI/CO/AZ/AK/WA batch.
+
+UK v1 scope: PAYE income tax for the three standard cumulative tax
+codes only (1257L England/NI, S1257L Scotland, C1257L Wales) via a
+simplified annualize-and-divide approximation (same disclosed
+simplification already used for Germany's Lohnsteuer); Class 1
+National Insurance category A only; Student/Postgraduate Loan
+deductions (Plans 1/2/4/5 + PGL); workplace pension auto-enrolment
+minimum contribution (5%/8%) gated on a caller-supplied enrolled flag.
+Every other tax code, NI category, statutory payment (SMP/SPP/SSP/
+etc.), Apprenticeship Levy, Employment Allowance, and RTI filing is
+explicitly rejected/unimplemented, not approximated -- see the file's
+own limitations array.
+
+Canada v1 scope: federal income tax (T4127 K-constant formula, BPAF
+taper reconstructed via linear interpolation between two published
+endpoints) plus all 10 non-Quebec provinces and 3 territories using
+their real 2026 bracket tables and Basic Personal Amounts (including
+BC's exact mid-year Option 1 reduction formula); CPP1/CPP2 and EI at
+standard rates via a banded incremental-contribution helper (verified
+by hand: CPP1 floor/ceiling boundary at $3,500/$74,600 produces exactly
+the published $4,230.45 annual maximum; EI ceiling at $68,900 produces
+exactly $1,123.07). QUEBEC IS ENTIRELY REJECTED, not approximated --
+the source document itself insists Quebec requires a wholly separate
+Revenu Quebec formula engine, which was not built; province_of_employment
+'QC' throws an explicit error, verified by a dedicated self-test case.
+Ontario surtax/Health Premium, all employer-only levies (BC EHT,
+Manitoba HE Levy, Ontario EHT, NL HAPSET), and all
+WCB/WSIB/WorkSafe/CNESST/WSCC premiums (explicitly marked DYNAMIC,
+employer-specific data in the source) are not implemented.
+
+Both packs are status DRAFT_NEEDS_LEGAL_REVIEW and gated behind
+VERIFIED_BASIC_RULES in preparePayrollRun, same as DE/US -- neither can
+run real payroll until reviewed. Full aggregate self-test suite
+(Georgia + Germany + US + UK + Canada) passes together.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

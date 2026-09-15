@@ -1,0 +1,53 @@
+payroll(rw,mu,cm): add Rwanda, Mauritius, and Cameroon payroll engines (v1 draft, DRAFT_NEEDS_LEGAL_REVIEW)
+
+Three more country payroll rule packs: lib/payroll-engine-rw.ts,
+lib/payroll-engine-mu.ts, and lib/payroll-engine-cm.ts, wired into the
+shared dispatcher alongside the seven already built. This completes
+the full batch of user-supplied country reference documents from this
+session.
+
+Rwanda v1: monthly progressive PAYE (0%/10%/20%/30%), with distinct
+first-employer/non-first-employer (flat 30%)/casual-labourer paths;
+RSSB pension fixed at 6%/6% for 2026 (the already-enacted 2027+
+increases are deliberately NOT pre-loaded, since the source itself
+flags them as requiring Presidential Order revalidation before
+activation); Occupational Hazards, Maternity, RAMA. CBHI's net-salary
+base is implemented per the source's own recommended validation order
+but explicitly flagged as UNVERIFIED against actual RSSB Ishema
+output, since the source itself warns this base must be locked only
+after golden-testing against the real system. All PAYE/pension/
+maternity/RAMA figures reproduce the source document's own worked
+golden-test numbers exactly (RWF300,000 -> RWF54,000 PAYE; first vs
+non-first employer; pension/maternity/RAMA on RWF500,000/400,000
+salaries).
+
+Mauritius v1: the genuinely distinctive CUMULATIVE PAYE algorithm
+(13-period relief allocation, the statutory end-of-year bonus as a
+13th period), implemented and verified with a two-period worked
+example confirming current-period PAYE correctly nets out tax already
+withheld since July. CSG, NSF (with min/max contribution-base
+clamping), HRDC Training Levy, PRGF. All income-tax bracket boundaries
+(Rs500,000, Rs1,000,000, Rs12,000,000) and CSG/PRGF golden tests from
+the source reproduce exactly.
+
+Cameroon v1: IRPP via the source's own recommended "annualised
+statutory method" (explicitly NOT the DGI's stale indicative table,
+which the source itself warns still shows the obsolete 2.8%/300,000
+CNPS parameters -- this pack correctly uses the current 4.2%/750,000
+figures throughout). CNPS pension/family-allowance/occupational-risk
+branches (rate depending on sector regime and A/B/C risk group), CAC,
+CFC/FNE (with the statutory lower-1,000 rounding), TDL and CRTV
+step-lookup tables. A full worked example was hand-derived and
+verified end-to-end (gross 1,000,000 FCFA/month -> pension capped
+exactly at the source's own stated 31,500 FCFA maximum, IRPP
+144,391.67, CAC 14,439.17, CFC/FNE/TDL/CRTV all matching their
+respective source tables), plus the source's own low-wage-threshold
+and CFC-rounding boundary tests.
+
+All three packs are status DRAFT_NEEDS_LEGAL_REVIEW and gated behind
+VERIFIED_BASIC_RULES in preparePayrollRun, same as every other pack.
+Full aggregate self-test suite (Georgia + Germany + US + UK + Canada +
+Kenya + South Africa + Rwanda + Mauritius + Cameroon -- 10 countries)
+passes together.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>

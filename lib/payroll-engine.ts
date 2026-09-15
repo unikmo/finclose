@@ -2,13 +2,44 @@ import crypto from 'node:crypto';
 import { realtimeDatabase } from './finclose-backend';
 import { getServiceDeployment } from './service-deployments';
 import { assertDateRangeOpenForCompany } from './close-governance-engine';
+import { calculateGermanyPayroll, payrollEngineSelfTestDE, PAYROLL_RULE_PACK_DE } from './payroll-engine-de';
+import type { DePayrollRunInput, DePayrollRunResult } from './payroll-engine-de';
+import { calculateUsPayroll, payrollEngineSelfTestUS, PAYROLL_RULE_PACK_US } from './payroll-engine-us';
+import { calculateUkPayroll, payrollEngineSelfTestUK, PAYROLL_RULE_PACK_UK } from './payroll-engine-uk';
+import type { UkPayrollRunInput, UkPayrollRunResult } from './payroll-engine-uk';
+import { calculateCaPayroll, payrollEngineSelfTestCA, PAYROLL_RULE_PACK_CA } from './payroll-engine-ca';
+import type { CaPayrollRunInput, CaPayrollRunResult } from './payroll-engine-ca';
+import { calculateKePayroll, payrollEngineSelfTestKE, PAYROLL_RULE_PACK_KE } from './payroll-engine-ke';
+import type { KePayrollRunInput, KePayrollRunResult } from './payroll-engine-ke';
+import { calculateZaPayroll, payrollEngineSelfTestZA, PAYROLL_RULE_PACK_ZA } from './payroll-engine-za';
+import type { ZaPayrollRunInput, ZaPayrollRunResult } from './payroll-engine-za';
+import { calculateRwPayroll, payrollEngineSelfTestRW, PAYROLL_RULE_PACK_RW } from './payroll-engine-rw';
+import type { RwPayrollRunInput, RwPayrollRunResult } from './payroll-engine-rw';
+import { calculateMuPayroll, payrollEngineSelfTestMU, PAYROLL_RULE_PACK_MU } from './payroll-engine-mu';
+import type { MuPayrollRunInput, MuPayrollRunResult } from './payroll-engine-mu';
+import { calculateCmPayroll, payrollEngineSelfTestCM, PAYROLL_RULE_PACK_CM } from './payroll-engine-cm';
+import type { CmPayrollRunInput, CmPayrollRunResult } from './payroll-engine-cm';
+import type { UsPayrollRunInput, UsPayrollRunResult } from './payroll-engine-us';
 
 export type PayrollEmployeeInput = {
   employee_id: string;
   name?: string;
+  // Cash salary for the period. This is NOT the same as the PIT/pension
+  // taxable base once taxable_benefits is nonzero -- see taxable_benefits.
   gross_pay: number;
   pension_participant: boolean;
   ytd_taxable_salary_before: number;
+  // Taxable non-cash benefits (market-value housing, goods/services,
+  // education assistance not job-related, debt waiver, etc. per Tax Code
+  // Ch. on employment income) added to gross_pay to form the PIT and
+  // pension contribution base. Increases PIT and pension withheld, but is
+  // NOT cash paid to the employee -- excluded from cash net pay.
+  taxable_benefits?: number;
+  // Qualifying cash reimbursements/allowances statutorily excluded from
+  // salary income (e.g. qualifying business-travel reimbursement, certain
+  // employer transport/accommodation/food cases). Paid in cash, added to
+  // cash net pay, but NOT added to the PIT/pension taxable base.
+  exempt_cash_reimbursements?: number;
 };
 
 export type PayrollRunInput = {
@@ -28,7 +59,10 @@ export type PayrollEmployeeResult = {
   employee_id: string;
   name?: string;
   gross_pay: number;
+  taxable_benefits: number;
+  exempt_cash_reimbursements: number;
   taxable_salary: number;
+  cash_pay: number;
   income_tax: number;
   employee_pension: number;
   employer_pension: number;
@@ -49,6 +83,7 @@ export type PayrollRunResult = {
   employees: PayrollEmployeeResult[];
   totals: {
     gross_pay: number;
+    cash_pay: number;
     income_tax: number;
     employee_pension: number;
     employer_pension: number;
@@ -68,7 +103,7 @@ export type PayrollRunResult = {
 
 export const PAYROLL_RULE_PACKS = {
   GE: {
-    id: 'GE-2026-BASIC-EMPLOYMENT-V1',
+    id: 'GE-2026-BASIC-EMPLOYMENT-V2',
     status: 'VERIFIED_BASIC_RULES',
     currency: 'GEL',
     income_tax_rate: 0.20,
@@ -89,21 +124,35 @@ export const PAYROLL_RULE_PACKS = {
         authority: 'Legislative Herald of Georgia (Matsne)',
         instrument: 'Law of Georgia on Funded Pension, Article 3',
         url: 'https://www.matsne.gov.ge/en/document/view/4280127'
+      },
+      {
+        authority: 'User-supplied golden-payslip QA pack',
+        instrument: '"Georgia 2026 Golden Payslip QA Pack" (verified 15 Sep 2026) -- 6 fully-traced fixtures plus 2 boundary tests, used to confirm the existing core PIT/pension/state-pension logic to the exact tetri (GE-001 through GE-004 plus both boundary tests) and to catch a real gap this pass fixed: no support for taxable non-cash benefits or exempt cash reimbursements (GE-005/GE-006), now implemented and verified to the exact tetri.',
+        url: 'file: Georgia_2026_Payroll_Golden_Payslip_QA_Pack.pdf (user-supplied, 2026-09-15)'
       }
     ],
     limitations: [
-      'Basic regular cash salary only.',
       'The caller must explicitly state whether each employee participates in the funded pension scheme; FinClose does not infer pension eligibility from age or historic opt-out status.',
-      'Special income-tax exemptions, non-cash benefits, expense reimbursements, foreign/diplomatic cases, garnishments and voluntary deductions are not calculated by this rule pack.',
+      'As of 2026-09-15 (caught via a user-supplied golden-payslip QA pack): taxable_benefits (e.g. employer-provided housing/goods/education at market value) and exempt_cash_reimbursements (e.g. qualifying business-travel reimbursement) are now supported as separate optional per-employee inputs -- taxable_benefits inflate the PIT/pension base without being cash paid to the employee; exempt_cash_reimbursements are cash paid to the employee without inflating the taxable base. Both default to 0, preserving prior behavior exactly for callers that don\'t supply them. Verified to the exact tetri against the source document\'s own GE-005 (housing benefit) and GE-006 (exempt reimbursement) golden fixtures.',
+      'Still NOT implemented: the employer-provided-motor-vehicle fixed-amount special rule (GEL 60-300/month by engine category, electric exempt), small-business-status individual entrepreneur\'s GEL 6,000 source-withholding exception (Article 94), Free Industrial Zone enterprise withholding exclusion, non-resident-employer-without-PE source-withholding exception, and employee tax-relief/exemption certificates (high-mountain rules, etc.). Foreign/diplomatic cases, garnishments and voluntary deductions are also not calculated by this rule pack.',
       'Year-to-date taxable salary is caller-supplied until historical payroll ingestion is normalized into the payroll engine.',
-      'This engine prepares payroll and accounting outputs only. It does not submit tax or pension declarations and does not initiate payments.'
+      'This engine prepares payroll and accounting outputs only. It does not submit tax or pension declarations and does not initiate payments. The journal does not book the underlying non-cash benefit expense itself (e.g. housing) -- only its tax/pension effect -- on the assumption that expense is already recorded elsewhere in the ledger.'
     ]
   },
-  US: { id: 'US-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
-  DE: { id: 'DE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
-  GB: { id: 'GB-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
-  EE: { id: 'EE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
-  CM: { id: 'CM-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' }
+  // Real calculation logic exists (see payroll-engine-de.ts / payroll-engine-us.ts)
+  // but both are DRAFT_NEEDS_LEGAL_REVIEW: preparePayrollRun below refuses to
+  // run real payroll on either pack until someone with current local
+  // payroll/tax expertise has checked the figures and flips the status.
+  DE: PAYROLL_RULE_PACK_DE,
+  US: PAYROLL_RULE_PACK_US,
+  GB: PAYROLL_RULE_PACK_UK,
+  CA: PAYROLL_RULE_PACK_CA,
+  KE: PAYROLL_RULE_PACK_KE,
+  ZA: PAYROLL_RULE_PACK_ZA,
+  RW: PAYROLL_RULE_PACK_RW,
+  MU: PAYROLL_RULE_PACK_MU,
+  CM: PAYROLL_RULE_PACK_CM,
+  EE: { id: 'EE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' }
 } as const;
 
 function money(value: number) {
@@ -188,30 +237,43 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
+    const taxableBenefits = requireNonNegativeMoney(employee.taxable_benefits ?? 0, `taxable_benefits for ${employeeId}`);
+    const exemptReimbursements = requireNonNegativeMoney(employee.exempt_cash_reimbursements ?? 0, `exempt_cash_reimbursements for ${employeeId}`);
 
-    const incomeTax = money(grossPay * 0.20);
-    const employeePension = employee.pension_participant ? money(grossPay * 0.02) : 0;
-    const employerPension = employee.pension_participant ? money(grossPay * 0.02) : 0;
-    const statePension = employee.pension_participant ? statePensionForPeriod(ytdBefore, grossPay) : 0;
-    const netPay = money(grossPay - incomeTax - employeePension);
+    // Taxable salary (PIT and pension contribution base) includes taxable
+    // non-cash benefits on top of cash salary. Cash pay (what the employee
+    // actually receives before withholding) includes exempt reimbursements
+    // but NOT the non-cash benefit, which is never paid in cash.
+    const taxableSalary = money(grossPay + taxableBenefits);
+    const cashPay = money(grossPay + exemptReimbursements);
+
+    const incomeTax = money(taxableSalary * 0.20);
+    const employeePension = employee.pension_participant ? money(taxableSalary * 0.02) : 0;
+    const employerPension = employee.pension_participant ? money(taxableSalary * 0.02) : 0;
+    const statePension = employee.pension_participant ? statePensionForPeriod(ytdBefore, taxableSalary) : 0;
+    const netPay = money(cashPay - incomeTax - employeePension);
 
     return {
       employee_id: employeeId,
       name: employee.name ? String(employee.name).trim() : undefined,
       gross_pay: grossPay,
-      taxable_salary: grossPay,
+      taxable_benefits: taxableBenefits,
+      exempt_cash_reimbursements: exemptReimbursements,
+      taxable_salary: taxableSalary,
+      cash_pay: cashPay,
       income_tax: incomeTax,
       employee_pension: employeePension,
       employer_pension: employerPension,
       state_pension: statePension,
       net_pay: netPay,
-      employer_funded_total: money(grossPay + employerPension),
-      ytd_taxable_salary_after: money(ytdBefore + grossPay)
+      employer_funded_total: money(cashPay + employerPension),
+      ytd_taxable_salary_after: money(ytdBefore + taxableSalary)
     };
   });
 
   const totals = {
     gross_pay: sum(employees.map(employee => employee.gross_pay)),
+    cash_pay: sum(employees.map(employee => employee.cash_pay)),
     income_tax: sum(employees.map(employee => employee.income_tax)),
     employee_pension: sum(employees.map(employee => employee.employee_pension)),
     employer_pension: sum(employees.map(employee => employee.employer_pension)),
@@ -221,7 +283,12 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
   };
 
   const journal: PayrollJournalLine[] = [
-    { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.gross_pay },
+    // Debited on CASH pay only -- the non-cash taxable benefit (e.g.
+    // employer-provided housing) is not a payroll cash cost here; it is
+    // assumed already booked through its own underlying expense account
+    // elsewhere in the ledger. It still correctly inflates PIT/pension
+    // withheld via taxable_salary above.
+    { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.cash_pay },
     { side: 'DEBIT', account_role: 'EMPLOYER_PENSION_EXPENSE', amount: totals.employer_pension },
     { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: totals.net_pay },
     { side: 'CREDIT', account_role: 'INCOME_TAX_PAYABLE', amount: totals.income_tax },
@@ -252,22 +319,28 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
   };
 }
 
-function stablePayrollInput(input: PayrollRunInput) {
+function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput | RwPayrollRunInput | MuPayrollRunInput | CmPayrollRunInput) {
   return JSON.stringify({
     pay_period_start: input.pay_period_start,
     pay_period_end: input.pay_period_end,
     pay_date: input.pay_date,
-    employees: input.employees.map(employee => ({
-      employee_id: String(employee.employee_id || '').trim(),
-      name: employee.name ? String(employee.name).trim() : '',
-      gross_pay: Number(employee.gross_pay),
-      pension_participant: employee.pension_participant,
-      ytd_taxable_salary_before: Number(employee.ytd_taxable_salary_before)
-    })).sort((a, b) => a.employee_id.localeCompare(b.employee_id))
+    // Sorted, JSON-stable serialization of whatever employee fields this
+    // country's input shape carries (Georgia and Germany differ), so the
+    // fingerprint stays deterministic per-country without a shared type.
+    employees: (input.employees as unknown as Record<string, unknown>[])
+      .map((employee: Record<string, unknown>) => {
+        const stable: Record<string, unknown> = {};
+        for (const key of Object.keys(employee).sort()) {
+          const value = employee[key];
+          stable[key] = typeof value === 'string' ? value.trim() : value;
+        }
+        return stable;
+      })
+      .sort((a: Record<string, unknown>, b: Record<string, unknown>) => String(a.employee_id).localeCompare(String(b.employee_id)))
   });
 }
 
-export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput) {
+export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput | RwPayrollRunInput | MuPayrollRunInput | CmPayrollRunInput) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   if (!['payroll', 'bookkeeping-payroll'].includes(String(deployment.service))) {
     const error = new Error('payroll engine is not enabled for this service');
@@ -288,13 +361,38 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
   await assertDateRangeOpenForCompany(String(deployment.company_id), String(input.pay_period_start), String(input.pay_period_end), 'payroll run');
 
   const countryCode = String(deployment.country_code || deployment.configuration?.country_code || '').toUpperCase();
-  if (countryCode !== 'GE') {
+  const rulePack = (PAYROLL_RULE_PACKS as Record<string, { id: string; status: string }>)[countryCode];
+  if (!rulePack || rulePack.status === 'NOT_IMPLEMENTED') {
     const error = new Error(`payroll calculation rule pack is not implemented for ${countryCode || 'this country'}`);
     (error as Error & { status?: number }).status = 409;
     throw error;
   }
+  if (rulePack.status !== 'VERIFIED_BASIC_RULES') {
+    const error = new Error(`payroll calculation rule pack for ${countryCode} is ${rulePack.status}, not yet enabled for real payroll runs`);
+    (error as Error & { status?: number }).status = 409;
+    throw error;
+  }
 
-  const result = calculateGeorgiaPayroll(input);
+  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult | UkPayrollRunResult | CaPayrollRunResult | KePayrollRunResult | ZaPayrollRunResult | RwPayrollRunResult | MuPayrollRunResult | CmPayrollRunResult =
+    countryCode === 'DE'
+      ? calculateGermanyPayroll(input as DePayrollRunInput)
+      : countryCode === 'US'
+        ? calculateUsPayroll(input as UsPayrollRunInput)
+        : countryCode === 'GB'
+          ? calculateUkPayroll(input as UkPayrollRunInput)
+          : countryCode === 'CA'
+            ? calculateCaPayroll(input as CaPayrollRunInput)
+            : countryCode === 'KE'
+              ? calculateKePayroll(input as KePayrollRunInput)
+              : countryCode === 'ZA'
+                ? calculateZaPayroll(input as ZaPayrollRunInput)
+                : countryCode === 'RW'
+                  ? calculateRwPayroll(input as RwPayrollRunInput)
+                  : countryCode === 'MU'
+                    ? calculateMuPayroll(input as MuPayrollRunInput)
+                    : countryCode === 'CM'
+                      ? calculateCmPayroll(input as CmPayrollRunInput)
+                      : calculateGeorgiaPayroll(input as PayrollRunInput);
   if (!result.controls.journal_balanced) {
     const error = new Error('payroll journal failed balance control');
     (error as Error & { status?: number }).status = 500;
@@ -329,7 +427,7 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
       payroll_run_id: runId,
       deployment_id: deploymentId,
       company_id: deployment.company_id,
-      country_code: 'GE',
+      country_code: countryCode,
       rule_pack_id: result.rule_pack_id,
       input_fingerprint: fingerprint,
       created_at: now
@@ -369,6 +467,24 @@ export function payrollEngineSelfTest() {
   const first = sample.employees[0];
   const second = sample.employees[1];
   const third = sample.employees[2];
+
+  // GE-005/GE-006: golden-payslip fixtures from a user-supplied MRA/Matsne-
+  // sourced QA pack (verified 15 Sep 2026), added 2026-09-15 after they
+  // caught a real gap -- this engine previously had no way to represent a
+  // taxable non-cash benefit or an exempt cash reimbursement at all.
+  const benefitsCase = calculateGeorgiaPayroll({
+    pay_period_start: '2026-01-01', pay_period_end: '2026-01-31', pay_date: '2026-01-31',
+    employees: [
+      // GE-005: cash 3,000 + taxable housing benefit 600 -> taxable 3,600.
+      { employee_id: 'GE-005', gross_pay: 3000, pension_participant: true, ytd_taxable_salary_before: 0, taxable_benefits: 600 },
+      // GE-006: cash 3,000 + exempt business-travel reimbursement 500 (cash,
+      // non-taxable) -> taxable stays 3,000, cash net includes the 500.
+      { employee_id: 'GE-006', gross_pay: 3000, pension_participant: true, ytd_taxable_salary_before: 0, exempt_cash_reimbursements: 500 }
+    ]
+  });
+  const ge005 = benefitsCase.employees[0];
+  const ge006 = benefitsCase.employees[1];
+
   return {
     ok:
       first.income_tax === 1000 &&
@@ -381,7 +497,37 @@ export function payrollEngineSelfTest() {
       third.state_pension === 10 &&
       third.employee_pension === 60 &&
       third.net_pay === 2340 &&
-      sample.controls.journal_balanced,
-    sample
+      sample.controls.journal_balanced &&
+      ge005.taxable_salary === 3600 && ge005.income_tax === 720 &&
+      ge005.employee_pension === 72 && ge005.employer_pension === 72 &&
+      ge005.state_pension === 72 && ge005.net_pay === 2208 &&
+      ge006.taxable_salary === 3000 && ge006.income_tax === 600 &&
+      ge006.net_pay === 2840 &&
+      benefitsCase.controls.journal_balanced,
+    sample,
+    benefitsCase
+  };
+}
+
+// Runs both the Georgia (real, VERIFIED_BASIC_RULES) and Germany (draft,
+// pending legal review) engine self-tests. The Germany pack cannot serve a
+// real payroll run until its status is changed to VERIFIED_BASIC_RULES (see
+// preparePayrollRun), but its math still needs to pass regression here so it
+// can be reviewed against known-correct expected output before that happens.
+export function payrollEngineSelfTestAll() {
+  const ge = payrollEngineSelfTest();
+  const de = payrollEngineSelfTestDE();
+  const us = payrollEngineSelfTestUS();
+  const uk = payrollEngineSelfTestUK();
+  const ca = payrollEngineSelfTestCA();
+  const ke = payrollEngineSelfTestKE();
+  const za = payrollEngineSelfTestZA();
+  const rw = payrollEngineSelfTestRW();
+  const mu = payrollEngineSelfTestMU();
+  const cm = payrollEngineSelfTestCM();
+  return {
+    ok: ge.ok && de.ok && us.ok && uk.ok && ca.ok && ke.ok && za.ok && rw.ok && mu.ok && cm.ok,
+    georgia: ge, germany: de, unitedStates: us, unitedKingdom: uk, canada: ca, kenya: ke, southAfrica: za,
+    rwanda: rw, mauritius: mu, cameroon: cm
   };
 }
