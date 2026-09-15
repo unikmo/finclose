@@ -271,6 +271,18 @@ export async function getServiceDeployment(id: string) {
   return snap.val();
 }
 
+// Reverse index written alongside linkDeploymentCompany() in
+// lib/onboarding-history.ts (finclose_company_deployments/{companyId}/
+// {deploymentId}) -- lets a company's deployment(s) be resolved without
+// scanning every deployment in the database. Returns [] for a company
+// with no linked deployment yet (including every company that existed
+// before this index was added, until it links or re-links a service).
+export async function listDeploymentsForCompany(companyId: string) {
+  const snap = await realtimeDatabase().ref(`finclose_company_deployments/${companyId}`).once('value');
+  const val = (snap.val() || {}) as Record<string, { deployment_id: string; service: string | null; linked_at: number }>;
+  return Object.values(val);
+}
+
 export async function saveServiceConfiguration(id: string, input: Record<string, unknown>) {
   const deployment = await getServiceDeployment(id) as Record<string, any>;
   const profile = getProfile(String(deployment.service));
