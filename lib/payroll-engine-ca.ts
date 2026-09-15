@@ -98,6 +98,21 @@ export type CaEmployeeInput = {
   // earnings, and EI insurable earnings are all equal to gross pay (see
   // limitations) — one accumulator covers all three.
   ytd_earnings_before: number;
+  // Workers' Compensation Board / Workplace Safety and Insurance Board
+  // (WCB/WSIB/WorkSafe/CNESST/WSCC), employer-only. Optional — all three
+  // omitted (the default, matching every pre-v3 caller) leaves it
+  // uncomputed. Like US SUI, the RATE is industry-classification- and
+  // employer-specific (each board assigns it by assessed industry risk
+  // class), so this engine has no statutory default — the caller must
+  // supply their own current assessment rate. wcb_rate is a FRACTION
+  // (e.g. 0.0235 for "$2.35 per $100 of assessable payroll," the unit
+  // most boards actually publish on their rate notices — divide by 100
+  // to convert). wcb_assessable_earnings_ceiling is that board's current
+  // annual maximum assessable/insurable earnings per worker (a real,
+  // board-published statutory figure, unlike the rate).
+  wcb_rate?: number;
+  wcb_assessable_earnings_ceiling?: number;
+  ytd_wcb_assessable_earnings_before?: number;
 };
 
 export type CaPayrollRunInput = {
@@ -116,7 +131,9 @@ export type CaJournalLine = {
     | 'FEDERAL_INCOME_TAX_PAYABLE'
     | 'PROVINCIAL_INCOME_TAX_PAYABLE'
     | 'CPP_PAYABLE'
-    | 'EI_PAYABLE';
+    | 'EI_PAYABLE'
+    | 'EMPLOYER_WCB_EXPENSE'
+    | 'WCB_PAYABLE';
   amount: number;
 };
 
@@ -132,9 +149,11 @@ export type CaEmployeeResult = {
   employer_cpp2: number;
   employee_ei: number;
   employer_ei: number;
+  employer_wcb: number;
   net_pay: number;
   employer_funded_total: number;
   ytd_earnings_after: number;
+  ytd_wcb_assessable_earnings_after: number;
 };
 
 export type CaPayrollRunResult = {
@@ -156,6 +175,7 @@ export type CaPayrollRunResult = {
     employer_cpp2: number;
     employee_ei: number;
     employer_ei: number;
+    employer_wcb: number;
     net_pay: number;
     employer_funded_total: number;
   };
@@ -170,7 +190,14 @@ export type CaPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_CA = {
-  id: 'CA-2026-FEDERAL-PLUS-12-NONQC-JURISDICTIONS-DRAFT-V2',
+  // v3: adds employer-side Workers' Compensation Board / Workplace Safety
+  // and Insurance Board (WCB/WSIB) premiums. Same shape as US SUI: the
+  // RATE is industry-classification- and employer-specific (each board
+  // assigns it), so the caller supplies wcb_rate + wcb_assessable_earnings_
+  // ceiling per employee; this engine does the period-proration/YTD-
+  // capping/journal posting. Both optional, default "not computed" —
+  // exact backward compatibility for every pre-v3 caller.
+  id: 'CA-2026-FEDERAL-PLUS-12-NONQC-JURISDICTIONS-DRAFT-V3',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'CAD',
   federal: {
@@ -287,7 +314,8 @@ export const PAYROLL_RULE_PACK_CA = {
     'Alberta\'s own additional K5P supplemental credit (((K1P+K2P)-$4,896) x 25%) remains UNMODELED — it produced a $0.01 residual on the one AB fixture available this pass, and may matter more at other income levels. Every other province\'s own possible K2P/K3P-equivalent variations (if any differ from the generic "credit at that province\'s lowest rate" pattern used here) are also unconfirmed beyond the BC/NT/NU fixtures that did match exactly.',
     'CPP1, CPP2, and EI are all computed on gross pay treated as fully pensionable and fully insurable, sharing one YTD accumulator (ytd_earnings_before) — no pay-component-level taxability/pensionability/insurability classification, which the source document explicitly warns against doing. CPT30 (age 65-69 stop-CPP election), age 18/70 proration, and the EI Premium Reduction Program (employer-specific reduced multiple, standard is 1.4x) are not modeled — standard ages/rates are assumed for every employee.',
     'Ontario surtax and Ontario Health Premium (both embedded in provincial withholding per T4127 Step 5) are NOT implemented — Ontario tax for high earners will be understated. Manitoba\'s labour-sponsored-fund credit and every other province\'s "formula-specific difference" (Nova Scotia\'s labour-sponsored fund credit, etc.) are also not implemented.',
-    'NOT IMPLEMENTED AT ALL in v1, rejected outright: bonuses/retroactive/irregular pay (T4127 non-periodic difference method); retiring allowances; taxable-benefit-specific CPP/EI treatment (a single gross-pay figure is assumed fully subject to everything); Northwest Territories and Nunavut territorial payroll tax; all employer-only levies (BC Employer Health Tax, Manitoba HE Levy, Ontario EHT, NL HAPSET); all workers-compensation/WCB/WSIB/WorkSafe/CNESST/WSCC premiums, which the source explicitly marks as employer/classification-specific DYNAMIC data this engine cannot supply a rate for.',
+    'NOT IMPLEMENTED AT ALL in v1, rejected outright: bonuses/retroactive/irregular pay (T4127 non-periodic difference method); retiring allowances; taxable-benefit-specific CPP/EI treatment (a single gross-pay figure is assumed fully subject to everything); Northwest Territories and Nunavut territorial payroll tax; all employer-only levies (BC Employer Health Tax, Manitoba HE Levy, Ontario EHT, NL HAPSET).',
+    'Workers\' Compensation Board / Workplace Safety and Insurance Board (WCB/WSIB/WorkSafe/CNESST/WSCC) premiums, v3: computed ONLY when the caller supplies wcb_rate and wcb_assessable_earnings_ceiling per employee, straight off that employer\'s own current board assessment notice — every board assigns each employer its own rate by industry classification, which this engine has no statutory default for (the same reasoning already applied to US SUI). Supplying only one of the two fields is rejected rather than silently defaulted. Once supplied, this engine correctly prorates and caps the assessable-earnings base across pay periods (ytd_wcb_assessable_earnings_before/after) and posts an EMPLOYER_WCB_EXPENSE/WCB_PAYABLE journal pair. Assessable earnings are assumed equal to gross pay, the same simplification already applied to CPP/EI pensionable/insurable earnings in this file — not independently confirmed per board. Multi-jurisdiction employers (an employee whose assessable earnings should be apportioned across more than one board) are not modeled; the caller must supply one ceiling/rate pair per employee.',
     'Mid-year 2026 proration: BC, Newfoundland & Labrador, and Prince Edward Island brackets/BPA above use the source\'s "current Jul-Dec 2026 Option 1" parameters as a single flat table for the whole pack, not effective-dated against pay_date — a payroll actually run before July 1, 2026 with this engine would get the wrong (post-July) figures. Not modeled; flagged rather than silently wrong without disclosure.',
     'Source parameters come from a user-supplied implementation-reference document (itself citing CRA T4127 and provincial sources), not independently re-fetched from canada.ca directly this pass. Should be reconfirmed against CRA\'s own T4127 and validated against CRA PDOC before this pack is marked VERIFIED_BASIC_RULES.'
   ]
@@ -480,10 +508,30 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     }
     const provincialIncomeTax = money(annualProvincialTax / periodsPerYear);
 
+    // --- WCB/WSIB (employer only; see limitations) ---
+    const wcbRateProvided = employee.wcb_rate !== undefined;
+    const wcbCeilingProvided = employee.wcb_assessable_earnings_ceiling !== undefined;
+    if (wcbRateProvided !== wcbCeilingProvided) {
+      const error = new Error(`${employeeId}: wcb_rate and wcb_assessable_earnings_ceiling must both be supplied together, or both omitted`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (wcbRateProvided && ((employee.wcb_rate as number) < 0 || (employee.wcb_rate as number) > 1)) {
+      const error = new Error(`wcb_rate for ${employeeId} must be between 0 and 1 (a fraction, e.g. 0.0235 for $2.35 per $100)`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    const wcbCeiling = wcbCeilingProvided ? requireNonNegativeMoney(employee.wcb_assessable_earnings_ceiling, `wcb_assessable_earnings_ceiling for ${employeeId}`) : 0;
+    const ytdWcbBefore = requireNonNegativeMoney(employee.ytd_wcb_assessable_earnings_before ?? 0, `ytd_wcb_assessable_earnings_before for ${employeeId}`);
+    const employerWcb = wcbRateProvided ? bandedContribution(ytdWcbBefore, grossPay, 0, wcbCeiling, employee.wcb_rate as number) : 0;
+    const ytdWcbAfter = wcbRateProvided
+      ? money(ytdWcbBefore + Math.max(0, Math.min(ytdWcbBefore + grossPay, wcbCeiling) - ytdWcbBefore))
+      : ytdWcbBefore;
+
     const employeeTaxTotal = money(federalIncomeTax + provincialIncomeTax + employeeCpp1 + employeeCpp2 + employeeEi);
     const netPay = money(grossPay - employeeTaxTotal);
     const employerCppEi = money(employerCpp1 + employerCpp2 + employerEi);
-    const employerFundedTotal = money(grossPay + employerCppEi);
+    const employerFundedTotal = money(grossPay + employerCppEi + employerWcb);
 
     return {
       employee_id: employeeId,
@@ -497,9 +545,11 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
       employer_cpp2: employerCpp2,
       employee_ei: employeeEi,
       employer_ei: employerEi,
+      employer_wcb: employerWcb,
       net_pay: netPay,
       employer_funded_total: employerFundedTotal,
-      ytd_earnings_after: money(ytdBefore + grossPay)
+      ytd_earnings_after: money(ytdBefore + grossPay),
+      ytd_wcb_assessable_earnings_after: ytdWcbAfter
     };
   });
 
@@ -517,6 +567,7 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     employer_cpp2: sum(employees.map(e => e.employer_cpp2)),
     employee_ei: sum(employees.map(e => e.employee_ei)),
     employer_ei: sum(employees.map(e => e.employer_ei)),
+    employer_wcb: sum(employees.map(e => e.employer_wcb)),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_funded_total: sum(employees.map(e => e.employer_funded_total))
   };
@@ -528,7 +579,9 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     { side: 'CREDIT', account_role: 'FEDERAL_INCOME_TAX_PAYABLE', amount: totals.federal_income_tax },
     { side: 'CREDIT', account_role: 'PROVINCIAL_INCOME_TAX_PAYABLE', amount: totals.provincial_income_tax },
     { side: 'CREDIT', account_role: 'CPP_PAYABLE', amount: money(totals.employee_cpp1 + totals.employer_cpp1 + totals.employee_cpp2 + totals.employer_cpp2) },
-    { side: 'CREDIT', account_role: 'EI_PAYABLE', amount: money(totals.employee_ei + totals.employer_ei) }
+    { side: 'CREDIT', account_role: 'EI_PAYABLE', amount: money(totals.employee_ei + totals.employer_ei) },
+    { side: 'DEBIT', account_role: 'EMPLOYER_WCB_EXPENSE', amount: totals.employer_wcb },
+    { side: 'CREDIT', account_role: 'WCB_PAYABLE', amount: totals.employer_wcb }
   ];
 
   const journalDebits = money(journal.filter(l => l.side === 'DEBIT').reduce((a, l) => a + l.amount, 0));
@@ -590,6 +643,26 @@ export function payrollEngineSelfTestCA() {
     rejected = true;
   }
 
+  // v3: WCB/WSIB. $5,000/month gross, hypothetical Ontario WSIB-style rate
+  // $3.00 per $100 (0.03 fraction) with a $110,000 annual assessable-
+  // earnings ceiling, YTD already at $108,000 -> only $2,000 of this
+  // month's $5,000 remains assessable: 2000 * 0.03 = 60.00.
+  const wcb = calculateCaPayroll({
+    pay_period_start: '2026-07-01', pay_period_end: '2026-07-31', pay_date: '2026-07-31',
+    employees: [{
+      employee_id: 'WCB1', gross_pay: 5000, pay_frequency: 'MONTHLY', province_of_employment: 'ON',
+      ytd_earnings_before: 60000, wcb_rate: 0.03, wcb_assessable_earnings_ceiling: 110000,
+      ytd_wcb_assessable_earnings_before: 108000
+    }]
+  });
+  const eWcb = wcb.employees[0];
+  // No wcb fields supplied -> employer_wcb must be exactly 0 (backward compat).
+  const noWcb = calculateCaPayroll({
+    pay_period_start: '2026-07-01', pay_period_end: '2026-07-31', pay_date: '2026-07-31',
+    employees: [{ employee_id: 'NOWCB1', gross_pay: 5000, pay_frequency: 'MONTHLY', province_of_employment: 'ON', ytd_earnings_before: 0 }]
+  });
+  const eNoWcb = noWcb.employees[0];
+
   const ok =
     eAb.federal_income_tax === 444.86 && eAb.employee_cpp1 === 280.15 && eAb.employee_ei === 81.5 &&
     eAb.employer_cpp1 === 280.15 && eAb.employer_ei === 114.1 &&
@@ -601,7 +674,9 @@ export function payrollEngineSelfTestCA() {
     eBc.federal_income_tax === 310.53 && eBc.provincial_income_tax === 160.43 &&
     eBc.employee_cpp1 === 220.65 && eBc.employee_ei === 65.2 &&
     bc.controls.journal_balanced &&
-    rejected;
+    rejected &&
+    eWcb.employer_wcb === 60 && eWcb.ytd_wcb_assessable_earnings_after === 110000 && wcb.controls.journal_balanced &&
+    eNoWcb.employer_wcb === 0 && noWcb.controls.journal_balanced;
 
-  return { ok, ab, bc };
+  return { ok, ab, bc, wcb };
 }

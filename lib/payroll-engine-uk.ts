@@ -70,6 +70,22 @@ export type UkEmployeeInput = {
   student_loan_plan?: UkStudentLoanPlan;
   postgraduate_loan: boolean;
   pension_enrolled: boolean;
+  // Statutory Sick Pay (SSP) — v2. Both optional; omit both to leave SSP
+  // uncomputed (default, matching every pre-v2 caller). Unlike SUI/WCB,
+  // SSP's RATE is a fixed statutory amount (not employer/rate-notice
+  // specific), so this engine computes the actual SSP pound amount
+  // itself rather than requiring the caller to supply it — but ELIGIBILITY
+  // (has the employee notified the employer correctly, is this within the
+  // same Period of Incapacity for Work / linked-PIW chain, has the
+  // 28-week maximum already been used) is NOT verified by this engine;
+  // the caller supplies only the number of qualifying days actually being
+  // paid, already having determined eligibility themselves.
+  ssp_qualifying_days_paid?: number;
+  // This employee's normal number of "qualifying days" (contracted
+  // working days) in a week — used to convert the flat statutory WEEKLY
+  // rate into this employee's own daily rate. Required whenever
+  // ssp_qualifying_days_paid is supplied.
+  ssp_qualifying_days_per_week?: number;
 };
 
 export type UkPayrollRunInput = {
@@ -95,7 +111,12 @@ export type UkJournalLine = {
 export type UkEmployeeResult = {
   employee_id: string;
   name?: string;
+  // Ordinary contractual pay PLUS any Statutory Sick Pay paid this period
+  // (see ssp below) — the full amount subject to PAYE/NI/pension, matching
+  // HMRC's own treatment of SSP as ordinary taxable/NICable pay. Equal to
+  // the contractual gross_pay input alone when ssp is 0.
   gross_pay: number;
+  ssp: number;
   nation: UkNation;
   paye_income_tax: number;
   employee_ni: number;
@@ -119,6 +140,7 @@ export type UkPayrollRunResult = {
   employees: UkEmployeeResult[];
   totals: {
     gross_pay: number;
+    ssp: number;
     paye_income_tax: number;
     employee_ni: number;
     employer_ni: number;
@@ -140,7 +162,14 @@ export type UkPayrollRunResult = {
 };
 
 export const PAYROLL_RULE_PACK_UK = {
-  id: 'GB-2026-27-PAYE-CAT-A-STANDARD-CODES-DRAFT-V1',
+  // v2: adds Statutory Sick Pay (SSP). Unlike SUI/WCB-style employer-rated
+  // items, SSP's rate IS a fixed statutory constant (£123.25/week for
+  // 2026/27, confirmed directly against gov.uk's own current rates-and-
+  // thresholds page — see evidence), so this engine computes the actual
+  // amount rather than asking the caller to. Eligibility determination
+  // (PIW linking, notice given, 28-week cap) stays the caller's
+  // responsibility — see limitations.
+  id: 'GB-2026-27-PAYE-CAT-A-STANDARD-CODES-SSP-DRAFT-V2',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'GBP',
   income_tax: {
@@ -204,21 +233,31 @@ export const PAYROLL_RULE_PACK_UK = {
     employee_rate: 0.05,
     employer_rate: 0.03
   },
+  ssp: {
+    // Statutory Sick Pay 2026/27 — confirmed directly from gov.uk's own
+    // current "Rates and thresholds for employers 2026 to 2027" page.
+    // From 6 April 2026 SSP reform removed BOTH the 3-day waiting period
+    // (paid from day 1) AND the Lower Earnings Limit eligibility test —
+    // see limitations for what this engine still can't verify itself.
+    weekly_rate: 123.25
+  },
   evidence: [
     { authority: 'HM Revenue & Customs / GOV.UK', instrument: 'Rates and thresholds for employers 2026 to 2027 (Personal Allowance GBP 12,570; England/NI/Wales bands 20%/40%/45%)', url: 'https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027' },
     { authority: 'Scottish Government', instrument: 'Scottish Income Tax rates and bands 2026/27 (19%/20%/21%/42%/45%/48%)', url: 'https://www.gov.scot/publications/scottish-income-tax-rates-and-bands/pages/2026-to-2027/' },
     { authority: 'HM Revenue & Customs', instrument: 'National Insurance software-developer specification 2026/27 (Class 1 category A thresholds/rates)', url: 'https://www.gov.uk/government/publications/payroll-technical-specifications-national-insurance' },
     { authority: 'HM Revenue & Customs', instrument: 'Collection of student loans from 6 April 2026 (Plans 1/2/4/5, Postgraduate Loan thresholds/rates)', url: 'https://www.gov.uk/government/publications/payroll-technical-specifications-student-loans/collection-of-student-loans-from-6-april-2026' },
     { authority: 'The Pensions Regulator', instrument: 'Qualifying earnings band and 3%/8% statutory minimum contribution basis', url: 'https://www.thepensionsregulator.gov.uk/en/business-advisers/automatic-enrolment-guide-for-business-advisers/minimum-contribution-increases-planned-by-law-phasing' },
-    { authority: 'User-supplied reference', instrument: '"UK 2026/27 Payroll Implementation Reference" (verified 14 Sep 2026) — the source document this pack was built from; parameters not independently re-fetched from GOV.UK/HMRC directly this pass.', url: 'file: UK_2026_27_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' }
+    { authority: 'User-supplied reference', instrument: '"UK 2026/27 Payroll Implementation Reference" (verified 14 Sep 2026) — the source document this pack was built from; parameters not independently re-fetched from GOV.UK/HMRC directly this pass.', url: 'file: UK_2026_27_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' },
+    { authority: 'HM Revenue & Customs / GOV.UK', instrument: 'Rates and thresholds for employers 2026 to 2027 — Statutory Sick Pay weekly rate £123.25, independently re-fetched directly (not via the implementation-reference document)', url: 'https://www.gov.uk/guidance/rates-and-thresholds-for-employers-2026-to-2027' }
   ],
   limitations: [
     'v1 initial build. Only tax codes 1257L / S1257L / C1257L (standard cumulative, no other income/benefits/adjustments) are supported. All other codes (BR, D0/D1, 0T, K codes, non-cumulative W1/M1/X) are REJECTED with an explicit error.',
+    'Statutory Sick Pay (SSP), v2: computed ONLY when the caller supplies both ssp_qualifying_days_paid and ssp_qualifying_days_per_week, at the flat 2026/27 statutory weekly rate (£123.25) prorated to a daily rate by the employee\'s own qualifying-days-per-week pattern, then multiplied by days paid. The result is added to gross_pay (SSP is ordinary taxable/NICable/pensionable pay, per HMRC\'s own treatment) and also reported separately as ssp for transparency. This engine does NOT verify SSP eligibility itself — Average Weekly Earnings/Lower Earnings Limit test (removed by the 6 April 2026 reform, so no longer relevant), correct employee notification, Period of Incapacity for Work (PIW) linking across a sickness sequence, or the 28-week statutory maximum — the caller must already know the employee qualifies and supply only the days actually being paid. SSP can no longer be reclaimed from HMRC for most employers under the 2026/27 rules, so no separate employer-recovery figure is computed; the cost is simply part of gross_pay/SALARY_EXPENSE like ordinary wages. SMP/SPP/SAP/ShPP/SPBP/SNCP (all other statutory payments) remain entirely unimplemented — see below.',
     'PAYE Income Tax uses a simplified ANNUALIZE-CURRENT-PERIOD-AND-DIVIDE approximation, not HMRC\'s true cumulative PAYE routine (which compares cumulative year-to-date tax due against cumulative tax already deducted). This will diverge from the correct figure whenever an employee\'s pay varies from period to period — most divergent for a large one-off bonus or a mid-year pay change. The same approximation and the same disclosed limitation already exists for Germany\'s Lohnsteuer in payroll-engine-de.ts.',
     'Only Class 1 National Insurance category A (standard employee) is implemented. Categories B/C/D/E/F/H/I/J/K/L/M/N/S/V/Z — married-woman reduced rate, State Pension age, Freeport/Investment Zone, apprentices under 25, veterans, under-21, deferment — are REJECTED, not approximated. Directors\' annual/alternative NI earnings-period method is not implemented; a director must not be run through this engine.',
     'Student/Postgraduate Loans: only the ordinary periodic-threshold formula for a regular pay period is implemented. Irregular pay periods (HMRC\'s day-based/number-of-periods logic) and protected-earnings-order interaction are not implemented.',
     'Workplace pension: implements only the 5%/3% qualifying-earnings-band minimum contribution, gated on a caller-supplied pension_enrolled flag. Auto-enrolment ASSESSMENT (age 22-to-State-Pension-Age, GBP 10,000 earnings trigger, postponement, opt-out/refund) is NOT modeled — the caller must already know whether the employee should be enrolled.',
-    'NOT IMPLEMENTED AT ALL in v1, rejected outright: statutory payments (SMP/SPP/SAP/ShPP/SPBP/SNCP/SSP) and their employer recovery; Apprenticeship Levy; Employment Allowance; Class 1A/1B (benefits in kind, termination awards, PAYE Settlement Agreements); salary sacrifice/benefits-in-kind wage adjustments; attachment of earnings / court order deductions; RTI (FPS/EPS) generation. This engine prepares payroll and accounting outputs only — it does not file with HMRC.',
+    'NOT IMPLEMENTED AT ALL, rejected outright: statutory payments OTHER than SSP (SMP/SPP/SAP/ShPP/SPBP/SNCP) and their employer recovery; Apprenticeship Levy; Employment Allowance; Class 1A/1B (benefits in kind, termination awards, PAYE Settlement Agreements); salary sacrifice/benefits-in-kind wage adjustments; attachment of earnings / court order deductions; RTI (FPS/EPS) generation. RTI in particular is not a calculation gap this engine could close by adding a formula — it is a live submission to HMRC\'s Government Gateway requiring real filing credentials and an actual API integration, fundamentally different in kind from every other item in this file. This engine prepares payroll and accounting outputs only — it does not file with HMRC.',
     'Source parameters come from a user-supplied implementation-reference document (itself citing HMRC/GOV.UK/Scottish Government/The Pensions Regulator), not independently re-fetched from GOV.UK/HMRC directly this pass. Should be reconfirmed against HMRC\'s own Specification for PAYE Tax Table Routines, NI specification, and Student Loan specification, and validated against HMRC\'s official 2026/27 payroll test data, before this pack is marked VERIFIED_BASIC_RULES.',
     'This engine does not calculate National Minimum Wage / National Living Wage compliance, mileage/expense rates, or any employer-wide charge not listed above.'
   ]
@@ -329,7 +368,37 @@ export function calculateUkPayroll(input: UkPayrollRunInput): UkPayrollRunResult
 
     const freq = employee.pay_frequency;
     const periodsPerYear = freq === 'WEEKLY' ? 52 : 12;
-    const grossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
+    const contractualGrossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
+
+    // --- Statutory Sick Pay (SSP); see limitations ---
+    const sspDaysProvided = employee.ssp_qualifying_days_paid !== undefined;
+    const sspPatternProvided = employee.ssp_qualifying_days_per_week !== undefined;
+    if (sspDaysProvided !== sspPatternProvided) {
+      const error = new Error(`${employeeId}: ssp_qualifying_days_paid and ssp_qualifying_days_per_week must both be supplied together, or both omitted`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    let sspAmount = 0;
+    if (sspDaysProvided) {
+      const daysPaid = employee.ssp_qualifying_days_paid as number;
+      const daysPerWeek = employee.ssp_qualifying_days_per_week as number;
+      if (!Number.isFinite(daysPaid) || daysPaid < 0 || daysPaid > 7) {
+        const error = new Error(`ssp_qualifying_days_paid for ${employeeId} must be between 0 and 7`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(daysPerWeek) || daysPerWeek < 1 || daysPerWeek > 7) {
+        const error = new Error(`ssp_qualifying_days_per_week for ${employeeId} must be an integer from 1 to 7`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      const dailyRate = money(p.ssp.weekly_rate / daysPerWeek);
+      sspAmount = money(dailyRate * daysPaid);
+    }
+    // SSP is ordinary taxable/NICable/pensionable pay per HMRC's own
+    // treatment — folded into grossPay so every downstream calculation
+    // (PAYE, NI, student loan, pension) applies to it automatically.
+    const grossPay = money(contractualGrossPay + sspAmount);
 
     // --- PAYE income tax (simplified annualize-and-divide; see limitations) ---
     const { nation, brackets } = nationAndBracketsForTaxCode(employee.tax_code, p);
@@ -379,6 +448,7 @@ export function calculateUkPayroll(input: UkPayrollRunInput): UkPayrollRunResult
       employee_id: employeeId,
       name: employee.name ? String(employee.name).trim() : undefined,
       gross_pay: grossPay,
+      ssp: sspAmount,
       nation,
       paye_income_tax: payeIncomeTax,
       employee_ni: employeeNi,
@@ -398,6 +468,7 @@ export function calculateUkPayroll(input: UkPayrollRunInput): UkPayrollRunResult
 
   const totals = {
     gross_pay: sum(employees.map(e => e.gross_pay)),
+    ssp: sum(employees.map(e => e.ssp)),
     paye_income_tax: sum(employees.map(e => e.paye_income_tax)),
     employee_ni: sum(employees.map(e => e.employee_ni)),
     employer_ni: sum(employees.map(e => e.employer_ni)),
@@ -480,13 +551,32 @@ export function payrollEngineSelfTestUK() {
   });
   const e2 = r2.employees[0];
 
+  // Case 3: v2 SSP. WEEKLY, England, fully off sick a whole 5-qualifying-
+  // day week, no contractual pay this period. Daily rate = 123.25/5 =
+  // 24.65 -> 5 days = 123.25. Folded into gross_pay/PAYE/NI like ordinary
+  // pay: annualized 123.25*52=6409 < 12,570 PA -> PAYE 0. NI: PT(weekly)
+  // 242 > 123.25 -> employee NI 0. Employer NI: (123.25-96)*0.15=4.09.
+  const r3 = calculateUkPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-07', pay_date: '2026-09-07',
+    employees: [{
+      employee_id: 'E3', gross_pay: 0, pay_frequency: 'WEEKLY', tax_code: '1257L',
+      ni_category: 'A', postgraduate_loan: false, pension_enrolled: false,
+      ssp_qualifying_days_paid: 5, ssp_qualifying_days_per_week: 5
+    }]
+  });
+  const e3 = r3.employees[0];
+
   const ok =
     e1.paye_income_tax === 590.50 && e1.employee_ni === 236.16 && e1.employer_ni === 537.45 &&
+    e1.ssp === 0 &&
     r1.controls.journal_balanced &&
     e2.paye_income_tax === 2411.00 && e2.employee_ni === 327.50 && e2.employer_ni === 1137.45 &&
     e2.student_loan_deduction === 499 && e2.postgraduate_loan_deduction === 375 &&
     e2.employee_pension === 183.45 && e2.employer_pension === 110.07 &&
-    r2.controls.journal_balanced;
+    r2.controls.journal_balanced &&
+    e3.ssp === 123.25 && e3.gross_pay === 123.25 && e3.paye_income_tax === 0 &&
+    e3.employee_ni === 0 && e3.employer_ni === 4.09 && e3.net_pay === 123.25 &&
+    r3.controls.journal_balanced;
 
-  return { ok, r1, r2 };
+  return { ok, r1, r2, r3 };
 }
