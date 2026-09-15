@@ -9,6 +9,10 @@ import { calculateUkPayroll, payrollEngineSelfTestUK, PAYROLL_RULE_PACK_UK } fro
 import type { UkPayrollRunInput, UkPayrollRunResult } from './payroll-engine-uk';
 import { calculateCaPayroll, payrollEngineSelfTestCA, PAYROLL_RULE_PACK_CA } from './payroll-engine-ca';
 import type { CaPayrollRunInput, CaPayrollRunResult } from './payroll-engine-ca';
+import { calculateKePayroll, payrollEngineSelfTestKE, PAYROLL_RULE_PACK_KE } from './payroll-engine-ke';
+import type { KePayrollRunInput, KePayrollRunResult } from './payroll-engine-ke';
+import { calculateZaPayroll, payrollEngineSelfTestZA, PAYROLL_RULE_PACK_ZA } from './payroll-engine-za';
+import type { ZaPayrollRunInput, ZaPayrollRunResult } from './payroll-engine-za';
 import type { UsPayrollRunInput, UsPayrollRunResult } from './payroll-engine-us';
 
 export type PayrollEmployeeInput = {
@@ -115,6 +119,8 @@ export const PAYROLL_RULE_PACKS = {
   US: PAYROLL_RULE_PACK_US,
   GB: PAYROLL_RULE_PACK_UK,
   CA: PAYROLL_RULE_PACK_CA,
+  KE: PAYROLL_RULE_PACK_KE,
+  ZA: PAYROLL_RULE_PACK_ZA,
   EE: { id: 'EE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' },
   CM: { id: 'CM-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' }
 } as const;
@@ -265,7 +271,7 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
   };
 }
 
-function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput) {
+function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput) {
   return JSON.stringify({
     pay_period_start: input.pay_period_start,
     pay_period_end: input.pay_period_end,
@@ -286,7 +292,7 @@ function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayro
   });
 }
 
-export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput) {
+export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   if (!['payroll', 'bookkeeping-payroll'].includes(String(deployment.service))) {
     const error = new Error('payroll engine is not enabled for this service');
@@ -319,7 +325,7 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
     throw error;
   }
 
-  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult | UkPayrollRunResult | CaPayrollRunResult =
+  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult | UkPayrollRunResult | CaPayrollRunResult | KePayrollRunResult | ZaPayrollRunResult =
     countryCode === 'DE'
       ? calculateGermanyPayroll(input as DePayrollRunInput)
       : countryCode === 'US'
@@ -328,7 +334,11 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
           ? calculateUkPayroll(input as UkPayrollRunInput)
           : countryCode === 'CA'
             ? calculateCaPayroll(input as CaPayrollRunInput)
-            : calculateGeorgiaPayroll(input as PayrollRunInput);
+            : countryCode === 'KE'
+              ? calculateKePayroll(input as KePayrollRunInput)
+              : countryCode === 'ZA'
+                ? calculateZaPayroll(input as ZaPayrollRunInput)
+                : calculateGeorgiaPayroll(input as PayrollRunInput);
   if (!result.controls.journal_balanced) {
     const error = new Error('payroll journal failed balance control');
     (error as Error & { status?: number }).status = 500;
@@ -431,5 +441,10 @@ export function payrollEngineSelfTestAll() {
   const us = payrollEngineSelfTestUS();
   const uk = payrollEngineSelfTestUK();
   const ca = payrollEngineSelfTestCA();
-  return { ok: ge.ok && de.ok && us.ok && uk.ok && ca.ok, georgia: ge, germany: de, unitedStates: us, unitedKingdom: uk, canada: ca };
+  const ke = payrollEngineSelfTestKE();
+  const za = payrollEngineSelfTestZA();
+  return {
+    ok: ge.ok && de.ok && us.ok && uk.ok && ca.ok && ke.ok && za.ok,
+    georgia: ge, germany: de, unitedStates: us, unitedKingdom: uk, canada: ca, kenya: ke, southAfrica: za
+  };
 }

@@ -1,0 +1,48 @@
+payroll(ke,za): add Kenya and South Africa payroll engines (v1 draft, DRAFT_NEEDS_LEGAL_REVIEW)
+
+Two more country payroll rule packs: lib/payroll-engine-ke.ts and
+lib/payroll-engine-za.ts, wired into the shared dispatcher alongside
+Georgia/Germany/US/UK/Canada.
+
+Both are built from user-supplied "Payroll Implementation Reference"
+documents (Kenya 2026 and South Africa 2026/27) citing KRA/NSSF/NITA
+(Kenya) and SARS (South Africa) as primary authorities, with real
+bands/rates/caps attributed to named government publications. Neither
+was independently re-fetched from the primary government source
+directly this pass.
+
+Kenya v1: PAYE monthly bands (10%/25%/30%/32.5%/35%) with personal and
+insurance relief; NSSF Tier I/II, correctly VERSIONED by pay_date
+(Year 3 schedule before 2026-02-01, Year 4 schedule from 2026-02-01 --
+a real mid-year statutory change the source explicitly warns about);
+SHIF (2.75%, KES300 minimum); Affordable Housing Levy (1.5%/1.5%);
+NITA (flat KES50/employee/month, employer-only). All 6 of the source
+document's own worked golden-test figures are reproduced exactly by
+this engine's self-tests: the NSSF Jan-vs-Feb transition (KES4,320 ->
+KES6,480 per side on the same KES120,000 salary), the NSSF mid-band
+case (KES3,000 employee NSSF on a KES50,000 salary from February), the
+SHIF statutory minimum, the AHL split, and the NITA employer-only levy
+across 50 employees.
+
+South Africa v1: PAYE 2027 tax year brackets with age-based primary/
+secondary/tertiary rebates and the medical scheme fees tax credit;
+UIF (1%/1%, capped at R17,712/month remuneration -- the source's own
+stated R177.12-per-side maximum is reproduced exactly); SDL (flat 1%
+gated on a caller-supplied employer-liability flag, since the real
+R500,000 12-month threshold test is not computed by this engine).
+PAYE explicitly uses the same disclosed simplified annualize-and-
+divide approximation already used for Germany/UK/Canada -- notably,
+this is exactly what the source document itself explicitly warns
+against doing ("Do not calculate monthly PAYE by merely applying 1/12
+of annual brackets"), and this limitation is stated plainly in the
+file's own limitations array rather than glossed over. ETI (the
+hours-based employer PAYE incentive) and tax directives for severance/
+lump-sum payments are NOT implemented -- a payment requiring a
+directive must not be run through this engine.
+
+Both packs are status DRAFT_NEEDS_LEGAL_REVIEW and gated behind
+VERIFIED_BASIC_RULES in preparePayrollRun, same as every other pack.
+Full aggregate self-test suite (Georgia + Germany + US + UK + Canada +
+Kenya + South Africa) passes together.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
