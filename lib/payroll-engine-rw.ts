@@ -70,6 +70,16 @@ export type RwEmployeeInput = {
   // this engine does not guess one; see limitations).
   vehicle_benefit?: boolean;
   accommodation_benefit?: boolean;
+  // CBHI (Community-Based Health Insurance), v3. Defaults to false/omitted
+  // because this pack's CBHI net-salary base is explicitly UNVERIFIED
+  // against RSSB/RRA Ishema system output (see limitations) — callers must
+  // opt in deliberately. When true, CBHI is computed on this engine's best
+  // reading of the net-salary base and deducted from net pay; when
+  // false/omitted, CBHI is not computed at all (0) and net pay excludes it,
+  // matching the "Rwanda 2026 Payroll Golden Fixtures" QA pack, whose five
+  // GOLDEN fixtures all set CBHI_applicable=false and whose expected net
+  // pay figures have zero CBHI deduction.
+  cbhi_applicable?: boolean;
 };
 
 export type RwPayrollRunInput = {
@@ -152,7 +162,24 @@ export const PAYROLL_RULE_PACK_RW = {
   // stated percentages (already cited in the v1 limitations, just not
   // implemented until now). RSSB/RAMA/CBHI bases stay on cash gross_pay
   // only — the source doesn't specify a BIK treatment for those.
-  id: 'RW-2026-PAYE-RSSB-RAMA-CBHI-BIK-DRAFT-V2',
+  //
+  // v3 (2026-09-16, golden-fixture QA pass): fixed a bug where CBHI was
+  // ALWAYS computed and deducted from net pay, with no way for a caller to
+  // turn it off — even though this pack's own limitations text already
+  // flagged the CBHI net-salary base as UNVERIFIED against real Ishema
+  // output. The "Rwanda 2026 Payroll Golden Fixtures" QA pack (5 fixtures,
+  // verified through 2026-09-14, sourced from RRA/RSSB) all set
+  // CBHI_applicable=false and expect net pay with ZERO CBHI deduction —
+  // e.g. RW-FIRST-300K: gross 300,000, PAYE 54,000, pension 18,000,
+  // maternity 900 -> expected net 227,100 (300,000-54,000-18,000-900,
+  // no CBHI). Before this fix the engine unconditionally subtracted
+  // employeeCbhi (≈1,135.5 in this example), producing net 225,964.5 —
+  // wrong by more than a rounding tolerance, on every single fixture.
+  // Added an explicit cbhi_applicable input flag (default false) so CBHI is
+  // only computed/deducted when a caller opts in; all five golden fixtures
+  // now pass net pay exactly. CBHI's net-salary base itself remains
+  // UNVERIFIED and unchanged from v2 — this fix only corrects when it fires.
+  id: 'RW-2026-PAYE-RSSB-RAMA-CBHI-BIK-DRAFT-V3',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'RWF',
   paye: {
@@ -180,7 +207,7 @@ export const PAYROLL_RULE_PACK_RW = {
   limitations: [
     'v1 initial build, monthly payroll only. PAYE has three paths: REGULAR + first_employer=true uses progressive bands; REGULAR + first_employer=false uses a flat 30% rate; CASUAL uses 0% up to RWF60,000 and 15% above.',
     'RSSB pension is fixed at 6%/6% for all of 2026. The already-enacted 2027+ rate increases (14%, 16%, 18%, 20%) are deliberately NOT implemented — a payroll run dated 2027 or later will still use the 6%/6% rate, which will be WRONG once the increase takes effect. The source itself notes these future rates require Presidential Order revalidation before activation.',
-    'CBHI (0.5%) is computed on this engine\'s own best reading of the source\'s recommended net-salary base (gross - PAYE - employee pension - employee maternity - employee RAMA if applicable). The source EXPLICITLY warns this base must be locked only after golden-testing against actual RSSB/RRA Ishema system output — this pass could not do that. Treat this pack\'s CBHI figure as UNVERIFIED against the real system, not merely lower-confidence.',
+    'CBHI (0.5%) is opt-in via cbhi_applicable (default false, added in v3 2026-09-16 — previously CBHI was always computed and deducted from net pay with no way to disable it, which mismatched the golden fixture pack\'s CBHI_applicable=false net-pay expectations on every fixture). When enabled, CBHI is computed on this engine\'s own best reading of the source\'s recommended net-salary base (gross - PAYE - employee pension - employee maternity - employee RAMA if applicable). The source EXPLICITLY warns this base must be locked only after golden-testing against actual RSSB/RRA Ishema system output — this pass could not do that. Treat this pack\'s CBHI figure as UNVERIFIED against the real system, not merely lower-confidence, and leave cbhi_applicable=false for real payroll runs until that verification happens.',
     'Occupational Hazards (OH) contribution base defaults to gross pay when no oh_contribution_base is separately supplied — the source notes OH has its own authority-defined base distinct from the pension base, but did not give that base numerically.',
     'Vehicle/accommodation benefit-in-kind, v2: computed ONLY when the caller sets vehicle_benefit and/or accommodation_benefit to true, adding 10% (vehicle) and/or 20% (accommodation) of gross_pay to the PAYE taxable base only, per the source\'s own stated percentages. RSSB pension/OH/maternity, RAMA, and CBHI stay on the cash gross_pay base — the source did not specify how (or whether) these benefits affect those bases, and this engine does not guess. Both flags default to false/omitted, exactly matching v1 behavior for every existing caller.',
     'NOT IMPLEMENTED: low-interest employee advances, expense-reimbursement classification, and all statutory filing (Ishema monthly declarations). This engine prepares payroll and accounting outputs only — it does not file with RRA/RSSB.',
@@ -309,9 +336,10 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
     const employeeRama = employee.rama_member ? money((employee.rama_basic_salary as number) * p.rama.employee_rate) : 0;
     const employerRama = employee.rama_member ? money((employee.rama_basic_salary as number) * p.rama.employer_rate) : 0;
 
-    // --- CBHI (unverified net-salary base; see limitations) ---
+    // --- CBHI (unverified net-salary base; opt-in only — see limitations) ---
+    const cbhiApplicable = employee.cbhi_applicable === true;
     const netSalaryForCbhi = Math.max(0, money(grossPay - paye - employeePension - employeeMaternity - employeeRama));
-    const employeeCbhi = money(netSalaryForCbhi * p.cbhi.employee_rate);
+    const employeeCbhi = cbhiApplicable ? money(netSalaryForCbhi * p.cbhi.employee_rate) : 0;
 
     const netPay = money(grossPay - paye - employeePension - employeeMaternity - employeeRama - employeeCbhi);
     const employerFundedTotal = money(grossPay + employerPension + employerOh + employerMaternity + employerRama);
