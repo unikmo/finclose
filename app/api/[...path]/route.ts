@@ -9,6 +9,7 @@ import { isRealDataMode, publicRuntimeProfile, runtimeReadiness } from '../../..
 import { assertProductionLedgerReady, ledgerHealth, persistBookkeepingBatch, persistFinanceCycle, persistPayrollRun } from '../../../lib/production-ledger';
 import { FINANCIAL_UPLOAD_SECURITY } from '../../../lib/file-security';
 import { getPayrollRun, PAYROLL_RULE_PACKS, payrollEngineSelfTest, preparePayrollRun } from '../../../lib/payroll-engine';
+import { computePayrollVariance, listPayrollRunsForDeployment } from '../../../lib/payroll-variance';
 import { BOOKKEEPING_CORE_CAPABILITIES, bookkeepingEngineSelfTest, getBookkeepingBatch, prepareBookkeepingBatch } from '../../../lib/bookkeeping-engine';
 import { FINANCE_CYCLE_CAPABILITIES, financeCycleSelfTest, getFinanceCycle, getMonthlyClose, prepareFinanceCycle } from '../../../lib/finance-cycle-engine';
 import { CLOSE_GOVERNANCE_CAPABILITIES, approveMonthlyClose, closeGovernanceSelfTest, configureBalanceSheetScope, configureSourceRequirements, evaluateSourceCompleteness, getCloseGovernance, lockMonthlyClose, prepareBalanceSheetReconciliation, recordPeriodSourceEvidence, reopenMonthlyClose } from '../../../lib/close-governance-engine';
@@ -148,6 +149,18 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
     if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'runs') {
       await authorizedDeployment(req, p[1]);
       return NextResponse.json(await getPayrollRun(p[1], p[4]));
+    }
+
+    if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'variance') {
+      await authorizedDeployment(req, p[1]);
+      const runs = await listPayrollRunsForDeployment(p[1]);
+      if (runs.length === 0) return NextResponse.json({ detail: 'no payroll runs found for this deployment' }, { status: 404 });
+      const requestedRunId = req.nextUrl.searchParams.get('run_id');
+      const currentIndex = requestedRunId ? runs.findIndex(r => r.payroll_run_id === requestedRunId) : runs.length - 1;
+      if (currentIndex === -1) return NextResponse.json({ detail: 'payroll run not found' }, { status: 404 });
+      const currentRun = runs[currentIndex];
+      const previousRun = currentIndex > 0 ? runs[currentIndex - 1] : null;
+      return NextResponse.json(computePayrollVariance(currentRun, previousRun));
     }
 
     if (p.length === 5 && p[0] === 'service-deployments' && p[2] === 'bookkeeping' && p[3] === 'batches') {
