@@ -36,6 +36,41 @@ const secondaryPaths = [
   { title: 'Bookkeeping & payroll together', href: '/start/bookkeeping-payroll' }
 ];
 
+const pipeline = [
+  { label: 'Collect', detail: 'Statements & records' },
+  { label: 'Match', detail: 'Reconcile every line' },
+  { label: 'Flag', detail: 'Surface exceptions' },
+  { label: 'Sign off', detail: 'Your accountant approves' }
+];
+
+function BookCloseIcon() {
+  return (
+    <svg viewBox="0 0 32 32" width="26" height="26" fill="none" aria-hidden="true">
+      <rect x="6" y="4" width="20" height="24" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M11 11h10M11 15.5h10M11 20h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M20.5 21.5l2 2 4-4.5" stroke="var(--fc-brass)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PayrollIcon() {
+  return (
+    <svg viewBox="0 0 32 32" width="26" height="26" fill="none" aria-hidden="true">
+      <circle cx="12.5" cy="13" r="6.5" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="19.5" cy="19" r="6.5" stroke="var(--fc-brass)" strokeWidth="1.6" />
+      <path d="M10.7 13h3.6M12.5 11.2v3.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M17.7 19h3.6" stroke="var(--fc-brass)" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const pipelineIcons = [
+  <svg key="collect" viewBox="0 0 32 32" width="22" height="22" fill="none" aria-hidden="true"><path d="M8 12l8-6 8 6v13a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 018 25V12z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><path d="M13 26.5V18h6v8.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>,
+  <svg key="match" viewBox="0 0 32 32" width="22" height="22" fill="none" aria-hidden="true"><path d="M8 11h11M8 11l3.5-3.5M8 11l3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /><path d="M24 21H13M24 21l-3.5-3.5M24 21l-3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  <svg key="flag" viewBox="0 0 32 32" width="22" height="22" fill="none" aria-hidden="true"><path d="M10 5v22" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M10 6.5h11.5L18 11l3.5 4.5H10" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>,
+  <svg key="signoff" viewBox="0 0 32 32" width="22" height="22" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="10.5" stroke="currentColor" strokeWidth="1.6" /><path d="M11.5 16.3l3 3 6-6.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+];
+
 export default function Home() {
   return (
     <main className="home-shell">
@@ -68,6 +103,9 @@ export default function Home() {
           {products.map((product) => (
             <Link key={product.number} href={product.href} className="help-card help-card-primary">
               <div className="help-card-top">
+                <span className="help-card-icon" aria-hidden="true">
+                  {product.number === '01' ? <BookCloseIcon /> : <PayrollIcon />}
+                </span>
                 <span className="help-number">{product.number}</span>
                 <span className="help-tag">{product.tag}</span>
               </div>
@@ -82,6 +120,19 @@ export default function Home() {
               </div>
               <span className="help-arrow" aria-hidden="true">→</span>
             </Link>
+          ))}
+        </div>
+
+        <div className="pipeline" aria-label="How FinClose works">
+          {pipeline.map((step, i) => (
+            <div className="pipeline-step" key={step.label}>
+              <span className="pipeline-node">{pipelineIcons[i]}</span>
+              <span className="pipeline-copy">
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </span>
+              {i < pipeline.length - 1 && <span className="pipeline-connector" aria-hidden="true" />}
+            </div>
           ))}
         </div>
 
