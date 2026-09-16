@@ -1585,10 +1585,23 @@ export const PAYROLL_RULE_PACK_US = {
   vermont: {
     // NFC bulletin. Five brackets by two-way filing status, flat
     // per-allowance exemption amount.
-    allowance_value_annual: 5100,
+    //
+    // BUG FIX (v21, golden-fixture pass, US-VT-001, verified
+    // 2026-09-15): the v12 limitations note already flagged Vermont as
+    // sourced from a stale 2024 NFC bulletin. The golden fixture cites
+    // (and this pass independently re-fetched) the actual 2026 bulletin
+    // — https://help.nfc.usda.gov/bulletins/2026/1780320782.htm — which
+    // states the per-allowance exemption "is increasing from $5,300 to
+    // $5,400" and gives materially different bracket thresholds/base-tax
+    // figures for both filing statuses (e.g. SINGLE_OR_HOH's second
+    // bracket moves from $51,600/base $1,604.65 to $54,675/base
+    // $1,700.13). Replaced with the 2026 figures below; every SINGLE
+    // bracket boundary was cross-confirmed exactly against the golden
+    // fixture's own calculation trace.
+    allowance_value_annual: 5400,
     brackets: {
-      SINGLE_OR_HOH: [[0, 0, 0], [3700, 0, 0.0335], [51600, 1604.65, 0.066], [119700, 6099.25, 0.076], [245700, 15675.25, 0.0875]],
-      MARRIED: [[0, 0, 0], [11138, 0, 0.0335], [91088, 2678.33, 0.066], [204488, 10162.73, 0.076], [305788, 17861.53, 0.0875]]
+      SINGLE_OR_HOH: [[0, 0, 0], [3925, 0, 0.0335], [54675, 1700.13, 0.066], [126775, 6458.73, 0.076], [260225, 16600.93, 0.0875]],
+      MARRIED: [[0, 0, 0], [11775, 0, 0.0335], [96475, 2837.45, 0.066], [216525, 10760.75, 0.076], [323825, 18915.55, 0.0875]]
     } as Record<VtFilingStatus, Array<[number, number, number]>>
   },
   west_virginia: {
@@ -1626,9 +1639,30 @@ export const PAYROLL_RULE_PACK_US = {
     // allowance") rather than a literal quoted formula line, so treated as
     // slightly lower confidence than a directly-quoted formula (see
     // limitations).
+    //
+    // BUG FIX (v21, golden-fixture pass, US-ID-001, verified 2026-09-15):
+    // the $15,000/$30,000 thresholds below were the STALE, pre-revision
+    // figures. Idaho published a revised percentage-method table
+    // (EPB00744, "07-23-2026") that raised the ANNUAL thresholds to
+    // $16,100 (Single/HOH) and $32,200 (Married) — fetched and read
+    // directly 2026-09-15, https://tax.idaho.gov/document-mngr/pubs_EPB00744.
+    // This is the same "old vs. revised mid-year table" class of bug
+    // already fixed for Ohio in v18; like Ohio, this engine now always
+    // uses the current post-revision figures regardless of pay_date (no
+    // pre-2026-07-23 payroll date is modeled — see limitations).
+    // RESIDUAL, NOT FORCED: Idaho's guide publishes an INDEPENDENTLY
+    // ROUNDED threshold per pay frequency (weekly $310, biweekly $619,
+    // monthly $1,342, annual $16,100) rather than the weekly figure times
+    // 52 exactly (310 x 52 = $16,120, not $16,100). This engine always
+    // annualizes gross pay and applies the single annual threshold, so
+    // for a WEEKLY employee it reproduces the golden fixture to within
+    // $0.02/week ($47.19 engine vs $47.17 fixture) rather than exactly —
+    // a genuine per-frequency-table-rounding gap, not a further data
+    // error, and not force-fit by fabricating a frequency-specific
+    // threshold table this engine's architecture doesn't otherwise have.
     rate: 0.053,
     exemption_value_annual: 3868,
-    threshold_annual: { SINGLE: 15000, MARRIED: 30000 } as Record<IdFilingStatus, number>
+    threshold_annual: { SINGLE: 16100, MARRIED: 32200 } as Record<IdFilingStatus, number>
   },
   new_mexico: {
     // NFC bulletin, complete 10-row bracket tables (an initial fetch only
@@ -1794,11 +1828,64 @@ export const PAYROLL_RULE_PACK_US = {
     // All 23 counties + Baltimore City confirmed — 22 use a single flat
     // rate; Anne Arundel and Frederick use their own graduated bracket
     // tables (fully captured here, not simplified to a flat rate).
+    //
+    // BUG FIX (golden-fixture pass against
+    // US_2026_Payroll_Golden_Payslip_QA_Pack_All_50_States_DC.pdf,
+    // US-MD-001, Montgomery County, verified 2026-09-15): the SINGLE and
+    // MARRIED bracket arrays below used to start with a placeholder
+    // [0, 0, 0] entry covering the ENTIRE $0–$100,000 (SINGLE) /
+    // $0–$150,000 (MARRIED) range — i.e. Maryland's real 2%, 3%, 4%, and
+    // 4.75% statutory brackets that cover that whole range were simply
+    // missing, mapped to a 0% rate. Because bracketLookup picks the
+    // largest threshold <= income, EVERY Maryland employee earning under
+    // $100k/$150k a year (the vast majority of real employees) got
+    // md_income_tax = 0.00 — a severe, silent under-withholding bug, not
+    // a rounding nuance. Confirmed by running the golden fixture: engine
+    // produced $0.00 state tax where the fixture asserts a combined
+    // state+Montgomery-County figure of $90.20/week (of which the flat
+    // 3.20% county portion this engine already computed correctly
+    // accounts for $36.31 — the entire discrepancy was the missing state
+    // brackets). Replaced with Maryland's real, stable, long-standing
+    // statutory 2% / 3% / 4% / 4.75% graduated brackets for that range
+    // (Comptroller of Maryland, admin.tax rate schedule; these four low
+    // brackets have not changed in the recent 2024/2025 MD tax-law
+    // changes, which only added new brackets ABOVE $250k/$1M — the part
+    // of this table at $100k/$150k and up was already present and is
+    // left unchanged here).
+    //
+    // REMAINING KNOWN GAP (documented, not silently claimed fixed): this
+    // engine computes Maryland withholding as state-bracket-tax PLUS a
+    // separate flat (or, for Anne Arundel/Frederick, graduated) COUNTY
+    // rate applied to the same taxable wages. Maryland's own official
+    // withholding guide does NOT publish withholding tables this way —
+    // it publishes ONE COMBINED state+local percentage-method table per
+    // distinct local rate (10 tables: 2.25%, 2.40%, 2.65%, 2.75%, 2.85%,
+    // 3.00%, 3.05%, 3.10%, 3.20%, 3.30%), and those combined tables use a
+    // single blended first-bracket rate (e.g. 7.95% = 4.75% state +
+    // 3.20% local for the $0–$100,000/SINGLE band) rather than stacking
+    // this engine's four separate 2/3/4/4.75% sub-brackets. Verified
+    // directly against the Comptroller's official 2026 guide (3.20%
+    // Percent Local Income Tax table, Annual payroll period, page 37 of
+    // https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf):
+    // for the golden fixture's exact inputs (Single, $62,400/yr, 0
+    // exemptions, Montgomery County/3.20%), the OFFICIAL combined table
+    // gives $90.20/week; this engine's decomposed state-bracket-fix
+    // above plus the existing flat-3.20%-county calc gives $89.19/week
+    // — a real, understood $1.01/week (~1.1%) residual gap from the
+    // combined-table blending, not from a further bracket error. This
+    // pass deliberately does NOT force-match the fixture's $90.20 by
+    // reverse-fitting the brackets, because doing so would make the
+    // Anne Arundel/Frederick graduated-county case (which layers this
+    // same state table under a genuinely separate county bracket lookup)
+    // wrong instead. A correct byte-exact fix requires implementing all
+    // 10 of Maryland's own combined per-local-rate tables (both filing
+    // statuses) rather than this decomposed approximation — flagged as
+    // follow-up work, not attempted this pass. See limitations array.
     standard_deduction_annual: 3400,
     allowance_value_annual: 3200,
     brackets: {
-      SINGLE: [[0, 0, 0], [100000, 4750, 0.05], [125000, 6000, 0.0525], [150000, 7312.5, 0.055], [250000, 12812.5, 0.0575], [500000, 27187.5, 0.0625], [1000000, 58437.5, 0.065]],
-      MARRIED: [[0, 0, 0], [150000, 7125, 0.05], [175000, 8375, 0.0525], [225000, 11000, 0.055], [300000, 15125, 0.0575], [600000, 32375, 0.0625], [1200000, 69875, 0.065]]
+      SINGLE: [[0, 0, 0.02], [1000, 20, 0.03], [2000, 50, 0.04], [3000, 90, 0.0475], [100000, 4750, 0.05], [125000, 6000, 0.0525], [150000, 7312.5, 0.055], [250000, 12812.5, 0.0575], [500000, 27187.5, 0.0625], [1000000, 58437.5, 0.065]],
+      MARRIED: [[0, 0, 0.02], [1000, 20, 0.03], [2000, 50, 0.04], [3000, 90, 0.0475], [150000, 7125, 0.05], [175000, 8375, 0.0525], [225000, 11000, 0.055], [300000, 15125, 0.0575], [600000, 32375, 0.0625], [1200000, 69875, 0.065]]
     } as Record<MdFilingStatus, Array<[number, number, number]>>,
     county_flat_rates: {
       'Allegany': 0.032, 'Baltimore County': 0.032, 'Baltimore City': 0.032, 'Calvert': 0.032,
@@ -1956,7 +2043,13 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'USDA National Finance Center (via text-extraction proxy)', instrument: 'Connecticut (NFC-24-1712697342) — the direct WebFetch of this bulletin repeatedly truncated the phase-out add-back and recapture step tables (each has ~10-50 rows); re-fetched via the same proxy workaround used for Oregon in v9 (oregon.gov and this NFC page both proved directly unreachable/unreliable to summarize fully), which returned the complete tables for withholding code A/D verbatim.', url: 'https://help.nfc.usda.gov/bulletins/2024/1712697342.htm' },
     { authority: 'Delaware Division of Revenue', instrument: '"Employer\'s Guide (Withholding Regulations and Employer\'s Duties)" — fetched and read directly 2026-09-15, effective 2025-01-01. Every bracket boundary hand-verified for internal consistency (each row\'s base tax figure exactly reproduces the previous row\'s formula extrapolated to that threshold).', url: 'https://revenue.delaware.gov/employers-guide-withholding-regulations-employers-duties/' },
     { authority: 'DC Office of Tax and Revenue (OTR) / USDA National Finance Center', instrument: 'DC\'s own current "DC Individual and Fiduciary Income Tax Rates" page (fetched directly 2026-09-15) gave a 7-row bracket table that exactly cross-confirmed a separately-fetched 2022 USDA NFC bulletin (TAXES 22-28, "District of Columbia Income Tax Withholding", effective Pay Period 22, 2022), which additionally gave the S/M/N/H filing-status categories and the $4,300-per-dependent allowance figure. Two independent sources landing on identical bracket numbers gives high confidence in the bracket table; the $4,300 allowance is only as current as its 2022 source (no more recent DC bulletin was located) — flagged in limitations.', url: 'https://otr.cfo.dc.gov/page/individual-income-tax-rates-district-columbia' },
-    { authority: 'Wisconsin Department of Revenue', instrument: 'Publication W-166 (1/26), "Withholding Tax Guide" — fetched and read directly 2026-09-15, the department\'s own current WITHHOLDING-specific publication (distinct from the individual income tax annual-return instructions, which give a similar-looking but not necessarily interchangeable formula — a distinction this session deliberately checked rather than assumed). Contains the "Alternate Method of Withholding Wisconsin Income Tax" section with a complete percentage-method formula (deduction phase-out by filing status, $400/exemption, and a single bracket schedule applying to both filing statuses) plus 3 fully worked examples, all reproduced exactly by this engine\'s self-tests.', url: 'https://www.revenue.wi.gov/DOR%20Publications/pb166.pdf' }
+    { authority: 'Wisconsin Department of Revenue', instrument: 'Publication W-166 (1/26), "Withholding Tax Guide" — fetched and read directly 2026-09-15, the department\'s own current WITHHOLDING-specific publication (distinct from the individual income tax annual-return instructions, which give a similar-looking but not necessarily interchangeable formula — a distinction this session deliberately checked rather than assumed). Contains the "Alternate Method of Withholding Wisconsin Income Tax" section with a complete percentage-method formula (deduction phase-out by filing status, $400/exemption, and a single bracket schedule applying to both filing statuses) plus 3 fully worked examples, all reproduced exactly by this engine\'s self-tests.', url: 'https://www.revenue.wi.gov/DOR%20Publications/pb166.pdf' },
+    { authority: 'Alabama Department of Revenue', instrument: '"Withholding Tax Tables and Instructions" (whbooklet_0126.pdf, effective 01/2026 — the same document the golden-fixture pack itself cites for US-AL-001) — fetched and read directly 2026-09-15 specifically to diagnose the v21 AL federal-deduction bug. Confirmed the official 4-line deduction stack (Standard Deduction / Federal Withholding x periods / Personal Exemption / Dependents) and the exact personal-exemption dollar amounts by claim code ($0 none, $1,500 S/MS, $3,000 M/H), used to fix the missing federal-tax-deduction line and to independently re-verify (not change) the existing $1,500 Single figure — see the limitations entry and the comment above the alabama al_income_tax calculation for the residual, deliberately-not-forced gap against the golden fixture.', url: 'https://www.revenue.alabama.gov/wp-content/uploads/2026/01/whbooklet_0126.pdf' },
+    { authority: 'South Carolina Department of Revenue', instrument: 'WH-1603F, "Formula for Computing South Carolina 2026 Withholding Tax" (Rev. 11/4/25) — fetched and read directly 2026-09-15 to diagnose the v21 SC standard-deduction bug. Confirmed both the personal allowance and the 10%-of-wages/$7,500-cap standard deduction are "$0 if zero allowances claimed", and reproduced the guide\'s own worked example (Subtraction Method, $20,100 taxable -> $549.90 annual) exactly, along with the golden fixture\'s own $0-allowance case.', url: 'https://dor.sc.gov/sites/dor/files/forms/WH1603F_2026.pdf' },
+    { authority: 'USDA National Finance Center', instrument: 'Vermont 2026 withholding bulletin (re-fetched 2026-09-15, superseding the stale 2024 bulletin this file previously used) — gives the per-allowance exemption increase from $5,300 to $5,400 and the full 2026 bracket tables (both filing statuses) used to fix the v21 Vermont bracket-threshold bug; every SINGLE_OR_HOH figure cross-confirmed exactly against the golden fixture\'s own calculation trace.', url: 'https://help.nfc.usda.gov/bulletins/2026/1780320782.htm' },
+    { authority: 'Oklahoma Tax Commission', instrument: 'Packet OW-2, "Oklahoma Income Tax Withholding Tables" (effective 2026) — fetched and read directly 2026-09-15 specifically to investigate the US-OK-001 golden-fixture mismatch. Found that this engine\'s existing oklahoma.brackets.SINGLE_OR_HOH table ($10,100/$11,250/$13,550 thresholds, $0/$28.75/$109.25 base, 2.5%/3.5%/4.5% rates) reproduces the guide\'s own Table 7 (Annual, Single Person) EXACTLY, and that the golden fixture\'s own calculation trace ("$4.20 + 4.50% of the excess over $521") instead matches Table 7\'s MARRIED PERSON column, not Single — used to confirm this was a fixture labeling issue, not an engine bug, and to add the whole-dollar rounding the guide separately requires ("must be rounded... to the nearest whole [dollar]").', url: 'https://oklahoma.gov/content/dam/ok/en/tax/documents/resources/publications/businesses/withholding-tables/WHTables-2026.pdf' },
+    { authority: 'Mississippi Department of Revenue', instrument: '"Withholding Income Tax Tables and Employer Instructions" (89-700-25-1, revised 1/13/2026) — fetched and read directly 2026-09-15 to investigate the US-MS-001 golden-fixture mismatch. Confirmed Mississippi\'s real withholding tables are genuine $10-wide WEEKLY WAGE-BRACKET tables (Table A/B/C by exemption count) that build up tax progressively, not the simple "$0 under $10,000 annualized, 4% flat above it" two-tier approximation this engine implements — the same class of simplification-vs-real-table gap already flagged for Arkansas\'s narrow top-bracket band elsewhere in this file. Not force-matched or fully transcribed this pass (the real table runs to hundreds of $10-wide rows per exemption count) — flagged as a known, now-confirmed-real gap in limitations rather than guessed at.', url: 'https://www.dor.ms.gov/sites/default/files/tax-forms/business/89700251revised1.13.2026.pdf' },
+    { authority: 'Comptroller of Maryland', instrument: '"Maryland Employer Withholding Guide" (effective January 2026) — fetched and read directly 2026-09-15 to diagnose and fix the v21 md_income_tax=$0-under-$100k bug found by the golden-fixture pass. Used to confirm (a) the $3,400 standard deduction and $3,200/exemption figures already in this file were correct, and (b) the official combined 3.20%-local-rate Annual-payroll-period percentage table (page 37) for both filing statuses, which was used to verify the fixed brackets\' correctness at the Montgomery County/$62,400/Single/0-exemptions golden fixture point and to quantify (not eliminate) the residual ~1.1% gap between this engine\'s decomposed state+county calculation and Maryland\'s actual combined-table withholding amount — see the limitations entry and the comment above the maryland.brackets table for the full reasoning.', url: 'https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf' }
   ],
   limitations: [
     'Supported states (v18): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, DE, DC, WI, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — full 50-state-plus-DC coverage. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
@@ -1965,7 +2058,17 @@ export const PAYROLL_RULE_PACK_US = {
     'Wisconsin (v17, the final state, completing full US coverage): sourced from the Wisconsin DOR\'s own current Publication W-166 (1/26) Withholding Tax Guide, specifically its "Alternate Method of Withholding" section — this is the WITHHOLDING-specific formula, deliberately distinguished from a similar-looking but ANNUAL-RETURN-specific formula found earlier in Form 1\'s instructions (which was NOT used, precisely because mixing annual-return constants into a withholding calculation without confirming interchangeability could have produced genuinely wrong numbers — flagged and held back in the v16 pass rather than guessed). All 3 of the guide\'s own worked examples (single/weekly, single/weekly with more exemptions, married/biweekly) are reproduced exactly by this engine. Treat as a high-confidence, primary-sourced, worked-example-verified state — comparable to IN/NC/IA/DE rather than the weaker single-NFC-bulletin tier.',
     'Connecticut (v14): only withholding code A/D is implemented. Codes B, C, and F use their own separate base bracket tables and/or phase-out/recapture schedules that were not captured this pass — employees on those codes are REJECTED with an explicit error rather than approximated using the A/D tables.',
     'Maryland (v14): county tax is MANDATORY and this engine requires md_county to be set to one of Maryland\'s 23 counties or Baltimore City rather than silently omitting it (the same required-not-skipped pattern established for Indiana\'s county tax in v10). Anne Arundel and Frederick\'s own graduated county bracket tables are fully implemented (not simplified to a flat rate); their bracket "base" dollar amounts for Frederick were computed by this engine from the source\'s rate-and-threshold data (not directly quoted in the source), then verified for internal consistency at every bracket boundary.',
+    'Maryland (v21, BUG FIX + open gap): the golden-fixture pass against US_2026_Payroll_Golden_Payslip_QA_Pack_All_50_States_DC.pdf (US-MD-001, Montgomery County) found that the SINGLE/MARRIED state bracket tables had NO real bracket structure below $100,000/$150,000 — that whole range mapped to a 0% placeholder, so every MD employee earning under six figures got md_income_tax = $0.00 regardless of wages. Fixed by adding Maryland\'s real, long-stable 2%/3%/4%/4.75% statutory brackets for that range (see the comment directly above the brackets table for full detail and sourcing). This was a severe, silent under-withholding bug for the overwhelming majority of real Maryland payrolls, not a cosmetic rounding gap. REMAINING GAP, deliberately not force-fixed this pass: this engine computes MD withholding as (state bracket tax) + (flat or graduated county rate on the same taxable wages), but Maryland\'s official withholding guide instead publishes ONE COMBINED state+local percentage-method table per distinct local rate (10 tables, verified directly against the Comptroller\'s 2026 guide, https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf, page 37 for the 3.20% table). For the golden fixture\'s own inputs, the official combined table gives $90.20/week; this engine\'s post-fix decomposed calculation gives $89.19/week — a real, understood ~$1.01/week (~1.1%) residual gap from the combined-table\'s blended first-bracket rate, not a further bracket transcription error. Every MD county still carries this same ~1% class of residual gap until this engine is rebuilt around Maryland\'s actual 10-table combined-rate architecture (both filing statuses) — flagged as follow-up work.',
     'Iowa (v13): the ONE state in the v11-v13 batches sourced with the same rigor as CA/NJ/NY/OR/IN/NC — the actual Iowa DOR current-year formula publication, with all 6 relevant worked examples reproduced exactly. Treat as high confidence, not the weaker single-NFC-bulletin tier the rest of this batch carries.',
+    'v21 golden-fixture pass (2026-09-16) against US_2026_Payroll_Golden_Payslip_QA_Pack_All_50_States_DC.pdf, 41 of the 51 fixtures actually run through this engine (the other 10 are structurally out of scope — see below): found and fixed 5 real, confirmed bugs (Alabama\'s missing federal-tax deduction, Maryland\'s missing sub-$100k/$150k state brackets, South Carolina\'s always-on standard deduction, Idaho\'s and Vermont\'s stale pre-2026-revision bracket tables — see each state\'s own dedicated limitations entry for detail and sourcing) plus one rounding fix (Oklahoma now rounds to the nearest whole dollar per its own official instruction). Also confirmed 2 fixture-side issues rather than engine bugs: the golden pack\'s own California PIT figure ($647.90) already had a documented engine-vs-fixture method divergence before this pass (see the CA case-17 comment); this pass additionally found the pack\'s US-OK-001 fixture itself appears to apply Oklahoma\'s MARRIED weekly bracket parameters to a scenario it labels Single (verified directly against Oklahoma\'s own official Table 7) — not treated as an engine bug. Structurally NOT run this pass, not because of a data error but because the input schema/engine has no code path for them at all: (a) 8 SUPPLEMENTAL-scenario fixtures (AR, MN, MO, MT, ND, NE, RI, WI) — this engine has no federal/state supplemental-wage flat-rate withholding of any kind (see the existing "Supplemental-wage flat-rate withholding methods... are not implemented" entry below); (b) Maine (ME) is not one of this engine\'s ~47 supported states at all (no UsState member, no me_income_tax field); (c) the DC fixture requires a federal/D-4 EXEMPT-certificate input path this engine has no field for, for any state. Five further REGULAR-scenario states pass their core state-income-tax LINE exactly but have a documented total/net gap because a whole secondary payroll program the fixture also asserts is not implemented in this engine at all: CT Paid Leave ($6.00/week), DE Paid Leave ($4.80/week), HI TDI ($6.00/week), MA PFML ($5.52/week), and Vermont\'s optional employer-elected Child Care Contribution ($1.32/week) — none of these have any field or calculation anywhere in this file. See test-golden-us-all-states.ts at the repo root for the full line-by-line results this entry summarizes.',
+    'Mississippi (v21, CONFIRMED GAP, not fixed): the golden-fixture pass found this engine\'s "$0 under $10,000 annualized, then flat 4% above it" 2-bracket Mississippi model is a simplification of Mississippi\'s REAL withholding method, which uses genuine $10-wide weekly (and other per-period) wage-bracket tables that build up tax progressively well below $10,000 of annualized taxable income (confirmed directly against Mississippi\'s own 2026 withholding tables, 89-700-25-1). This produces a materially different number even at ordinary wage levels ($33.92/week engine vs. roughly $28-29/week per the real table for this engine\'s own $1,200/week Single/0-dependents case) — not a rounding-scale gap. Not fixed this pass: the real table runs to hundreds of $10-wide rows per exemption-count column, the same "too large to safely transcribe under time pressure" call already made for Arkansas\'s narrow top-bracket band elsewhere in this file. Flagged as a confirmed, real, and non-trivial gap for a follow-up pass, not guessed at.',
+    'South Carolina (v21, BUG FIX): the golden-fixture pass found this engine applied the 10%-of-wages/$7,500-cap standard deduction unconditionally, when South Carolina\'s own WH-1603F formula states the deduction (and the separate personal allowance) are both "$0 if zero allowances claimed" and only apply when the employee claims one or more allowances. Fixed by gating both on sc_allowances > 0; reproduces both the WH-1603F worked example and the golden fixture exactly. Every SC employee who claims zero allowances was previously under-withheld.',
+    'Idaho (v21, BUG FIX): the golden-fixture pass found this engine\'s $15,000/$30,000 annual thresholds were the stale pre-revision figures; Idaho\'s own EPB00744 (revised 07-23-2026) raised them to $16,100 (Single/HOH) and $32,200 (Married). Fixed — see the comment above idaho.threshold_annual for detail, including a small (~$0.02/week) residual gap from Idaho\'s own per-pay-frequency tables being independently rounded rather than exact multiples of each other, which this engine\'s single-annual-threshold architecture cannot reproduce byte-exact.',
+    'Vermont (v21, BUG FIX): superseded the v12-flagged stale 2024 bracket table with Vermont\'s actual 2026 figures (both filing statuses) — see the comment above vermont.brackets for detail. The separate, still-open Vermont Child Care Contribution gap (an optional employer-elected program this engine does not implement at all) is unrelated and remains open — see the v21 pass-summary entry above.',
+    'Delaware (v21, method-divergence finding, not an engine bug): the golden-fixture pass confirmed this engine\'s annualized PERCENTAGE method (bracket table, internally consistent) produces a different weekly number ($55.70) than the golden fixture\'s own DE wage-BRACKET table method ($58.61) for the same inputs — Delaware, like several other states, publishes both a percentage method and a discrete wage-bracket table as equally valid alternatives; this engine implements only the former. Same class of legitimate method-choice divergence as the existing CA Method-B precedent, not force-matched.',
+    'Hawaii, Kansas, West Virginia (v21, verified, not pursued further): the golden-fixture pass found these three within $0.01-$0.02/week of their fixtures — consistent with this engine\'s uniform "annualize wages, apply annual brackets, divide by periods" architecture landing a cent or two off a source that instead publishes independently-rounded per-period tables (the same underlying cause already documented in detail for Idaho). Not investigated further given the sub-3-cent size; flagged here rather than silently left unexplained.',
+    'Oklahoma (v21, rounding fix + fixture-labeling finding, not an engine bug): added whole-dollar rounding per Oklahoma\'s own stated withholding rule (previously kept cents). Separately, re-verified this engine\'s existing SINGLE_OR_HOH bracket table against Oklahoma\'s own official Table 7 (Annual, Single) and found it matches exactly ($10,100/$11,250/$13,550 thresholds); the golden-fixture pack\'s own US-OK-001 card appears to use Oklahoma\'s MARRIED weekly bracket parameters ($521 threshold / $4.20 base) for a scenario it labels "Single" — not force-matched, treated as a fixture-side issue backed by a direct primary-source cross-check, not a reason to change this engine\'s already-correct table.',
+    'Alabama (v21, BUG FIX + open gap): the golden-fixture pass against US_2026_Payroll_Golden_Payslip_QA_Pack_All_50_States_DC.pdf (US-AL-001) found this engine\'s Alabama deduction stack was missing an entire, confirmed-real deduction line: Alabama\'s own official withholding booklet (whbooklet_0126.pdf, step 2, fetched and read directly 2026-09-15) lists Standard Deduction (2A) + FEDERAL WITHHOLDING x periods/year (2B) + Personal Exemption (2C) + Dependents (2D); this engine only ever implemented 2A, 2C, and 2D, silently omitting the federal-tax deduction entirely (Alabama is one of the few states that lets the federal withholding amount itself reduce AL taxable wages, uncapped for withholding purposes per the booklet\'s own worked example). Fixed by adding the missing federal-tax-deduction line. This moved the AL-001 fixture from $55.38/week (old, wrong — overstated AL withholding by omitting a real deduction) to $50.28/week. OPEN, UNRESOLVED GAP: the fixture itself asserts $51.72/week, a further $1.44/week different from this engine\'s post-fix number. That gap was NOT force-closed: this engine\'s $1,500 Single personal-exemption figure was independently re-verified directly against the same booklet\'s own exemption-code table ("SINGLE CLAIMING $1500 PERSONAL EXEMPTION") this pass and confirmed correct, so reproducing the fixture\'s exact number would require an unverified guess at a different personal-exemption or federal-deduction treatment not supported by the primary source in hand — left open rather than reverse-fit, consistent with the CA Method-B precedent elsewhere in this file.',
     'Alabama (v13): only wages at or above the FLOOR standard-deduction threshold are supported ($35,500/year Single/MFJ/Head of Family, $17,750/year MFS) — Alabama\'s real standard deduction phases DOWN in $25 increments for every $500 of income below that threshold (confirmed via Alabama\'s own official TY2025 deduction table), which this engine does not model. Employees below the threshold are REJECTED with an explicit error rather than approximated. Alabama\'s tax brackets, personal exemption, and dependent exemption tiers are sourced from a 2022 NFC bulletin (not reconfirmed for 2026) — treated as low-risk given AL\'s historical rate stability, but should be reconfirmed before real payroll runs. The Alabama standard deduction table itself is dated tax-year 2025, not yet confirmed for 2026.',
     'v12 eleven-state batch (MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI): same single-NFC-source confidence tier as v11. Only 4 (MO, HI, SC, AR) were hand-verified against manual bracket arithmetic; the rest (MA, NE, VT, WV, KS, ID, NM) checked only for journal-balance/positive-tax sanity — a real, explicitly-flagged verification gap.',
     'Arkansas (v12): the real top bracket smooths across 28 narrow $100-wide rows between $94,701 and $97,601 annualized taxable income to avoid a hard rate cliff; this engine could not obtain that full 28-row table and REJECTS (with an explicit error) any employee whose annualized taxable income falls in that band, rather than approximating across it. Also does not model Arkansas\'s separate low-income tax credit for married filers in a specific income band.',
@@ -2932,7 +3035,19 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const ded = (employee.ok_exemptions as number) * p.oklahoma.exemption_value_annual;
       const taxable = Math.max(0, money(annualWagesV11 - ded));
       const annualTax = bracketLookup(taxable, p.oklahoma.brackets[status]);
-      okIncomeTax = money(annualTax / periodsPerYear);
+      // Rounding fix (v21, golden-fixture pass): Oklahoma's own Packet
+      // OW-2 says withholding "must be rounded. Round to the nearest
+      // whole [dollar]" — this engine previously kept cents. Rounded to
+      // the nearest whole dollar at the per-period level, matching the
+      // same whole-dollar convention already implemented for NC (see
+      // ncIncomeTax = Math.round(...) above). See limitations for the
+      // separate, unrelated finding that fixture US-OK-001 itself
+      // appears to use the MARRIED weekly bracket parameters ($521/
+      // $4.20) while labeling the scenario Single — this engine's own
+      // brackets.oklahoma.SINGLE_OR_HOH table was independently
+      // re-verified to match Oklahoma's official Table 7 (Annual,
+      // Single) exactly, so that fixture was NOT force-matched.
+      okIncomeTax = Math.round(annualTax / periodsPerYear);
     }
 
     let riIncomeTax = 0;
@@ -2985,8 +3100,25 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
 
     let scIncomeTax = 0;
     if (employee.state === 'SC') {
-      const ded = Math.min(money(annualWagesV11 * p.south_carolina.standard_deduction_rate), p.south_carolina.standard_deduction_cap_annual)
-        + (employee.sc_allowances as number) * p.south_carolina.allowance_value_annual;
+      // BUG FIX (v21, golden-fixture pass, US-SC-001, verified
+      // 2026-09-15): South Carolina's own WH-1603F formula (fetched and
+      // read directly this pass) states BOTH the personal allowance AND
+      // the standard deduction are "$0 if zero allowances claimed" —
+      // the 10%-of-wages-up-to-$7,500 standard deduction only applies
+      // when the employee claims one or more allowances. This engine
+      // previously applied the capped standard deduction unconditionally
+      // regardless of sc_allowances, overstating the deduction (and
+      // understating withholding) for every SC employee claiming zero
+      // allowances. Confirmed against WH-1603F's own worked example
+      // (using the SUBTRACTION method: taxable x 6% - $656.10 for
+      // taxable income >= $18,230) and against the golden fixture, which
+      // both reproduce exactly once the standard deduction is gated on
+      // allowances > 0, matching the source's AND condition.
+      const claimsAllowance = (employee.sc_allowances as number) > 0;
+      const ded = claimsAllowance
+        ? Math.min(money(annualWagesV11 * p.south_carolina.standard_deduction_rate), p.south_carolina.standard_deduction_cap_annual)
+          + (employee.sc_allowances as number) * p.south_carolina.allowance_value_annual
+        : 0;
       const taxable = Math.max(0, money(annualWagesV11 - ded));
       const annualTax = bracketLookup(taxable, p.south_carolina.brackets);
       scIncomeTax = money(annualTax / periodsPerYear);
@@ -3115,7 +3247,28 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       for (const [atLeast, amount] of p.alabama.dependent_exemption_tiers) {
         if (annualWagesV11 >= atLeast) dependentRate = amount; else break;
       }
-      const ded = p.alabama.floor_deduction_annual[status] + p.alabama.personal_exemption_annual[status] + dependents * dependentRate;
+      // BUG FIX (golden-fixture pass, US-AL-001, verified 2026-09-15):
+      // Alabama's own official withholding booklet ("Withholding Tax
+      // Tables and Instructions", whbooklet_0126.pdf, fetched and read
+      // directly 2026-09-15) step 2 lists FOUR deduction lines, not three
+      // — Standard Deduction (2A), FEDERAL WITHHOLDING x periods/year
+      // (2B), Personal Exemption (2C), Dependents (2D). This engine was
+      // missing line 2B entirely: Alabama is one of the few states that
+      // lets employees deduct their own federal income tax withholding
+      // from AL taxable wages, and the booklet's worked example applies
+      // it UNCAPPED for withholding purposes (unlike the capped version
+      // on the annual AL-40 return). Adding it moves this fixture from
+      // $55.38/week (old, wrong) to $50.28/week — much closer to, but
+      // NOT exactly, the golden fixture's own $51.72/week. That residual
+      // ~$1.44/week gap is NOT force-matched: the booklet's own $1,500
+      // "S" (Single) personal-exemption figure, used unchanged here, was
+      // independently re-confirmed directly against the booklet's own
+      // exemption-code table this pass, so closing the remaining gap
+      // would require guessing at a different personal-exemption number
+      // that the primary source does not support — flagged as an open,
+      // unresolved discrepancy in limitations rather than reverse-fit.
+      const annualFederalTax = money(federalIncomeTax * periodsPerYear);
+      const ded = p.alabama.floor_deduction_annual[status] + annualFederalTax + p.alabama.personal_exemption_annual[status] + dependents * dependentRate;
       const taxable = Math.max(0, money(annualWagesV11 - ded));
       const brackets = status === 'MARRIED_FILING_JOINTLY' ? p.alabama.brackets_mfj : p.alabama.brackets_single_mfs_hof;
       const annualTax = bracketLookup(taxable, brackets);
@@ -4224,7 +4377,12 @@ export function payrollEngineSelfTestUS() {
   });
   const [sMa1, sMo1, sNe1, sSc1, sVt1, sWv1, sKs1, sId1, sNm1, sAr1, sHi1] = v12Case.employees;
   const expectedMo1 = 391.9;
-  const expectedSc1 = 507.83;
+  // v21: SC1 recomputed after the standard-deduction-gating bug fix
+  // (sc_allowances: 0 now correctly zeroes both the personal allowance
+  // and the standard deduction per SC's own WH-1603F formula, instead of
+  // always applying the capped standard deduction) — $507.83 was the
+  // pre-fix (buggy, overstated-deduction) figure.
+  const expectedSc1 = 545.32;
   const expectedAr1 = 355.73;
   const expectedHi1 = 640.03;
 
@@ -4254,7 +4412,10 @@ export function payrollEngineSelfTestUS() {
   // = $218.99 + $56.67 (rounded) = $275.66.
   const expectedOh1 = 275.66;
   const expectedLa1 = 275.85;
-  const expectedAl1 = 480;
+  // v21: AL1 recomputed after fixing the missing federal-tax-deduction
+  // line (Alabama's own withholding booklet step 2B) — $480 was the
+  // pre-fix (buggy, understated-deduction) figure.
+  const expectedAl1 = 406.79;
 
   // v14: Maryland (flat + graduated counties) and Connecticut (code A/D
   // phase-out + recapture), both hand-verified against bracket-math
