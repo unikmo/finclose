@@ -1,4 +1,16 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'FinClose — Bookkeeping, Payroll & Close Support',
+  description: 'FinClose prepares the close and prepares payroll — every calculation, match, and reconciliation done for you. Your accountant reviews, judges, and approves before anything is released.',
+  alternates: { canonical: '/' },
+  openGraph: {
+    title: 'FinClose — Bookkeeping, Payroll & Close Support',
+    description: 'FinClose prepares the close and prepares payroll. Your accountant reviews, judges, and approves before anything is released.',
+    url: '/'
+  }
+};
 
 const products = [
   {
