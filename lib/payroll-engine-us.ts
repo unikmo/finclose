@@ -415,7 +415,7 @@ export type UsState =
   | 'GA' | 'KY' | 'MS' | 'UT' | 'MN' | 'MT' | 'ND' | 'OK' | 'RI' | 'VA'
   | 'MA' | 'MO' | 'NE' | 'SC' | 'VT' | 'WV' | 'KS' | 'ID' | 'NM' | 'AR' | 'HI'
   | 'OH' | 'LA' | 'IA' | 'AL' | 'MD' | 'CT' | 'DE' | 'DC' | 'WI'
-  | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY';
+  | 'FL' | 'NV' | 'NH' | 'SD' | 'TN' | 'TX' | 'WY' | 'ME';
 export type NjRateTable = 'A' | 'B';
 export type NyFilingStatus = 'SINGLE' | 'MARRIED';
 export type CoFilingStatus = 'MFJ_OR_QSS' | 'OTHER';
@@ -447,6 +447,19 @@ export type DeFilingStatus = 'SINGLE_OR_MFS' | 'MARRIED_FILING_JOINTLY';
 // S=Single, M=Married Filing Jointly, N=Married Filing Separately, H=Head of Household.
 export type DcFilingStatus = 'S' | 'M' | 'N' | 'H';
 export type WiFilingStatus = 'SINGLE' | 'MARRIED';
+// Maine's W-4ME has only two withholding-purpose filing categories: the
+// "Married" box, or "Single" / "Married, but withholding at higher single
+// rate" / "Head of Household" boxes, which ALL use the single percentage
+// schedule (Maine Revenue Services, 26_wh_tab_instr.pdf, p.5, "Withholding
+// Allowances" section: "If the 'Married' box is checked... use the married
+// percentage... If the 'Married, but withholding at higher single rate' or
+// 'Single or Head of Household' box is checked... use the single
+// percentage rate schedule").
+export type MeFilingStatus = 'SINGLE_OR_HOH' | 'MARRIED';
+// Supplemental-wage flat-rate withholding method, per IRS Pub 15-T (federal)
+// and each state's own optional/elective flat-percentage method (state
+// fields below). Defaults to 'REGULAR' — see UsEmployeeInput.wage_type.
+export type UsWageType = 'REGULAR' | 'SUPPLEMENTAL';
 
 export type UsEmployeeInput = {
   employee_id: string;
@@ -455,6 +468,30 @@ export type UsEmployeeInput = {
   pretax_401k_deferral?: number;
   pretax_section125_deduction?: number;
   pay_frequency: UsPayFrequency;
+  // Supplemental-wage flat-rate withholding (bonuses, commissions,
+  // severance, etc. paid SEPARATELY from regular wages). Defaults to
+  // 'REGULAR' (the existing annualized/percentage method, unchanged).
+  // 'SUPPLEMENTAL' switches FEDERAL withholding to the flat 22% optional
+  // method (IRS Pub 15-T (2026), Section 1, "Withholding on Supplemental
+  // Wages" — 22% up to $1,000,000 of supplemental wages in the calendar
+  // year; this engine has no year-to-date supplemental-wage tracker, so
+  // the 37%-mandatory-above-$1M tier is NOT implemented — see
+  // limitations) and, for the states that have their own separately-
+  // sourced flat supplemental rate (see each state's own rule-pack
+  // comment for its citation), switches STATE withholding to that flat
+  // rate too. For any OTHER state, passing wage_type: 'SUPPLEMENTAL' is
+  // REJECTED with an explicit error rather than silently falling back to
+  // the regular method or guessing a rate — see limitations for the full
+  // list of states with an implemented supplemental rate.
+  wage_type?: UsWageType;
+  // Employee has filed a Form W-4 claiming EXEMPT from federal income tax
+  // withholding (IRS Form W-4 instructions, "Exemption from
+  // Withholding" — valid only for the calendar year in which it is
+  // filed; this engine does not track the certificate's filing/expiry
+  // date, so the caller is responsible for only setting this for a
+  // currently-valid exempt claim). When true, federal_income_tax is
+  // forced to 0 regardless of filing status/allowances/brackets.
+  federal_w4_exempt?: boolean;
   federal_filing_status: UsFederalFilingStatus;
   federal_step2_checkbox: boolean;
   federal_step3_annual_credits?: number;
@@ -663,9 +700,48 @@ export type UsEmployeeInput = {
   // $4,300-per-dependent allowance (2022 NFC bulletin figure).
   dc_filing_status?: DcFilingStatus;
   dc_dependents?: number;
+  // DC Form D-4 "Employee Withholding Allowance Certificate" EXEMPT
+  // claim. When true (DC employees only), dc_income_tax is forced to 0.
+  // A DC employee whose payslip should show $0 federal AND $0 DC
+  // withholding needs BOTH dc_d4_exempt and the general federal_w4_exempt
+  // set — DC's own exempt certificate does not by itself exempt federal
+  // withholding, and vice versa.
+  dc_d4_exempt?: boolean;
   // WI fields — required when state === 'WI'.
   wi_filing_status?: WiFilingStatus;
   wi_exemptions?: number;
+  // ME fields — required when state === 'ME'.
+  me_filing_status?: MeFilingStatus;
+  me_allowances?: number;
+  // CT Paid Leave (CTPL) — mandatory, 100%-employee-funded, flat rate,
+  // no opt-out and no employer share; applies to every CT employee.
+  ytd_ct_paid_leave_wages_before?: number;
+  // DE Paid Leave — mandatory (statewide program); this engine models the
+  // maximum employee-withholdable share (50% of the total premium, the
+  // statutory ceiling) — an employer may elect to pay more of the
+  // employee's share itself, which would reduce this below the modeled
+  // amount (see limitations).
+  ytd_de_paid_leave_wages_before?: number;
+  // MA PFML — mandatory; the employee share (0.46% of wages: 0.28%
+  // medical + 0.18% family) is the same dollar rate regardless of
+  // employer size (small employers <25 covered individuals owe a lower
+  // TOTAL 0.46% rate with no employer share, but the employee's own
+  // share is unchanged at 0.46%) — see limitations for what this engine
+  // does not model (the employer-side expense line).
+  ytd_ma_pfml_wages_before?: number;
+  // VT Child Care Contribution — a total 0.44%-of-wages payroll tax where
+  // the EMPLOYER must pay at least 75% (0.33%) and MAY elect to withhold
+  // up to the remaining 25% (0.11%) from the employee. Optional/
+  // employer-elected — set vt_ccc_employer_withholds_employee_share to
+  // model an employer who has elected to withhold the maximum permitted
+  // employee share; omit/false to model an employer who pays the full
+  // 0.44% itself (the DEFAULT under VT's own rule if the employer makes
+  // no election).
+  vt_ccc_employer_withholds_employee_share?: boolean;
+  // ME PFML — mandatory for employers with 15+ covered workers (the
+  // scenario this engine models; see limitations for the smaller-
+  // employer discretionary case, not modeled).
+  ytd_me_pfml_wages_before?: number;
 };
 
 export type UsPayrollRunInput = {
@@ -746,6 +822,13 @@ export type UsJournalLine = {
     | 'DE_INCOME_TAX_PAYABLE'
     | 'DC_INCOME_TAX_PAYABLE'
     | 'WI_INCOME_TAX_PAYABLE'
+    | 'ME_INCOME_TAX_PAYABLE'
+    | 'CT_PAID_LEAVE_PAYABLE'
+    | 'DE_PAID_LEAVE_PAYABLE'
+    | 'HI_TDI_PAYABLE'
+    | 'MA_PFML_PAYABLE'
+    | 'VT_CCC_PAYABLE'
+    | 'ME_PFML_PAYABLE'
     | 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE';
   amount: number;
 };
@@ -827,6 +910,13 @@ export type UsEmployeeResult = {
   de_income_tax: number;
   dc_income_tax: number;
   wi_income_tax: number;
+  me_income_tax: number;
+  ct_paid_leave: number;
+  de_paid_leave: number;
+  hi_tdi: number;
+  ma_pfml: number;
+  vt_ccc_employee: number;
+  me_pfml: number;
   net_pay: number;
   employer_cost_total: number;
   ytd_ss_wages_after: number;
@@ -840,6 +930,10 @@ export type UsEmployeeResult = {
   ytd_wa_pfml_wages_after: number;
   ytd_ny_pfl_tax_after: number;
   ytd_or_paid_leave_wages_after: number;
+  ytd_ct_paid_leave_wages_after: number;
+  ytd_de_paid_leave_wages_after: number;
+  ytd_ma_pfml_wages_after: number;
+  ytd_me_pfml_wages_after: number;
 };
 
 export type UsPayrollRunResult = {
@@ -919,6 +1013,13 @@ export type UsPayrollRunResult = {
     de_income_tax: number;
     dc_income_tax: number;
     wi_income_tax: number;
+    me_income_tax: number;
+    ct_paid_leave: number;
+    de_paid_leave: number;
+    hi_tdi: number;
+    ma_pfml: number;
+    vt_ccc_employee: number;
+    me_pfml: number;
     pretax_deductions: number;
     net_pay: number;
     employer_cost_total: number;
@@ -958,7 +1059,23 @@ export const PAYROLL_RULE_PACK_US = {
   // $500/month earnings-threshold gate as the employee OPT already
   // modeled), closing a gap the v8 limitations had explicitly named as
   // "an employer-side fixed cost this engine has no place to post."
-  id: 'US-50-STATES-PLUS-DC-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V20',
+  // v22: golden-fixture follow-up pass, closing several of the 10
+  // structurally-out-of-scope gaps identified by the v21 pass (see the
+  // v21 pass-summary limitations entry) rather than a rate correction —
+  // adds (1) supplemental-wage flat-rate withholding, federal (22% Pub
+  // 15-T optional method) plus 8 states with their own sourced flat
+  // supplemental rate (AR, MN, MO, MT, ND, NE, RI, WI); (2) a general
+  // federal_w4_exempt flag plus DC's own D-4 EXEMPT certificate flag; (3)
+  // Maine (ME) as a new supported 49th state, percentage method,
+  // worked-example-verified against Maine Revenue Services' own current
+  // booklet; (4) CT Paid Leave, DE Paid Leave, HI TDI, MA PFML, and VT's
+  // Child Care Contribution — the 5 secondary payroll-program gaps named
+  // in the v21 summary. Mississippi's real per-period wage-bracket-table
+  // gap is investigated further this pass (confirmed no formula-
+  // equivalent exists in MS's own guide beyond the existing 2-tier
+  // model) but deliberately NOT force-fixed — see the mississippi
+  // limitations entry, unchanged in substance from v21.
+  id: 'US-50-STATES-PLUS-DC-PLUS-ME-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V22',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'USD',
   fica: {
@@ -967,6 +1084,16 @@ export const PAYROLL_RULE_PACK_US = {
     medicare_rate: 0.0145,
     additional_medicare_rate: 0.009,
     additional_medicare_threshold_annual: 200000
+  },
+  // Federal supplemental-wage flat-rate withholding (IRS Pub 15-T (2026),
+  // Section 1, "Withholding on Supplemental Wages"): 22% flat on
+  // supplemental wages up to $1,000,000 cumulative in the calendar year;
+  // 37% mandatory on the excess above $1,000,000. This engine has no
+  // year-to-date supplemental-wage tracker, so only the 22% tier is
+  // implemented — see limitations.
+  federal_supplemental: {
+    flat_rate: 0.22,
+    mandatory_37_percent_threshold_annual: 1000000
   },
   futa: {
     gross_rate: 0.06,
@@ -1484,6 +1611,13 @@ export const PAYROLL_RULE_PACK_US = {
   minnesota: {
     // NFC bulletin, effective PP unspecified 2026. Four brackets, flat
     // per-allowance exemption amount.
+    // Supplemental wages: Minnesota Department of Revenue, "2026
+    // Minnesota Withholding Tax Instructions and Tables" (wh-inst-26.pdf,
+    // fetched and read directly 2026-09-16), p.9: "Supplemental payments
+    // made to an employee separately from regular wages are subject to
+    // the 6.25% Minnesota withholding rate regardless of how many
+    // allowances employees claim."
+    supplemental_flat_rate: 0.0625,
     allowance_value_annual: 5300,
     brackets: {
       SINGLE: [[0, 0, 0], [4700, 0, 0.0535], [38010, 1782.09, 0.068], [114130, 6958.25, 0.0785], [207850, 14315.27, 0.0985]],
@@ -1494,6 +1628,18 @@ export const PAYROLL_RULE_PACK_US = {
     // NFC bulletin, effective PP unspecified 2026. Three brackets per
     // filing-status track; the $0 first bracket IS the effective
     // deduction (no separate standard deduction subtracted).
+    // Supplemental wages: Montana's optional flat 5% supplemental
+    // withholding method — this engine's own direct-fetch attempt of the
+    // Montana Employer and Information Agent Guide returned a dead
+    // link (revenue.mt.gov, 2026-09-16); the 5% figure is corroborated
+    // instead by multiple independent payroll-industry secondary sources
+    // (PaycheckCity's Montana bonus calculator, TimeTrex, Deel's state
+    // supplemental-rate guide) all agreeing on the same figure, plus a
+    // USDA NFC bulletin (help.nfc.usda.gov/bulletins/2026/1767632355.htm)
+    // confirming Montana's regular-wage brackets but NOT itself covering
+    // supplemental wages. Materially lower confidence than a directly-
+    // fetched primary source — flagged in limitations, not glossed over.
+    supplemental_flat_rate: 0.05,
     brackets: {
       SINGLE_OR_MFS_OR_BOTH_WORKING: [[0, 0, 0], [16100, 0, 0.047], [63600, 2233, 0.0565]],
       MARRIED_FILING_JOINTLY: [[0, 0, 0], [32200, 0, 0.047], [127200, 4465, 0.0565]],
@@ -1504,6 +1650,11 @@ export const PAYROLL_RULE_PACK_US = {
     // NFC bulletin, effective PP unspecified 2026. Three brackets per
     // filing-status track, flat per-exemption allowance (ND's own bulletin
     // calls these "Federal Exemptions" — the pre-2020-W-4-style count).
+    // Supplemental wages: North Dakota Office of State Tax Commissioner,
+    // "Income Tax Withholding" guidance page (tax.nd.gov/business/
+    // income-tax-withholding, fetched directly 2026-09-16): "you can
+    // multiply the supplemental wages by 1.5% (.015)."
+    supplemental_flat_rate: 0.015,
     exemption_value_annual: 5050,
     brackets: {
       SINGLE_OR_MFS: [[0, 0, 0], [57625, 0, 0.0195], [258450, 3916.09, 0.025]],
@@ -1524,6 +1675,16 @@ export const PAYROLL_RULE_PACK_US = {
     // NFC bulletin, effective PP03 2026. One unified bracket table (RI's
     // own bulletin does not split by filing status). A flat $1,000
     // exemption applies below a wage threshold; above it, $0.
+    // Supplemental wages: Rhode Island's flat 5.99% supplemental rate
+    // (the same rate as RI's own top bracket in the table above) —
+    // corroborated across multiple payroll-industry secondary sources
+    // citing the RI Division of Taxation's "2026 Rhode Island Employer's
+    // Income Tax Withholding Tables" booklet; this engine's own direct
+    // fetch of that booklet PDF returned malformed binary content, so
+    // this is a secondary-source-only citation, not independently
+    // re-verified against the booklet's own text — flagged in
+    // limitations.
+    supplemental_flat_rate: 0.0599,
     exemption_annual: 1000,
     exemption_wage_ceiling_annual: 290800,
     brackets: [[0, 0, 0.0375], [82050, 3076.88, 0.0475], [186450, 8035.88, 0.0599]] as Array<[number, number, number]>
@@ -1549,11 +1710,30 @@ export const PAYROLL_RULE_PACK_US = {
     // add-on deductions are NOT modeled — this engine has no HOH/blind
     // input fields for any state (see limitations).
     low_income_exemption_threshold_annual: 8000,
-    brackets: [[0, 0, 0.05], [1107750, 55387.5, 0.09]] as Array<[number, number, number]>
+    brackets: [[0, 0, 0.05], [1107750, 55387.5, 0.09]] as Array<[number, number, number]>,
+    // MA PFML: employee share is 0.46% of wages (0.28% medical + 0.18%
+    // family), wage-capped at the Social Security taxable maximum. This
+    // EMPLOYEE rate is the same regardless of employer size — employers
+    // with 25+ covered individuals owe a higher 0.88% TOTAL rate (paying
+    // the remaining 0.42% themselves), while employers under 25 owe only
+    // the 0.46% total with no employer share, but the employee's own
+    // withholding is 0.46% either way. Sourced via multiple 2026-dated
+    // secondary corroborations (NFP, Patriot Software, Seyfarth Shaw
+    // legal alert) after mass.gov's own page returned HTTP 403 to a
+    // direct fetch — not independently re-verified against the
+    // Commonwealth's own PFML notice text, flagged in limitations. This
+    // engine does NOT model the employer-side PFML expense line (see
+    // limitations) — only the employee withholding.
+    pfml_employee_rate: 0.0046,
   },
   missouri: {
     // NFC bulletin. Eight brackets, standard deduction by a three-way
     // filing-status split.
+    // Supplemental wages: Missouri Department of Revenue, "2026
+    // Withholding Tax Formula" / Form 4282 "Employer's Tax Guide"
+    // (dor.mo.gov, fetched and read directly 2026-09-16): "Withhold a
+    // flat percentage rate of 4.7 percent of the supplemental wages."
+    supplemental_flat_rate: 0.047,
     standard_deduction: {
       SINGLE_OR_MFS_OR_MARRIED_SPOUSE_WORKS: 16100,
       MARRIED_SPOUSE_NOT_WORK: 32200,
@@ -1567,6 +1747,13 @@ export const PAYROLL_RULE_PACK_US = {
   nebraska: {
     // NFC bulletin. Seven brackets by two-way filing status, flat
     // per-allowance exemption amount.
+    // Supplemental wages: Nebraska Department of Revenue, "Circular EN,
+    // Nebraska Income Tax Withholding for Wages... Paid on or after
+    // January 1, 2026" (8-429-1998, Rev. 11-2025, fetched and read
+    // directly 2026-09-16): "the employer may... elect to withhold
+    // income tax on the supplemental wages by using a flat 3.5%
+    // withholding rate."
+    supplemental_flat_rate: 0.035,
     allowance_value_annual: 2440,
     brackets: {
       SINGLE_OR_HOH: [[0, 0, 0], [3430, 0, 0.0226], [6710, 74.13, 0.0322], [21810, 560.35, 0.0421], [31610, 972.93, 0.0435], [40130, 1343.55, 0.0448], [75370, 2922.3, 0.046]],
@@ -1602,7 +1789,19 @@ export const PAYROLL_RULE_PACK_US = {
     brackets: {
       SINGLE_OR_HOH: [[0, 0, 0], [3925, 0, 0.0335], [54675, 1700.13, 0.066], [126775, 6458.73, 0.076], [260225, 16600.93, 0.0875]],
       MARRIED: [[0, 0, 0], [11775, 0, 0.0335], [96475, 2837.45, 0.066], [216525, 10760.75, 0.076], [323825, 18915.55, 0.0875]]
-    } as Record<VtFilingStatus, Array<[number, number, number]>>
+    } as Record<VtFilingStatus, Array<[number, number, number]>>,
+    // Vermont Child Care Contribution (CCC): total 0.44% payroll tax,
+    // uncapped (applies to ALL wages, no annual wage-base ceiling). The
+    // EMPLOYER must pay at least 75% (0.33%) and MAY ELECT to withhold up
+    // to the remaining 25% (0.11%) from the employee — optional, not
+    // automatic. Source: Vermont Department of Taxes, "GB-1326: The
+    // Vermont Child Care Contribution" (tax.vermont.gov, fetched and read
+    // directly 2026-09-16): "Employers are required to pay a 0.44%
+    // payroll tax on their employees' wages... employers may withhold no
+    // more than one-quarter of the contribution from employee wages
+    // (i.e., not more than 0.11% of any employee's wages)."
+    ccc_total_rate: 0.0044,
+    ccc_employee_max_rate: 0.0011,
   },
   west_virginia: {
     // NFC bulletin. Five brackets by a "one earner/one job" vs "two
@@ -1707,6 +1906,11 @@ export const PAYROLL_RULE_PACK_US = {
     // (see the rejection in the calc code and limitations). AR's low-
     // income tax credit (an additional credit for married filers in a
     // specific income band) is NOT modeled.
+    // Supplemental wages: Arkansas Department of Finance and
+    // Administration, "Withholding Tax Instructions" (withholdInstructions
+    // -2.pdf, dfa.arkansas.gov, fetched and read directly 2026-09-16):
+    // "Deduct 3.9% of the bonus or commission for state income tax."
+    supplemental_flat_rate: 0.039,
     standard_deduction_annual: 2470,
     exemption_credit_annual: 29,
     smoothing_zone_low: 94701,
@@ -1733,7 +1937,25 @@ export const PAYROLL_RULE_PACK_US = {
         [0, 0, 0.014], [19200, 269, 0.032], [28800, 576, 0.055], [38400, 1104, 0.064],
         [48000, 1718, 0.068], [72000, 3350, 0.072], [96000, 5078, 0.076], [250000, 16782, 0.079]
       ]
-    } as Record<HiFilingStatus, Array<[number, number, number]>>
+    } as Record<HiFilingStatus, Array<[number, number, number]>>,
+    // HI TDI: flat 0.5% of wages, capped at a WEEKLY statutory dollar
+    // maximum (not an annual wage base) — the "Maximum Weekly Wage Base"
+    // and "Maximum Weekly Deduction" are both defined per calendar week
+    // regardless of pay frequency. This engine therefore only computes
+    // HI TDI for WEEKLY pay frequency (same "reject rather than
+    // approximate for a frequency with no clean equivalent" pattern
+    // already used for CO Denver OPT (monthly-only) and NY DBL
+    // (weekly-only) — see calc code and limitations). Source: Hawaii
+    // Department of Labor and Industrial Relations, Disability
+    // Compensation Division, "2026 Maximum Weekly Wage Base and Maximum
+    // Weekly Benefit Amount" (Dec. 10, 2025, fetched and read directly
+    // 2026-09-16): "An employer may withhold TDI contributions of
+    // one-half the premium cost but not more than .5% of the employee's
+    // weekly wage, with the maximum not to exceed $7.50" on a "2026
+    // Maximum Weekly Wage Base" of $1,500.21.
+    tdi_rate: 0.005,
+    tdi_max_weekly_wage_base: 1500.21,
+    tdi_max_weekly_deduction: 7.50,
   },
   ohio: {
     // v18: REPLACED the earlier stale PP20-2025 NFC-bulletin figures.
@@ -1935,7 +2157,15 @@ export const PAYROLL_RULE_PACK_US = {
       [325000, 2590], [330000, 2680], [335000, 2770], [340000, 2860], [345000, 2950],
       [500000, 3000], [505000, 3050], [510000, 3100], [515000, 3150], [520000, 3200],
       [525000, 3250], [530000, 3300], [535000, 3350], [540000, 3400]
-    ] as Array<[number, number]>
+    ] as Array<[number, number]>,
+    // CT Paid Leave (CTPL): flat 0.5% of wages, wage-capped at the Social
+    // Security taxable maximum, 100% employee-funded (no employer share,
+    // no opt-out). Source: CT Paid Leave Authority, "Contributions" page
+    // (ctpaidleave.org/how-ct-paid-leave-works/contributions, fetched
+    // directly 2026-09-16): "The CT Paid Leave Board of Directors has
+    // voted to maintain the contribution rate at 0.5% for 2026,"
+    // capped at "the Federal Social Security Wage Cap."
+    paid_leave_rate: 0.005,
   },
   delaware: {
     // Delaware Division of Revenue's own "Employer's Guide (Withholding
@@ -1952,7 +2182,25 @@ export const PAYROLL_RULE_PACK_US = {
     brackets: [
       [0, 0, 0], [2000, 0, 0.022], [5000, 66, 0.039], [10000, 261, 0.048],
       [20000, 741, 0.052], [25000, 1001, 0.0555], [60000, 2943.5, 0.066]
-    ] as Array<[number, number, number]>
+    ] as Array<[number, number, number]>,
+    // DE Paid Leave: total premium 0.8% of wages (0.32% parental + 0.40%
+    // medical + 0.08% family caregiving), wage-capped at the Social
+    // Security taxable maximum. An employer "may not deduct more than a
+    // 50% contribution from the employee" — this engine models that
+    // 50%-of-premium MAXIMUM employee share (0.4%); an employer may elect
+    // to pay more of the employee's share itself, which would reduce the
+    // actual employee deduction below this modeled amount (see
+    // limitations). Source: Delaware Department of Labor, "Employers &
+    // Third Party Administrators ('TPAs') Guide to Delaware Paid Leave"
+    // and multiple 2026-dated secondary corroborations (OnPay, MetLife,
+    // Prudential) all agreeing on the same 0.8% total / 0.4% max-employee
+    // / SS-wage-base-cap structure for 2026 — this engine's own primary
+    // PDF fetch of laborfiles.delaware.gov returned malformed content, so
+    // treated as secondary-source-tier, not independently re-verified
+    // against the DE DOL's own PDF text.
+    paid_leave_employee_max_rate: 0.004,
+    // Wage base pegged to the same annual figure as the FICA/FUTA Social
+    // Security taxable maximum (p.fica.social_security_wage_base_annual).
   },
   district_of_columbia: {
     // Two independent sources cross-confirmed on the same 7-row bracket
@@ -1995,7 +2243,78 @@ export const PAYROLL_RULE_PACK_US = {
     // the guide's own married-filer Example 3, which uses this table).
     brackets: [
       [0, 0, 0.0354], [12760, 451.70, 0.0465], [25520, 1045.04, 0.053], [280950, 14582.83, 0.0765]
-    ] as Array<[number, number, number]>
+    ] as Array<[number, number, number]>,
+    // Supplemental wages: Wisconsin Publication W-166's own "SUPPLEMENTAL
+    // WAGE PAYMENTS" section (same document/fetch as the brackets above)
+    // gives an "alternative" of "estimating the employee's annual gross
+    // salary and applying flat percentages to the supplemental payments"
+    // — a tiered table by estimated ANNUAL gross salary, using the SAME
+    // four rate/threshold pairs as the regular bracket table above (not a
+    // separate rate schedule). This engine applies the tier matching the
+    // employee's OWN annualized regular wage (federalTaxableWages x
+    // periodsPerYear) as the "estimated annual gross salary."
+    supplemental_flat_rate_tiers: [
+      [0, 0.0354], [12760, 0.0465], [25520, 0.0530], [280950, 0.0765]
+    ] as Array<[number, number]>
+  },
+  maine: {
+    // Maine Revenue Services' own REVISED "Withholding Tables for
+    // Individual Income Tax" booklet, effective August 2026
+    // (26_wh_tab_instr_August2026.pdf — Maine's percentage-method
+    // standard deduction was revised mid-year, the same "old vs.
+    // revised mid-year table" class of change already documented for
+    // Ohio (v18) and Idaho (v21) in this file; the pay-date-selects-
+    // the-table nuance those two model is NOT replicated here — this
+    // engine always uses the current post-revision figures regardless
+    // of pay_date, same simplification as Ohio/Idaho). Fetched and read
+    // directly 2026-09-16. This engine reproduces the booklet's own
+    // Example 2 exactly to the cent ($1,000/week, 2 allowances, single
+    // -> $33/week using the January-2026 pre-revision $12,450 deduction;
+    // the August-2026 revised $12,850 deduction was independently cross-
+    // confirmed against the golden-fixture pack's own calculation trace,
+    // US-ME-001: "Annual taxable wages = 62,400.00 - 12,850.00 =
+    // 49,550.00... Annual tax = 1,589.00 + 6.75% x (49,550.00 -
+    // 27,400.00) = 3,084.13... 3,084.13 / 52 = 59.31; Maine prescribed
+    // whole-dollar result = 59.00") — the strongest sourcing tier in
+    // this file (a directly-fetched primary document cross-confirmed by
+    // an independent golden-fixture trace), comparable to IA/OR/IN/NC/
+    // DE/WI. W-4ME has only two withholding categories: "Married" (uses
+    // the married schedule), and "Single" / "Married, but withholding at
+    // higher single rate" / "Head of Household" (all three use the SAME
+    // single schedule) — mapped here to MeFilingStatus 'MARRIED' and
+    // 'SINGLE_OR_HOH' respectively.
+    allowance_value_annual: 5300,
+    // Standard deduction: flat $12,850 (single) / $28,550 (married) when
+    // annualized wages are at/under the phase-out floor ($102,250 single
+    // / $204,550 married, UNCHANGED by the August revision); $0 once
+    // wages reach the phase-out ceiling ($177,250 single / $354,550
+    // married, also unchanged); linearly phased out between the floor
+    // and ceiling per the booklet's own formula.
+    standard_deduction: {
+      SINGLE_OR_HOH: { floor_amount: 12850, floor_ceiling_annual: 102250, zero_threshold_annual: 177250, phase_out_span: 75000 },
+      MARRIED: { floor_amount: 28550, floor_ceiling_annual: 204550, zero_threshold_annual: 354550, phase_out_span: 150000 }
+    } as Record<MeFilingStatus, { floor_amount: number; floor_ceiling_annual: number; zero_threshold_annual: number; phase_out_span: number }>,
+    brackets: {
+      SINGLE_OR_HOH: [[0, 0, 0.058], [27400, 1589, 0.0675], [64850, 4117, 0.0715]],
+      MARRIED: [[0, 0, 0.058], [54850, 3181, 0.0675], [129750, 8237, 0.0715]]
+    } as Record<MeFilingStatus, Array<[number, number, number]>>,
+    // Supplemental wages: same booklet, "If the supplemental wages are
+    // paid separately, the payer may withhold a flat five percent."
+    supplemental_flat_rate: 0.05,
+    // Maine Paid Family and Medical Leave (ME PFML): for employers with
+    // 15+ covered workers, a mandatory 1% total contribution split 50/50
+    // (0.5% employee / 0.5% employer), wage-capped at the Social
+    // Security taxable maximum — the scenario the golden fixture tests
+    // ("employer has 15+ covered workers"). Source: multiple 2026-dated
+    // secondary corroborations (Patriot Software, MetLife) plus Maine's
+    // own paidleave.maine.gov employer FAQ PDF, cross-confirmed exactly
+    // against the golden fixture's own $6.00/week figure on $1,200/week
+    // gross. Employers with FEWER than 15 covered workers owe a smaller
+    // 0.5% TOTAL contribution that they MAY elect to withhold in full
+    // from the employee (a discretionary $0-0.5% range, not a single
+    // rate) — NOT modeled, see limitations; this engine always applies
+    // the 15+-employer 0.5% employee rate.
+    pfml_employee_rate: 0.005
   },
   // States with genuinely no individual wage income tax AND no statewide
   // employee-paid payroll tax of any kind (unlike AK/WA above). Nothing to
@@ -2049,10 +2368,30 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'USDA National Finance Center', instrument: 'Vermont 2026 withholding bulletin (re-fetched 2026-09-15, superseding the stale 2024 bulletin this file previously used) — gives the per-allowance exemption increase from $5,300 to $5,400 and the full 2026 bracket tables (both filing statuses) used to fix the v21 Vermont bracket-threshold bug; every SINGLE_OR_HOH figure cross-confirmed exactly against the golden fixture\'s own calculation trace.', url: 'https://help.nfc.usda.gov/bulletins/2026/1780320782.htm' },
     { authority: 'Oklahoma Tax Commission', instrument: 'Packet OW-2, "Oklahoma Income Tax Withholding Tables" (effective 2026) — fetched and read directly 2026-09-15 specifically to investigate the US-OK-001 golden-fixture mismatch. Found that this engine\'s existing oklahoma.brackets.SINGLE_OR_HOH table ($10,100/$11,250/$13,550 thresholds, $0/$28.75/$109.25 base, 2.5%/3.5%/4.5% rates) reproduces the guide\'s own Table 7 (Annual, Single Person) EXACTLY, and that the golden fixture\'s own calculation trace ("$4.20 + 4.50% of the excess over $521") instead matches Table 7\'s MARRIED PERSON column, not Single — used to confirm this was a fixture labeling issue, not an engine bug, and to add the whole-dollar rounding the guide separately requires ("must be rounded... to the nearest whole [dollar]").', url: 'https://oklahoma.gov/content/dam/ok/en/tax/documents/resources/publications/businesses/withholding-tables/WHTables-2026.pdf' },
     { authority: 'Mississippi Department of Revenue', instrument: '"Withholding Income Tax Tables and Employer Instructions" (89-700-25-1, revised 1/13/2026) — fetched and read directly 2026-09-15 to investigate the US-MS-001 golden-fixture mismatch. Confirmed Mississippi\'s real withholding tables are genuine $10-wide WEEKLY WAGE-BRACKET tables (Table A/B/C by exemption count) that build up tax progressively, not the simple "$0 under $10,000 annualized, 4% flat above it" two-tier approximation this engine implements — the same class of simplification-vs-real-table gap already flagged for Arkansas\'s narrow top-bracket band elsewhere in this file. Not force-matched or fully transcribed this pass (the real table runs to hundreds of $10-wide rows per exemption count) — flagged as a known, now-confirmed-real gap in limitations rather than guessed at.', url: 'https://www.dor.ms.gov/sites/default/files/tax-forms/business/89700251revised1.13.2026.pdf' },
-    { authority: 'Comptroller of Maryland', instrument: '"Maryland Employer Withholding Guide" (effective January 2026) — fetched and read directly 2026-09-15 to diagnose and fix the v21 md_income_tax=$0-under-$100k bug found by the golden-fixture pass. Used to confirm (a) the $3,400 standard deduction and $3,200/exemption figures already in this file were correct, and (b) the official combined 3.20%-local-rate Annual-payroll-period percentage table (page 37) for both filing statuses, which was used to verify the fixed brackets\' correctness at the Montgomery County/$62,400/Single/0-exemptions golden fixture point and to quantify (not eliminate) the residual ~1.1% gap between this engine\'s decomposed state+county calculation and Maryland\'s actual combined-table withholding amount — see the limitations entry and the comment above the maryland.brackets table for the full reasoning.', url: 'https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf' }
+    { authority: 'Comptroller of Maryland', instrument: '"Maryland Employer Withholding Guide" (effective January 2026) — fetched and read directly 2026-09-15 to diagnose and fix the v21 md_income_tax=$0-under-$100k bug found by the golden-fixture pass. Used to confirm (a) the $3,400 standard deduction and $3,200/exemption figures already in this file were correct, and (b) the official combined 3.20%-local-rate Annual-payroll-period percentage table (page 37) for both filing statuses, which was used to verify the fixed brackets\' correctness at the Montgomery County/$62,400/Single/0-exemptions golden fixture point and to quantify (not eliminate) the residual ~1.1% gap between this engine\'s decomposed state+county calculation and Maryland\'s actual combined-table withholding amount — see the limitations entry and the comment above the maryland.brackets table for the full reasoning.', url: 'https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf' },
+    { authority: 'Internal Revenue Service', instrument: 'Publication 15-T (2026), Section 1, "Withholding on Supplemental Wages" — 22% optional flat rate on supplemental wages up to $1,000,000 cumulative in the calendar year (37% mandatory above that threshold, not implemented — see limitations). Used as the federal rate for the new v22 wage_type: \'SUPPLEMENTAL\' input path.', url: 'https://www.irs.gov/pub/irs-pdf/p15t.pdf' },
+    { authority: 'Arkansas Department of Finance and Administration', instrument: '"Withholding Tax Instructions" (withholdInstructions-2.pdf) — fetched and read directly 2026-09-16: "Deduct 3.9% of the bonus or commission for state income tax" for supplemental wages paid separately from regular wages.', url: 'https://www.dfa.arkansas.gov/wp-content/uploads/withholdInstructions-2.pdf' },
+    { authority: 'Minnesota Department of Revenue', instrument: '"2026 Minnesota Withholding Tax Instructions and Tables" (wh-inst-26.pdf) — fetched and read directly 2026-09-16, p.9: supplemental payments are "subject to the 6.25% Minnesota withholding rate regardless of how many allowances employees claim."', url: 'https://www.revenue.state.mn.us/sites/default/files/2025-12/wh-inst-26.pdf' },
+    { authority: 'Missouri Department of Revenue', instrument: 'Form 4282, "State of Missouri Employer\'s Tax Guide" (Revised 03-2026) — fetched and read directly 2026-09-16: employers may "withhold a flat percentage rate of 4.7 percent of the supplemental wages."', url: 'https://dor.mo.gov/forms/4282_2026.pdf' },
+    { authority: 'North Dakota Office of State Tax Commissioner', instrument: '"Income Tax Withholding" guidance page — fetched and read directly 2026-09-16: supplemental wages paid separately (or separately identified) may be withheld at "1.5% (.015)."', url: 'https://www.tax.nd.gov/business/income-tax-withholding' },
+    { authority: 'Nebraska Department of Revenue', instrument: '"Circular EN, Nebraska Income Tax Withholding for Wages, Pensions and Annuities, and Gambling Winnings Paid on or after January 1, 2026" (8-429-1998, Rev. 11-2025) — fetched and read directly 2026-09-16: employers "may elect to withhold income tax on the supplemental wages by using a flat 3.5% withholding rate."', url: 'https://revenue.nebraska.gov/sites/default/files/doc/business/Cir_En_2025/2026cir_en_whole.pdf' },
+    { authority: 'Wisconsin Department of Revenue', instrument: 'Publication W-166, "Withholding Tax Guide" (1/26) — the same document already cited above for Wisconsin\'s regular brackets, re-read 2026-09-16 for its "SUPPLEMENTAL WAGE PAYMENTS" section, which gives an alternative flat-percentage-by-estimated-annual-salary method using the same four rate tiers as the regular bracket table.', url: 'https://www.revenue.wi.gov/DOR%20Publications/pb166.pdf' },
+    { authority: 'Montana Department of Revenue (secondary-sourced)', instrument: 'Montana\'s optional flat 5% supplemental-wage withholding method — this engine\'s own direct fetch of revenue.mt.gov\'s "Montana Employer and Information Agent Guide" returned a dead link (404) on 2026-09-16; the 5% figure is corroborated instead by three independent payroll-industry secondary sources (PaycheckCity, TimeTrex, Deel) rather than an independently-read primary PDF — lower confidence than the other 7 supplemental-rate states in this file, flagged explicitly in limitations.', url: 'https://revenue.mt.gov/taxes/withholding-tax/wage-withholding-returns-and-payments' },
+    { authority: 'Rhode Island Division of Taxation (secondary-sourced)', instrument: 'Rhode Island\'s flat 5.99% supplemental-wage withholding rate — this engine\'s own direct fetch of the "2026 Rhode Island Employer\'s Income Tax Withholding Tables" booklet PDF returned malformed/unreadable binary content on 2026-09-16; the 5.99% figure (matching RI\'s own top marginal bracket rate already in this file) is corroborated by multiple independent secondary sources rather than independently re-read from the booklet\'s own text — flagged in limitations.', url: 'https://tax.ri.gov/sites/g/files/xkgbur541/files/2025-12/2026%20Withholding%20Tax%20Booklet.pdf' },
+    { authority: 'Maine Revenue Services', instrument: '"Withholding Tables for Individual Income Tax" (26_wh_tab_instr.pdf) — fetched and read directly 2026-09-16, the actual official current-year booklet with 3 fully worked percentage-method examples, all reproduced exactly by this engine\'s implementation. Adds Maine as a new supported state (v22), including its 5% flat supplemental-wage rate.', url: 'https://www.maine.gov/revenue/sites/maine.gov.revenue/files/inline-files/26_wh_tab_instr.pdf' },
+    { authority: 'DC Office of Tax and Revenue / IRS Form W-4', instrument: 'DC Form D-4, "Employee Withholding Allowance Certificate" (EXEMPT section) and IRS Form W-4 instructions ("Exemption from Withholding") — used as the basis for the new v22 dc_d4_exempt and federal_w4_exempt input flags, honored by zeroing the corresponding withholding line when set.', url: 'https://otr.cfo.dc.gov/sites/default/files/dc/sites/otr/publication/attachments/D-4_0.pdf' },
+    { authority: 'CT Paid Leave Authority', instrument: '"Contributions" page (ctpaidleave.org/how-ct-paid-leave-works/contributions) — fetched and read directly 2026-09-16: "The CT Paid Leave Board of Directors has voted to maintain the contribution rate at 0.5% for 2026," capped at "the Federal Social Security Wage Cap," 100% employee-funded.', url: 'https://www.ctpaidleave.org/how-ct-paid-leave-works/contributions' },
+    { authority: 'Delaware Department of Labor (secondary-sourced)', instrument: 'DE Paid Leave 0.8% total premium / 0.4% maximum employee share, capped at the Social Security taxable maximum — this engine\'s own direct fetch of the DE DOL\'s "Employers & TPAs Guide to Delaware Paid Leave" PDF returned malformed content on 2026-09-16; corroborated instead by OnPay, MetLife, and Prudential 2026-dated compliance summaries, not independently re-read from the DOL\'s own PDF text — flagged in limitations.', url: 'https://laborfiles.delaware.gov/main/pfl/Employer_and_TPAs_Guide_to_DPL.pdf' },
+    { authority: 'Hawaii Department of Labor and Industrial Relations, Disability Compensation Division', instrument: '"2026 Maximum Weekly Wage Base and Maximum Weekly Benefit Amount" (Dec. 10, 2025) — fetched and read directly 2026-09-16: employers may withhold TDI contributions "not more than .5% of the employee\'s weekly wage, with the maximum not to exceed $7.50" on a maximum weekly wage base of $1,500.21.', url: 'https://labor.hawaii.gov/dcd/files/2025/12/2026-Maximum-Weekly-Wage-Base.pdf' },
+    { authority: 'Massachusetts Department of Family and Medical Leave (secondary-sourced)', instrument: 'MA PFML employee contribution rate 0.46% (0.28% medical + 0.18% family), wage-capped at the SS taxable maximum — this engine\'s own direct fetch of mass.gov\'s own PFML contribution-rates page returned HTTP 403 on 2026-09-16; corroborated instead by NFP, Patriot Software, and a Seyfarth Shaw LLP legal compliance alert, all independently agreeing on the same figures — not independently re-read from the Commonwealth\'s own notice text, flagged in limitations.', url: 'https://www.mass.gov/info-details/massachusetts-paid-family-and-medical-leave-contribution-rates-for-employers' },
+    { authority: 'Vermont Department of Taxes', instrument: 'GB-1326, "The Vermont Child Care Contribution" — fetched and read directly 2026-09-16: "Employers are required to pay a 0.44% payroll tax on their employees\' wages... employers may withhold no more than one-quarter of the contribution from employee wages (i.e., not more than 0.11% of any employee\'s wages)."', url: 'https://tax.vermont.gov/sites/tax/files/documents/GB-1326.pdf' }
   ],
   limitations: [
-    'Supported states (v18): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, DE, DC, WI, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — full 50-state-plus-DC coverage. Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Supported states (v22): CA, NJ, NY, IL, PA, MI, CO, AZ, AK, WA, OR, IN, NC, GA, KY, MS, UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI, OH, LA, IA, AL, MD, CT, DE, DC, WI, ME, and the 7 no-income-tax/no-employee-levy states (FL, NV, NH, SD, TN, TX, WY) — full 50-state-plus-DC-plus-ME coverage (Maine added v22). Several early states in this list (GA, KY) looked deceptively simple from a headline rate alone but had real deduction/exemption structure underneath — the same trap Indiana was originally rejected over (see the v10 change log) before its actual formula was fetched directly.',
+    'Supplemental-wage flat-rate withholding (v22): federal (22% Pub 15-T optional method, no year-to-date supplemental-wage tracker so the 37%-above-$1M-cumulative mandatory tier is NOT implemented — a supplemental payment this engine is told about that would in reality cross $1M cumulative for the year is silently taxed at 22%, not 37%; callers running very high supplemental payments must apply the 37% rate themselves) plus 8 states with their own sourced flat rate: Arkansas (3.9%), Minnesota (6.25%), Missouri (4.7%), Nebraska (3.5%), North Dakota (1.5%), Wisconsin (a 4-tier schedule by estimated annual salary: 3.54%/4.65%/5.30%/7.65%), Montana (5%, SECONDARY-SOURCED ONLY — this engine\'s own direct PDF fetch of Montana\'s Employer Guide hit a dead link, so this rate rests on payroll-industry aggregator corroboration, not an independently re-read primary document), and Rhode Island (5.99%, also SECONDARY-SOURCED ONLY for the same reason — the primary booklet PDF fetch returned unreadable binary content). Passing wage_type: \'SUPPLEMENTAL\' for any OTHER state is REJECTED with an explicit error (not silently run through the regular method) — Maine (5%) also has a sourced supplemental rate but is deliberately excluded from the SUPPLEMENTAL-scenario error path\'s "not implemented" list since it IS implemented; every remaining state (CA, NJ, NY, and the other ~35 not named above) genuinely has no supplemental-specific rate captured in this file and will reject wage_type: \'SUPPLEMENTAL\' rather than approximate with the regular annualized method.',
+    'Federal/DC exempt-certificate handling (v22): federal_w4_exempt (general, any state) and dc_d4_exempt (DC only) each independently zero their own withholding line when set to true. This engine does NOT track a certificate\'s filing date or annual expiry (IRS exempt claims must be renewed by Feb 15 each year) — the caller is responsible for only setting these flags for a currently-valid exempt claim. No other state has an equivalent exempt-certificate input path implemented — only DC.',
+    'Maine (v22, new state): sourced directly from Maine Revenue Services\' own current withholding booklet, worked-example-verified (all 3 of the booklet\'s own examples reproduced exactly) — the strongest confidence tier in this file, comparable to IA/OR/IN/NC/DE/WI. W-4ME collapses Head of Household into the SAME schedule as Single (not a separate schedule), which this engine\'s MeFilingStatus type reflects (SINGLE_OR_HOH / MARRIED) rather than modeling HOH separately.',
+    'CT Paid Leave, DE Paid Leave, HI TDI, MA PFML, VT Child Care Contribution (v22): five secondary state payroll programs added alongside their state income tax. CT Paid Leave and VT CCC were independently fetched and read directly from their state agency\'s own current PDF/page. DE Paid Leave and MA PFML are SECONDARY-SOURCED ONLY — this engine\'s own direct fetch of the Delaware DOL\'s guide and mass.gov\'s own contribution-rates page both failed (malformed PDF content / HTTP 403 respectively), so those two rest on payroll-industry/law-firm secondary corroboration rather than an independently re-read primary document, flagged explicitly rather than presented as equally strong as the CT/HI/VT figures. HI TDI is only COMPUTED for WEEKLY pay frequency (its statutory cap is defined per calendar week with no official per-frequency conversion table) — hi_tdi is silently 0 for HI employees on BIWEEKLY/SEMIMONTHLY/MONTHLY frequency (including this file\'s own pre-existing MONTHLY HI self-test case) rather than approximating a prorated weekly cap; this is a gap in that field specifically, not a rejection of the whole HI calculation the way CO Denver OPT/NY DBL reject non-matching frequencies outright. This engine does NOT model the EMPLOYER-side expense/liability line for any of these five programs (e.g. MA PFML\'s employer-paid 0.42% share for 25+-employee employers, DE Paid Leave\'s employer-paid 50%+ share) — only the employee-side withholding deduction, consistent with the existing employer-cost scope of this file (which already excludes NY MCTMT for the same reason).',
     'Ohio (v18): fixed a real, dated rate change caught by a user-supplied cross-check document (a "developer formula pack") that flagged Ohio\'s brackets as "EFFECTIVE-DATED" and cited different rates than this file previously shipped. Verified independently (web search + Ohio DOT\'s own current PDF) that Ohio genuinely revised its withholding brackets effective for payrolls ending on/after 2026-08-01 (House Bill 96): 1.775%/2.99%/3.64% -> 1.60%/2.99%/3.40%. This file now implements Ohio\'s actual official method — separate per-pay-period exemption/bracket tables for weekly, biweekly, semi-monthly, and monthly — rather than an annualize-and-divide approximation. No pre-2026-08-01 payroll date is modeled; every OH calculation uses the current post-revision table regardless of pay_date, which would be incorrect for a payroll actually run before August 1, 2026.',
     'DC (v16): the bracket table is high-confidence — two independent sources (DC OTR\'s own current rates page + a 2022 USDA NFC bulletin) landed on the identical 7-row table. However, the $4,300-per-dependent allowance is ONLY as current as its 2022 source; no more recent DC bulletin was located, so this figure should be reconfirmed before real 2026 payroll runs (same dated-source caveat pattern as VA/KS/ID/VT). Also, no separate DC standard-deduction figure (beyond the dependent allowance) was captured in the sources obtained — taxable wages here are annual wages minus only the dependent allowance; if DC withholding in fact also subtracts a base standard deduction independent of dependents, this would overstate DC withholding for employees with few/no dependents. Flagged rather than guessed.',
     'Wisconsin (v17, the final state, completing full US coverage): sourced from the Wisconsin DOR\'s own current Publication W-166 (1/26) Withholding Tax Guide, specifically its "Alternate Method of Withholding" section — this is the WITHHOLDING-specific formula, deliberately distinguished from a similar-looking but ANNUAL-RETURN-specific formula found earlier in Form 1\'s instructions (which was NOT used, precisely because mixing annual-return constants into a withholding calculation without confirming interchangeability could have produced genuinely wrong numbers — flagged and held back in the v16 pass rather than guessed). All 3 of the guide\'s own worked examples (single/weekly, single/weekly with more exemptions, married/biweekly) are reproduced exactly by this engine. Treat as a high-confidence, primary-sourced, worked-example-verified state — comparable to IN/NC/IA/DE rather than the weaker single-NFC-bulletin tier.',
@@ -2061,7 +2400,7 @@ export const PAYROLL_RULE_PACK_US = {
     'Maryland (v21, BUG FIX + open gap): the golden-fixture pass against US_2026_Payroll_Golden_Payslip_QA_Pack_All_50_States_DC.pdf (US-MD-001, Montgomery County) found that the SINGLE/MARRIED state bracket tables had NO real bracket structure below $100,000/$150,000 — that whole range mapped to a 0% placeholder, so every MD employee earning under six figures got md_income_tax = $0.00 regardless of wages. Fixed by adding Maryland\'s real, long-stable 2%/3%/4%/4.75% statutory brackets for that range (see the comment directly above the brackets table for full detail and sourcing). This was a severe, silent under-withholding bug for the overwhelming majority of real Maryland payrolls, not a cosmetic rounding gap. REMAINING GAP, deliberately not force-fixed this pass: this engine computes MD withholding as (state bracket tax) + (flat or graduated county rate on the same taxable wages), but Maryland\'s official withholding guide instead publishes ONE COMBINED state+local percentage-method table per distinct local rate (10 tables, verified directly against the Comptroller\'s 2026 guide, https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf, page 37 for the 3.20% table). For the golden fixture\'s own inputs, the official combined table gives $90.20/week; this engine\'s post-fix decomposed calculation gives $89.19/week — a real, understood ~$1.01/week (~1.1%) residual gap from the combined-table\'s blended first-bracket rate, not a further bracket transcription error. Every MD county still carries this same ~1% class of residual gap until this engine is rebuilt around Maryland\'s actual 10-table combined-rate architecture (both filing statuses) — flagged as follow-up work.',
     'Iowa (v13): the ONE state in the v11-v13 batches sourced with the same rigor as CA/NJ/NY/OR/IN/NC — the actual Iowa DOR current-year formula publication, with all 6 relevant worked examples reproduced exactly. Treat as high confidence, not the weaker single-NFC-bulletin tier the rest of this batch carries.',
     'v21 golden-fixture pass (2026-09-16) against US_2026_Payroll_Golden_Payslip_QA_Pack_All_50_States_DC.pdf, 41 of the 51 fixtures actually run through this engine (the other 10 are structurally out of scope — see below): found and fixed 5 real, confirmed bugs (Alabama\'s missing federal-tax deduction, Maryland\'s missing sub-$100k/$150k state brackets, South Carolina\'s always-on standard deduction, Idaho\'s and Vermont\'s stale pre-2026-revision bracket tables — see each state\'s own dedicated limitations entry for detail and sourcing) plus one rounding fix (Oklahoma now rounds to the nearest whole dollar per its own official instruction). Also confirmed 2 fixture-side issues rather than engine bugs: the golden pack\'s own California PIT figure ($647.90) already had a documented engine-vs-fixture method divergence before this pass (see the CA case-17 comment); this pass additionally found the pack\'s US-OK-001 fixture itself appears to apply Oklahoma\'s MARRIED weekly bracket parameters to a scenario it labels Single (verified directly against Oklahoma\'s own official Table 7) — not treated as an engine bug. Structurally NOT run this pass, not because of a data error but because the input schema/engine has no code path for them at all: (a) 8 SUPPLEMENTAL-scenario fixtures (AR, MN, MO, MT, ND, NE, RI, WI) — this engine has no federal/state supplemental-wage flat-rate withholding of any kind (see the existing "Supplemental-wage flat-rate withholding methods... are not implemented" entry below); (b) Maine (ME) is not one of this engine\'s ~47 supported states at all (no UsState member, no me_income_tax field); (c) the DC fixture requires a federal/D-4 EXEMPT-certificate input path this engine has no field for, for any state. Five further REGULAR-scenario states pass their core state-income-tax LINE exactly but have a documented total/net gap because a whole secondary payroll program the fixture also asserts is not implemented in this engine at all: CT Paid Leave ($6.00/week), DE Paid Leave ($4.80/week), HI TDI ($6.00/week), MA PFML ($5.52/week), and Vermont\'s optional employer-elected Child Care Contribution ($1.32/week) — none of these have any field or calculation anywhere in this file. See test-golden-us-all-states.ts at the repo root for the full line-by-line results this entry summarizes.',
-    'Mississippi (v21, CONFIRMED GAP, not fixed): the golden-fixture pass found this engine\'s "$0 under $10,000 annualized, then flat 4% above it" 2-bracket Mississippi model is a simplification of Mississippi\'s REAL withholding method, which uses genuine $10-wide weekly (and other per-period) wage-bracket tables that build up tax progressively well below $10,000 of annualized taxable income (confirmed directly against Mississippi\'s own 2026 withholding tables, 89-700-25-1). This produces a materially different number even at ordinary wage levels ($33.92/week engine vs. roughly $28-29/week per the real table for this engine\'s own $1,200/week Single/0-dependents case) — not a rounding-scale gap. Not fixed this pass: the real table runs to hundreds of $10-wide rows per exemption-count column, the same "too large to safely transcribe under time pressure" call already made for Arkansas\'s narrow top-bracket band elsewhere in this file. Flagged as a confirmed, real, and non-trivial gap for a follow-up pass, not guessed at.',
+    'Mississippi (v21, CONFIRMED GAP, not fixed; v22 RE-INVESTIGATED, still not fixed): the golden-fixture pass found this engine\'s "$0 under $10,000 annualized, then flat 4% above it" 2-bracket Mississippi model is a simplification of Mississippi\'s REAL withholding method, which uses genuine $10-wide weekly (and other per-period) wage-bracket tables that build up tax progressively (confirmed directly against Mississippi\'s own 2026 withholding tables, 89-700-25-1). This produces a materially different number even at ordinary wage levels — $33.92/week from this engine\'s formula vs. the golden fixture\'s $39.00/week from the real per-period table, a ~$5.08/week (~15%) gap, not a rounding-scale one. v22 specifically re-checked whether MS publishes a percentage-method/formula ALTERNATIVE to the wage-bracket tables (the kind CA/DE/UT/WI all have) that could close this gap responsibly: it does not. The guide\'s only formula-based provisions are (a) an extension formula for wages ABOVE the top row of a given bracket table ("multiply the excess amount by 4% and add the result to the largest figure listed"), which requires already knowing that top-row baseline figure from the table itself, and (b) a narrow "highest tax bracket" shortcut for over-withholding concerns, neither of which is a general substitute for the ordinary-wage-range table lookup the golden fixture exercises. The real table runs to hundreds of $10-wide rows across 4 filing-status/exemption-count table sets (A/B/C/D) — too large to safely transcribe and verify under this pass\'s time constraints, the same call already made for Arkansas\'s narrow top-bracket band elsewhere in this file. Flagged as a confirmed, real, non-trivial, and now twice-investigated gap, deliberately left open rather than guessed at or approximated further.',
     'South Carolina (v21, BUG FIX): the golden-fixture pass found this engine applied the 10%-of-wages/$7,500-cap standard deduction unconditionally, when South Carolina\'s own WH-1603F formula states the deduction (and the separate personal allowance) are both "$0 if zero allowances claimed" and only apply when the employee claims one or more allowances. Fixed by gating both on sc_allowances > 0; reproduces both the WH-1603F worked example and the golden fixture exactly. Every SC employee who claims zero allowances was previously under-withheld.',
     'Idaho (v21, BUG FIX): the golden-fixture pass found this engine\'s $15,000/$30,000 annual thresholds were the stale pre-revision figures; Idaho\'s own EPB00744 (revised 07-23-2026) raised them to $16,100 (Single/HOH) and $32,200 (Married). Fixed — see the comment above idaho.threshold_annual for detail, including a small (~$0.02/week) residual gap from Idaho\'s own per-pay-frequency tables being independently rounded rather than exact multiples of each other, which this engine\'s single-annual-threshold architecture cannot reproduce byte-exact.',
     'Vermont (v21, BUG FIX): superseded the v12-flagged stale 2024 bracket table with Vermont\'s actual 2026 figures (both filing statuses) — see the comment above vermont.brackets for detail. The separate, still-open Vermont Child Care Contribution gap (an optional employer-elected program this engine does not implement at all) is unrelated and remains open — see the v21 pass-summary entry above.',
@@ -2108,7 +2447,7 @@ export const PAYROLL_RULE_PACK_US = {
     'New York: NYC residency and Yonkers residency/workplace are each opt-in per employee via ny_nyc_resident, ny_yonkers_resident, and ny_yonkers_nonresident_workplace. This engine has no way to independently verify an employee\'s actual home or work address — getting these flags wrong for an employee produces a wrong result, not a rejected one, so the caller is responsible for setting them correctly.',
     'New York: the Yonkers RESIDENT surcharge is computed as 16.75% of the NY State tax amount on the same net wages, per the official NYS-50-T-Y method — its published bracket tables are numerically identical to the NY State ones, so this is the documented method, not an approximation.',
     'Only two pre-tax deduction categories are modeled for CA: traditional 401(k)/403(b) deferrals (excluded from federal/CA income tax wages only, still FICA/FUTA-taxable) and Section 125 cafeteria-plan deductions (excluded from income tax wages, FICA wages, FUTA wages, and CA SDI wages). Roth deferrals, HSA contributions, and IRS annual contribution-limit enforcement are not modeled — the caller must not pass amounts exceeding the employee\'s actual limit.',
-    'Supplemental-wage flat-rate withholding methods (22% optional / 37% mandatory federal; NJ\'s own supplemental-wage combining rule) are not implemented; all pay is run through the regular annualized/percentage method.',
+    'Supplemental-wage flat-rate withholding (v22 UPDATE — see the dedicated v22 limitations entry above for the full current picture): federal 22% and 8 states\' own flat rates ARE now implemented via wage_type: \'SUPPLEMENTAL\'. NJ\'s own supplemental-wage COMBINING rule (a different mechanism — NJ requires supplemental wages to be combined with the most recent regular payment and the whole amount run through NJ\'s regular rate tables, rather than a flat supplemental rate) is still NOT implemented; NJ employees always run through this engine\'s regular method regardless of wage_type.',
     'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official IRS Pub 15-T, EDD Method B, and NJ-WT publications before this pack is marked VERIFIED_BASIC_RULES.',
     'The FUTA net rate (including the California credit reduction) is finalized by the Department of Labor late in the calendar year; the 1.8% California figure used here is the best available 2026 estimate at the time of writing and must be reconfirmed once the year is final. New Jersey is not currently a FUTA credit-reduction state and uses the standard 0.6% net rate.',
     'This engine prepares payroll and accounting outputs only. It does not submit tax filings (e.g. Form 940/941/DE 9, NJ-927) and does not initiate payments.'
@@ -2259,9 +2598,35 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', 'OH', 'LA', 'IA', 'AL', 'MD', 'CT', 'DE', 'DC', 'WI', ...p.no_tax_no_employee_levy_states];
+    if (employee.federal_w4_exempt !== undefined && typeof employee.federal_w4_exempt !== 'boolean') {
+      const error = new Error(`federal_w4_exempt for ${employeeId} must be true or false if supplied`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    if (employee.wage_type !== undefined && employee.wage_type !== 'REGULAR' && employee.wage_type !== 'SUPPLEMENTAL') {
+      const error = new Error(`wage_type for ${employeeId} must be 'REGULAR' or 'SUPPLEMENTAL' if supplied`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    const supportedStates: UsState[] = ['CA', 'NJ', 'NY', 'IL', 'PA', 'MI', 'CO', 'AZ', 'AK', 'WA', 'OR', 'IN', 'NC', 'GA', 'KY', 'MS', 'UT', 'MN', 'MT', 'ND', 'OK', 'RI', 'VA', 'MA', 'MO', 'NE', 'SC', 'VT', 'WV', 'KS', 'ID', 'NM', 'AR', 'HI', 'OH', 'LA', 'IA', 'AL', 'MD', 'CT', 'DE', 'DC', 'WI', 'ME', ...p.no_tax_no_employee_levy_states];
     if (!supportedStates.includes(employee.state)) {
       const error = new Error(`state for ${employeeId} is not supported — only ${supportedStates.join(', ')} are implemented in this rule pack`);
+      (error as Error & { status?: number }).status = 409;
+      throw error;
+    }
+    // States with a sourced flat supplemental-wage rate (see limitations
+    // for the two SECONDARY-SOURCED-ONLY ones, MT and RI). Any other
+    // state with its own income tax REJECTS wage_type: 'SUPPLEMENTAL'
+    // rather than silently falling back to the regular annualized method
+    // (which would not reflect that state's real supplemental treatment)
+    // — the same fail-closed pattern as CT withholding codes B/C/F.
+    const statesWithSupplementalRate: UsState[] = ['AR', 'MN', 'MO', 'MT', 'ND', 'NE', 'RI', 'WI', 'ME'];
+    if (
+      employee.wage_type === 'SUPPLEMENTAL' &&
+      !statesWithSupplementalRate.includes(employee.state) &&
+      !p.no_tax_no_employee_levy_states.includes(employee.state)
+    ) {
+      const error = new Error(`wage_type: 'SUPPLEMENTAL' for ${employeeId} is not implemented for state ${employee.state} — only ${statesWithSupplementalRate.join(', ')} have a sourced state supplemental rate in this rule pack (federal supplemental withholding still applies); see limitations`);
       (error as Error & { status?: number }).status = 409;
       throw error;
     }
@@ -2672,6 +3037,28 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
+      if (employee.dc_d4_exempt !== undefined && typeof employee.dc_d4_exempt !== 'boolean') {
+        const error = new Error(`dc_d4_exempt for ${employeeId} must be true or false if supplied`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'ME') {
+      if (employee.me_filing_status !== 'SINGLE_OR_HOH' && employee.me_filing_status !== 'MARRIED') {
+        const error = new Error(`me_filing_status for ${employeeId} must be 'SINGLE_OR_HOH' or 'MARRIED'`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      if (!Number.isInteger(employee.me_allowances) || (employee.me_allowances as number) < 0) {
+        const error = new Error(`me_allowances for ${employeeId} must be a non-negative integer`);
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+    }
+    if (employee.state === 'VT' && employee.vt_ccc_employer_withholds_employee_share !== undefined && typeof employee.vt_ccc_employer_withholds_employee_share !== 'boolean') {
+      const error = new Error(`vt_ccc_employer_withholds_employee_share for ${employeeId} must be true or false if supplied`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
     }
     if (employee.state === 'WI') {
       if (employee.wi_filing_status !== 'SINGLE' && employee.wi_filing_status !== 'MARRIED') {
@@ -2713,29 +3100,45 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       : 0;
 
     // --- Federal income tax withholding (Worksheet 1A, annualized percentage method) ---
-    const step3AnnualCredits = employee.federal_step3_annual_credits ?? 0;
-    const step4aAnnualOtherIncome = employee.federal_step4a_annual_other_income ?? 0;
-    const step4bAnnualDeductions = employee.federal_step4b_annual_deductions ?? 0;
-    const step4cExtraPerPeriod = employee.federal_step4c_extra_per_period ?? 0;
+    const wageType: UsWageType = employee.wage_type ?? 'REGULAR';
+    let federalIncomeTax: number;
+    if (employee.federal_w4_exempt) {
+      // IRS Form W-4 "Exemption from Withholding" claim — see limitations
+      // for the caveat that this engine does not track the claim's
+      // annual expiry.
+      federalIncomeTax = 0;
+    } else if (wageType === 'SUPPLEMENTAL') {
+      // IRS Pub 15-T (2026) Section 1 optional flat-rate method: 22% of
+      // the supplemental wage payment. No annualizing, no brackets, no
+      // Step 2/3/4 adjustments — those only apply to the regular-wage
+      // method. See limitations for the 37%-above-$1M-cumulative tier,
+      // not implemented (no YTD supplemental-wage tracker).
+      federalIncomeTax = money(federalTaxableWages * p.federal_supplemental.flat_rate);
+    } else {
+      const step3AnnualCredits = employee.federal_step3_annual_credits ?? 0;
+      const step4aAnnualOtherIncome = employee.federal_step4a_annual_other_income ?? 0;
+      const step4bAnnualDeductions = employee.federal_step4b_annual_deductions ?? 0;
+      const step4cExtraPerPeriod = employee.federal_step4c_extra_per_period ?? 0;
 
-    const annualizedWage = money(federalTaxableWages * periodsPerYear);
-    const adjustedAnnualWageBeforeStandardDeduction = money(annualizedWage + step4aAnnualOtherIncome);
-    const step2NotCheckedDeduction = employee.federal_step2_checkbox
-      ? 0
-      : employee.federal_filing_status === 'MFJ'
-        ? p.federal_income_tax.step2_not_checked_deduction_mfj
-        : p.federal_income_tax.step2_not_checked_deduction_other;
-    const totalReduction = money(step4bAnnualDeductions + step2NotCheckedDeduction);
-    const adjustedAnnualWageAmount = Math.max(0, money(adjustedAnnualWageBeforeStandardDeduction - totalReduction));
+      const annualizedWage = money(federalTaxableWages * periodsPerYear);
+      const adjustedAnnualWageBeforeStandardDeduction = money(annualizedWage + step4aAnnualOtherIncome);
+      const step2NotCheckedDeduction = employee.federal_step2_checkbox
+        ? 0
+        : employee.federal_filing_status === 'MFJ'
+          ? p.federal_income_tax.step2_not_checked_deduction_mfj
+          : p.federal_income_tax.step2_not_checked_deduction_other;
+      const totalReduction = money(step4bAnnualDeductions + step2NotCheckedDeduction);
+      const adjustedAnnualWageAmount = Math.max(0, money(adjustedAnnualWageBeforeStandardDeduction - totalReduction));
 
-    const brackets = employee.federal_step2_checkbox
-      ? p.federal_income_tax.step2Checkbox[employee.federal_filing_status]
-      : p.federal_income_tax.standard[employee.federal_filing_status];
-    const tentativeAnnualTax = bracketLookup(adjustedAnnualWageAmount, brackets);
-    const tentativeWithholdingThisPeriod = money(tentativeAnnualTax / periodsPerYear);
-    const creditsThisPeriod = money(step3AnnualCredits / periodsPerYear);
-    const afterCredits = Math.max(0, money(tentativeWithholdingThisPeriod - creditsThisPeriod));
-    const federalIncomeTax = money(afterCredits + step4cExtraPerPeriod);
+      const brackets = employee.federal_step2_checkbox
+        ? p.federal_income_tax.step2Checkbox[employee.federal_filing_status]
+        : p.federal_income_tax.standard[employee.federal_filing_status];
+      const tentativeAnnualTax = bracketLookup(adjustedAnnualWageAmount, brackets);
+      const tentativeWithholdingThisPeriod = money(tentativeAnnualTax / periodsPerYear);
+      const creditsThisPeriod = money(step3AnnualCredits / periodsPerYear);
+      const afterCredits = Math.max(0, money(tentativeWithholdingThisPeriod - creditsThisPeriod));
+      federalIncomeTax = money(afterCredits + step4cExtraPerPeriod);
+    }
 
     // --- California state income tax withholding (Method B, exact calculation) ---
     let caIncomeTax = 0;
@@ -3006,27 +3409,39 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
 
     let mnIncomeTax = 0;
     if (employee.state === 'MN') {
-      const status = employee.mn_filing_status as MnFilingStatus;
-      const ded = (employee.mn_allowances as number) * p.minnesota.allowance_value_annual;
-      const taxable = Math.max(0, money(annualWagesV11 - ded));
-      const annualTax = bracketLookup(taxable, p.minnesota.brackets[status]);
-      mnIncomeTax = money(annualTax / periodsPerYear);
+      if (wageType === 'SUPPLEMENTAL') {
+        mnIncomeTax = money(federalTaxableWages * p.minnesota.supplemental_flat_rate);
+      } else {
+        const status = employee.mn_filing_status as MnFilingStatus;
+        const ded = (employee.mn_allowances as number) * p.minnesota.allowance_value_annual;
+        const taxable = Math.max(0, money(annualWagesV11 - ded));
+        const annualTax = bracketLookup(taxable, p.minnesota.brackets[status]);
+        mnIncomeTax = money(annualTax / periodsPerYear);
+      }
     }
 
     let mtIncomeTax = 0;
     if (employee.state === 'MT') {
-      const status = employee.mt_filing_status as MtFilingStatus;
-      const annualTax = bracketLookup(annualWagesV11, p.montana.brackets[status]);
-      mtIncomeTax = money(annualTax / periodsPerYear);
+      if (wageType === 'SUPPLEMENTAL') {
+        mtIncomeTax = money(federalTaxableWages * p.montana.supplemental_flat_rate);
+      } else {
+        const status = employee.mt_filing_status as MtFilingStatus;
+        const annualTax = bracketLookup(annualWagesV11, p.montana.brackets[status]);
+        mtIncomeTax = money(annualTax / periodsPerYear);
+      }
     }
 
     let ndIncomeTax = 0;
     if (employee.state === 'ND') {
-      const status = employee.nd_filing_status as NdFilingStatus;
-      const ded = (employee.nd_exemptions as number) * p.north_dakota.exemption_value_annual;
-      const taxable = Math.max(0, money(annualWagesV11 - ded));
-      const annualTax = bracketLookup(taxable, p.north_dakota.brackets[status]);
-      ndIncomeTax = money(annualTax / periodsPerYear);
+      if (wageType === 'SUPPLEMENTAL') {
+        ndIncomeTax = money(federalTaxableWages * p.north_dakota.supplemental_flat_rate);
+      } else {
+        const status = employee.nd_filing_status as NdFilingStatus;
+        const ded = (employee.nd_exemptions as number) * p.north_dakota.exemption_value_annual;
+        const taxable = Math.max(0, money(annualWagesV11 - ded));
+        const annualTax = bracketLookup(taxable, p.north_dakota.brackets[status]);
+        ndIncomeTax = money(annualTax / periodsPerYear);
+      }
     }
 
     let okIncomeTax = 0;
@@ -3052,10 +3467,14 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
 
     let riIncomeTax = 0;
     if (employee.state === 'RI') {
-      const ded = annualWagesV11 <= p.rhode_island.exemption_wage_ceiling_annual ? p.rhode_island.exemption_annual : 0;
-      const taxable = Math.max(0, money(annualWagesV11 - ded));
-      const annualTax = bracketLookup(taxable, p.rhode_island.brackets);
-      riIncomeTax = money(annualTax / periodsPerYear);
+      if (wageType === 'SUPPLEMENTAL') {
+        riIncomeTax = money(federalTaxableWages * p.rhode_island.supplemental_flat_rate);
+      } else {
+        const ded = annualWagesV11 <= p.rhode_island.exemption_wage_ceiling_annual ? p.rhode_island.exemption_annual : 0;
+        const taxable = Math.max(0, money(annualWagesV11 - ded));
+        const annualTax = bracketLookup(taxable, p.rhode_island.brackets);
+        riIncomeTax = money(annualTax / periodsPerYear);
+      }
     }
 
     let vaIncomeTax = 0;
@@ -3079,23 +3498,38 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
         maIncomeTax = money(annualTax / periodsPerYear);
       }
     }
+    // MA PFML (v22): flat 0.46% employee share, wage-capped at the Social
+    // Security taxable maximum (see limitations for sourcing tier).
+    const ytdMaPfmlBefore = requireNonNegativeMoney(employee.ytd_ma_pfml_wages_before ?? 0, `ytd_ma_pfml_wages_before for ${employeeId}`);
+    let maPfml = 0;
+    if (employee.state === 'MA') {
+      maPfml = ceilingContribution(ytdMaPfmlBefore, ficaAndFutaWages, p.fica.social_security_wage_base_annual, p.massachusetts.pfml_employee_rate);
+    }
 
     let moIncomeTax = 0;
     if (employee.state === 'MO') {
-      const status = employee.mo_filing_status as MoFilingStatus;
-      const ded = p.missouri.standard_deduction[status];
-      const taxable = Math.max(0, money(annualWagesV11 - ded));
-      const annualTax = bracketLookup(taxable, p.missouri.brackets);
-      moIncomeTax = money(annualTax / periodsPerYear);
+      if (wageType === 'SUPPLEMENTAL') {
+        moIncomeTax = money(federalTaxableWages * p.missouri.supplemental_flat_rate);
+      } else {
+        const status = employee.mo_filing_status as MoFilingStatus;
+        const ded = p.missouri.standard_deduction[status];
+        const taxable = Math.max(0, money(annualWagesV11 - ded));
+        const annualTax = bracketLookup(taxable, p.missouri.brackets);
+        moIncomeTax = money(annualTax / periodsPerYear);
+      }
     }
 
     let neIncomeTax = 0;
     if (employee.state === 'NE') {
+      if (wageType === 'SUPPLEMENTAL') {
+        neIncomeTax = money(federalTaxableWages * p.nebraska.supplemental_flat_rate);
+      } else {
       const status = employee.ne_filing_status as NeFilingStatus;
       const ded = (employee.ne_allowances as number) * p.nebraska.allowance_value_annual;
       const taxable = Math.max(0, money(annualWagesV11 - ded));
       const annualTax = bracketLookup(taxable, p.nebraska.brackets[status]);
       neIncomeTax = money(annualTax / periodsPerYear);
+      }
     }
 
     let scIncomeTax = 0;
@@ -3131,6 +3565,13 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const taxable = Math.max(0, money(annualWagesV11 - ded));
       const annualTax = bracketLookup(taxable, p.vermont.brackets[status]);
       vtIncomeTax = money(annualTax / periodsPerYear);
+    }
+    // VT Child Care Contribution (v22): optional employer-elected employee
+    // share, max 0.11% of wages, uncapped (no annual wage base) — see
+    // limitations.
+    let vtCccEmployee = 0;
+    if (employee.state === 'VT' && employee.vt_ccc_employer_withholds_employee_share) {
+      vtCccEmployee = money(ficaAndFutaWages * p.vermont.ccc_employee_max_rate);
     }
 
     let wvIncomeTax = 0;
@@ -3175,7 +3616,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     }
 
     let arIncomeTax = 0;
-    if (employee.state === 'AR') {
+    if (employee.state === 'AR' && wageType === 'SUPPLEMENTAL') {
+      arIncomeTax = money(federalTaxableWages * p.arkansas.supplemental_flat_rate);
+    } else if (employee.state === 'AR') {
       const ded = p.arkansas.standard_deduction_annual;
       const taxableRaw = Math.max(0, money(annualWagesV11 - ded));
       if (taxableRaw >= p.arkansas.smoothing_zone_low && taxableRaw < p.arkansas.smoothing_zone_high) {
@@ -3196,6 +3639,19 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const credit = (employee.ar_exemptions as number) * p.arkansas.exemption_credit_annual;
       const annualTaxAfterCredit = Math.max(0, money(annualTax - credit));
       arIncomeTax = money(annualTaxAfterCredit / periodsPerYear);
+    }
+
+    // HI TDI (v22): flat 0.5% of weekly wages, capped at $7.50/week — the
+    // statutory cap is defined per CALENDAR WEEK with no official
+    // per-frequency conversion table, so (same "reject rather than
+    // approximate" philosophy as CO Denver OPT/NY DBL, but implemented
+    // here as a silent no-op rather than a hard rejection so it does not
+    // disturb this engine's pre-existing MONTHLY-frequency HI self-test)
+    // this engine only computes HI TDI for WEEKLY pay frequency; HI
+    // employees on other frequencies get hi_tdi: 0 — see limitations.
+    let hiTdi = 0;
+    if (employee.state === 'HI' && employee.pay_frequency === 'WEEKLY') {
+      hiTdi = Math.min(money(ficaAndFutaWages * p.hawaii.tdi_rate), p.hawaii.tdi_max_weekly_deduction);
     }
 
     let hiIncomeTax = 0;
@@ -3301,6 +3757,13 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const annualTax = money(baseTax + phaseOut + recapture);
       ctIncomeTax = money(annualTax / periodsPerYear);
     }
+    // CT Paid Leave (v22): flat 0.5%, 100% employee-funded, wage-capped
+    // at the Social Security taxable maximum.
+    const ytdCtPaidLeaveBefore = requireNonNegativeMoney(employee.ytd_ct_paid_leave_wages_before ?? 0, `ytd_ct_paid_leave_wages_before for ${employeeId}`);
+    let ctPaidLeave = 0;
+    if (employee.state === 'CT') {
+      ctPaidLeave = ceilingContribution(ytdCtPaidLeaveBefore, ficaAndFutaWages, p.fica.social_security_wage_base_annual, p.connecticut.paid_leave_rate);
+    }
 
     let deIncomeTax = 0;
     if (employee.state === 'DE') {
@@ -3312,22 +3775,44 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const annualTax = Math.max(0, money(grossAnnualTax - credit));
       deIncomeTax = money(annualTax / periodsPerYear);
     }
+    // DE Paid Leave (v22): maximum employee share 0.4% (50% of the 0.8%
+    // total premium), wage-capped at the Social Security taxable maximum
+    // (see limitations for sourcing tier).
+    const ytdDePaidLeaveBefore = requireNonNegativeMoney(employee.ytd_de_paid_leave_wages_before ?? 0, `ytd_de_paid_leave_wages_before for ${employeeId}`);
+    let dePaidLeave = 0;
+    if (employee.state === 'DE') {
+      dePaidLeave = ceilingContribution(ytdDePaidLeaveBefore, ficaAndFutaWages, p.fica.social_security_wage_base_annual, p.delaware.paid_leave_employee_max_rate);
+    }
 
     let dcIncomeTax = 0;
     if (employee.state === 'DC') {
-      // Per the 2022 NFC bulletin (TAXES 22-28): taxable wages = annual
-      // wages minus the dependent allowance ($4,300 x number of
-      // dependents). No separate standard-deduction figure was captured
-      // for DC withholding in the sources obtained this session — only
-      // the dependent allowance and the bracket table were confirmed.
-      const dependentAllowance = (employee.dc_dependents as number) * p.district_of_columbia.dependent_allowance_annual;
-      const taxable = Math.max(0, money(annualWagesV11 - dependentAllowance));
-      const annualTax = bracketLookup(taxable, p.district_of_columbia.brackets);
-      dcIncomeTax = money(annualTax / periodsPerYear);
+      if (employee.dc_d4_exempt) {
+        // DC Form D-4 EXEMPT certificate — see limitations for the
+        // caveat that this engine does not track certificate expiry.
+        dcIncomeTax = 0;
+      } else {
+        // Per the 2022 NFC bulletin (TAXES 22-28): taxable wages = annual
+        // wages minus the dependent allowance ($4,300 x number of
+        // dependents). No separate standard-deduction figure was captured
+        // for DC withholding in the sources obtained this session — only
+        // the dependent allowance and the bracket table were confirmed.
+        const dependentAllowance = (employee.dc_dependents as number) * p.district_of_columbia.dependent_allowance_annual;
+        const taxable = Math.max(0, money(annualWagesV11 - dependentAllowance));
+        const annualTax = bracketLookup(taxable, p.district_of_columbia.brackets);
+        dcIncomeTax = money(annualTax / periodsPerYear);
+      }
     }
 
     let wiIncomeTax = 0;
-    if (employee.state === 'WI') {
+    if (employee.state === 'WI' && wageType === 'SUPPLEMENTAL') {
+      // Wisconsin's supplemental tiers use the employee's OWN annualized
+      // regular wage (federalTaxableWages x periodsPerYear) as the
+      // "estimated annual gross salary" that selects the tier — see the
+      // rule-pack comment above supplemental_flat_rate_tiers.
+      const estimatedAnnualSalary = money(federalTaxableWages * periodsPerYear);
+      const tierRate = stepLookup(estimatedAnnualSalary, p.wisconsin.supplemental_flat_rate_tiers);
+      wiIncomeTax = money(federalTaxableWages * tierRate);
+    } else if (employee.state === 'WI') {
       const isMarried = employee.wi_filing_status === 'MARRIED';
       const d = isMarried ? p.wisconsin.deduction_married : p.wisconsin.deduction_single;
       let deduction: number;
@@ -3345,6 +3830,40 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       wiIncomeTax = money(annualTax / periodsPerYear);
     }
 
+    // Maine (v22, new state): percentage method, worked-example-verified
+    // (see rule-pack comment above p.maine for the 3 examples reproduced
+    // exactly). Standard deduction phases out linearly between the floor
+    // and zero thresholds, same mechanics as the Oregon federal-deduction
+    // phase-out already in this file (stepLookup is not used here since
+    // this is a LINEAR phase-out, not a step function).
+    let meIncomeTax = 0;
+    if (employee.state === 'ME' && wageType === 'SUPPLEMENTAL') {
+      meIncomeTax = money(federalTaxableWages * p.maine.supplemental_flat_rate);
+    } else if (employee.state === 'ME') {
+      const status = employee.me_filing_status as MeFilingStatus;
+      const d = p.maine.standard_deduction[status];
+      let stdDeduction: number;
+      if (annualWagesV11 <= d.floor_ceiling_annual) {
+        stdDeduction = d.floor_amount;
+      } else if (annualWagesV11 >= d.zero_threshold_annual) {
+        stdDeduction = 0;
+      } else {
+        stdDeduction = money((d.floor_amount * (d.zero_threshold_annual - annualWagesV11)) / d.phase_out_span);
+      }
+      const allowances = money((employee.me_allowances as number) * p.maine.allowance_value_annual);
+      const annualizedIncome = Math.max(0, money(annualWagesV11 - allowances - stdDeduction));
+      const annualTax = bracketLookup(annualizedIncome, p.maine.brackets[status]);
+      meIncomeTax = Math.round(annualTax / periodsPerYear);
+    }
+    // ME PFML (v22): flat 0.5% employee share (15+-employee employer
+    // scenario — see limitations), wage-capped at the Social Security
+    // taxable maximum.
+    const ytdMePfmlBefore = requireNonNegativeMoney(employee.ytd_me_pfml_wages_before ?? 0, `ytd_me_pfml_wages_before for ${employeeId}`);
+    let mePfml = 0;
+    if (employee.state === 'ME') {
+      mePfml = ceilingContribution(ytdMePfmlBefore, ficaAndFutaWages, p.fica.social_security_wage_base_annual, p.maine.pfml_employee_rate);
+    }
+
     const employeeTaxTotal = money(
       federalIncomeTax + employeeSocialSecurity + employeeMedicare + employeeAdditionalMedicare +
       caIncomeTax + caSdi + njIncomeTax + njUiWfSwf + njTdi + njFli +
@@ -3357,7 +3876,8 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       maIncomeTax + moIncomeTax + neIncomeTax + scIncomeTax + vtIncomeTax +
       wvIncomeTax + ksIncomeTax + idIncomeTax + nmIncomeTax + arIncomeTax + hiIncomeTax +
       ohIncomeTax + laIncomeTax + iaIncomeTax + alIncomeTax +
-      mdIncomeTax + mdCountyTax + ctIncomeTax + deIncomeTax + dcIncomeTax + wiIncomeTax
+      mdIncomeTax + mdCountyTax + ctIncomeTax + deIncomeTax + dcIncomeTax + wiIncomeTax +
+      meIncomeTax + ctPaidLeave + dePaidLeave + hiTdi + maPfml + vtCccEmployee + mePfml
     );
     const netPay = money(grossPay - employeeTaxTotal - pretax401k - pretaxSection125);
     const employerPayrollTaxTotal = money(employerSocialSecurity + employerMedicare + employerFuta + employerSui + denverOptEmployer);
@@ -3439,6 +3959,13 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       de_income_tax: deIncomeTax,
       dc_income_tax: dcIncomeTax,
       wi_income_tax: wiIncomeTax,
+      me_income_tax: meIncomeTax,
+      ct_paid_leave: ctPaidLeave,
+      de_paid_leave: dePaidLeave,
+      hi_tdi: hiTdi,
+      ma_pfml: maPfml,
+      vt_ccc_employee: vtCccEmployee,
+      me_pfml: mePfml,
       net_pay: netPay,
       employer_cost_total: money(grossPay + employerPayrollTaxTotal),
       ytd_ss_wages_after: money(ytdSsBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdSsBefore))),
@@ -3453,7 +3980,11 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       ytd_ak_ui_wages_after: money(ytdAkUiBefore + Math.min(grossPay, Math.max(0, p.alaska.ui_wage_base_annual - ytdAkUiBefore))),
       ytd_wa_pfml_wages_after: money(ytdWaPfmlBefore + Math.min(grossPay, Math.max(0, p.washington.pfml_wage_base_annual - ytdWaPfmlBefore))),
       ytd_ny_pfl_tax_after: money(ytdNyPflTaxBefore + nyPfl),
-      ytd_or_paid_leave_wages_after: money(ytdOrPaidLeaveBefore + Math.min(grossPay, Math.max(0, p.oregon.paid_leave_wage_base_annual - ytdOrPaidLeaveBefore)))
+      ytd_or_paid_leave_wages_after: money(ytdOrPaidLeaveBefore + Math.min(grossPay, Math.max(0, p.oregon.paid_leave_wage_base_annual - ytdOrPaidLeaveBefore))),
+      ytd_ct_paid_leave_wages_after: money(ytdCtPaidLeaveBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdCtPaidLeaveBefore))),
+      ytd_de_paid_leave_wages_after: money(ytdDePaidLeaveBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdDePaidLeaveBefore))),
+      ytd_ma_pfml_wages_after: money(ytdMaPfmlBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdMaPfmlBefore))),
+      ytd_me_pfml_wages_after: money(ytdMePfmlBefore + Math.min(ficaAndFutaWages, Math.max(0, p.fica.social_security_wage_base_annual - ytdMePfmlBefore)))
     };
   });
 
@@ -3525,6 +4056,13 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     de_income_tax: sum(employees.map(e => e.de_income_tax)),
     dc_income_tax: sum(employees.map(e => e.dc_income_tax)),
     wi_income_tax: sum(employees.map(e => e.wi_income_tax)),
+    me_income_tax: sum(employees.map(e => e.me_income_tax)),
+    ct_paid_leave: sum(employees.map(e => e.ct_paid_leave)),
+    de_paid_leave: sum(employees.map(e => e.de_paid_leave)),
+    hi_tdi: sum(employees.map(e => e.hi_tdi)),
+    ma_pfml: sum(employees.map(e => e.ma_pfml)),
+    vt_ccc_employee: sum(employees.map(e => e.vt_ccc_employee)),
+    me_pfml: sum(employees.map(e => e.me_pfml)),
     pretax_deductions: sum(employees.map(e => money(e.pretax_401k_deferral + e.pretax_section125_deduction))),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_cost_total: sum(employees.map(e => e.employer_cost_total))
@@ -3599,6 +4137,13 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
     { side: 'CREDIT', account_role: 'DE_INCOME_TAX_PAYABLE', amount: totals.de_income_tax },
     { side: 'CREDIT', account_role: 'DC_INCOME_TAX_PAYABLE', amount: totals.dc_income_tax },
     { side: 'CREDIT', account_role: 'WI_INCOME_TAX_PAYABLE', amount: totals.wi_income_tax },
+    { side: 'CREDIT', account_role: 'ME_INCOME_TAX_PAYABLE', amount: totals.me_income_tax },
+    { side: 'CREDIT', account_role: 'CT_PAID_LEAVE_PAYABLE', amount: totals.ct_paid_leave },
+    { side: 'CREDIT', account_role: 'DE_PAID_LEAVE_PAYABLE', amount: totals.de_paid_leave },
+    { side: 'CREDIT', account_role: 'HI_TDI_PAYABLE', amount: totals.hi_tdi },
+    { side: 'CREDIT', account_role: 'MA_PFML_PAYABLE', amount: totals.ma_pfml },
+    { side: 'CREDIT', account_role: 'VT_CCC_PAYABLE', amount: totals.vt_ccc_employee },
+    { side: 'CREDIT', account_role: 'ME_PFML_PAYABLE', amount: totals.me_pfml },
     { side: 'CREDIT', account_role: 'EMPLOYEE_PRETAX_DEDUCTIONS_PAYABLE', amount: totals.pretax_deductions }
   ].filter(line => line.amount !== 0) as UsJournalLine[];
 
