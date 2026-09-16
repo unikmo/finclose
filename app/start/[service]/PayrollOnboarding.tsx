@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import PayrollVariancePanel from './PayrollVariancePanel';
 
 type Country = { code: string; name: string; currency: string };
 type User = { user_id: string; name: string; email: string };
@@ -411,6 +412,8 @@ export default function PayrollOnboarding() {
           ))}
         </div>
       </section>
+
+      {deployment && <PayrollVariancePanel deploymentId={deployment.deployment_id} />}
 
       {!user && (
         <section className="payroll-stage payroll-auth-stage">

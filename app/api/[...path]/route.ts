@@ -151,6 +151,22 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       return NextResponse.json(await getPayrollRun(p[1], p[4]));
     }
 
+    if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'runs') {
+      await authorizedDeployment(req, p[1]);
+      const runs = await listPayrollRunsForDeployment(p[1]);
+      return NextResponse.json(runs.map(r => ({
+        payroll_run_id: r.payroll_run_id,
+        pay_date: r.pay_date,
+        currency: r.currency,
+        country_code: r.country_code,
+        totals: r.totals,
+        employee_count: r.controls.employee_count,
+        approval_status: (r as Record<string, any>).approval_status,
+        execution_status: (r as Record<string, any>).execution_status,
+        created_at: r.created_at
+      })));
+    }
+
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'variance') {
       await authorizedDeployment(req, p[1]);
       const runs = await listPayrollRunsForDeployment(p[1]);
