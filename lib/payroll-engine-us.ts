@@ -307,7 +307,10 @@
 // all three as one shared table silently understated the NYC tax by
 // several dollars per pay period until caught by comparing against the
 // NYS-50-T-NYC publication's own worked example. Pre-tax deduction handling
-// was NOT extended to NY this pass, for the same reason as NJ (see below).
+// was NOT extended to NY in this v4 pass, for the same reason as NJ (see
+// below) — later resolved and extended to NY in v24 (see the v24 note near
+// the NY block and the evidence/limitations entries for the 20 NYCRR
+// 171.1(b)/171.3 conformity citation).
 //
 // v3 change log (from v2): adds New Jersey as a second supported state.
 // Scoped narrowly and deliberately ahead of NY in build order — the
@@ -2351,6 +2354,7 @@ export const PAYROLL_RULE_PACK_US = {
     { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-NYS (1/26) — New York State Withholding Tax Tables and Methods', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nys.pdf' },
     { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-NYC (1/26) — New York City Withholding Tax Tables and Methods', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_nyc.pdf' },
     { authority: 'New York State Department of Taxation and Finance', instrument: 'NYS-50-T-Y (1/26) — Yonkers Withholding Tax Tables and Methods (resident surcharge and nonresident earnings tax)', url: 'https://www.tax.ny.gov/pdf/publications/withholding/nys50_t_y.pdf' },
+    { authority: 'New York Codes, Rules and Regulations', instrument: '20 NYCRR 171.1(b) — adopts the federal Internal Revenue Code\'s withholding-tax definitions of "employer, employee, wages, payroll period, withholding exemptions" for NY State personal income tax withholding, "except as otherwise specifically provided ... or where such Federal rules and definitions are clearly inconsistent with and inapplicable to" NY law; and 20 NYCRR 171.3 — "Payments which are considered wages for Federal income tax withholding purposes are also wages for purposes of withholding New York State personal income tax." Basis for extending pretax_401k_deferral/pretax_section125_deduction support to NY in v24 (traditional 401(k)/403(b) deferrals and Section 125 amounts are excluded from wages for FEDERAL income tax withholding, so by this conformity rule they are also excluded from NY State/NYC/Yonkers withholding wages, absent a NY-specific carve-out, none of which was found).', url: 'https://www.law.cornell.edu/regulations/new-york/20-NYCRR-171.1' },
     { authority: 'Cross-check / secondary reference', instrument: '"2026 U.S. Payroll Tax Implementation Reference" (all-50-states developer baseline, verified through 2026-09-13, user-supplied) — used to independently corroborate the CA/NJ/NY figures already in this file (all of which were independently fetched from each state\'s own primary publication), AND as the DIRECT source for the IL/PA/MI/CO/AZ/AK/WA figures added in v5 below, since those five states\' own primary withholding-table publications were not independently fetched this pass. This is a materially weaker sourcing chain than CA/NJ/NY and is called out explicitly, not glossed over — see the v5 change log and limitations.', url: 'file: US_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-14)' },
     { authority: 'Colorado Department of Revenue', instrument: 'DR 1098 (2026) — the reference document reproduces its full percentage-method computation steps (not just a headline rate), which is why CO is implemented here despite not being independently primary-sourced', url: 'https://tax.colorado.gov/withholding-tax' },
     { authority: 'Illinois Department of Revenue', instrument: '2026 Illinois withholding tax formula — flat 4.95% and the IL-W-4 Line 1/Line 2 annual allowance amounts, as reproduced in the reference document', url: 'https://tax.illinois.gov/research/publications/pubs/illinois-withholding-tax-tables-booklet.html' },
@@ -2458,7 +2462,7 @@ export const PAYROLL_RULE_PACK_US = {
     'New Jersey: the Newark payroll tax (an employer-paid 1% tax on total payroll for businesses with 50+ employees working in Newark) is NOT calculated — directly relevant to this pack\'s ~50-employee target segment if any client has a Newark work location, and flagged here rather than silently ignored.',
     'New Jersey: the NJ/PA reciprocal agreement (no NJ withholding for PA-resident employees who file Form NJ-165) is not modeled; all NJ employees are withheld as NJ-taxable.',
     'New Jersey: pretax_401k_deferral and pretax_section125_deduction are NOT applied to NJ state income tax, UI/WF/SWF, TDI, or FLI wages — NJ employees with either pretax field non-zero are rejected rather than silently taxed on the wrong base, since NJ\'s treatment of these wage bases was not independently verified this pass (unlike the federal/CA treatment, which was).',
-    'New York: pretax_401k_deferral and pretax_section125_deduction are also NOT applied to NY State, NYC, or Yonkers wages for the same reason — NY employees with either pretax field non-zero are rejected rather than silently taxed on the wrong wage base.',
+    'New York (v24 UPDATE — previously rejected): pretax_401k_deferral and pretax_section125_deduction ARE now applied to NY State, NYC, and Yonkers (resident surcharge and nonresident earnings tax) wages, on the same federalTaxableWages base as federal withholding. Sourced from 20 NYCRR 171.1(b) (NY adopts federal IRC withholding definitions, including "wages," "except as otherwise specifically provided ... or where ... clearly inconsistent") and 171.3 ("Payments which are considered wages for Federal income tax withholding purposes are also wages for purposes of withholding New York State personal income tax") — no NY-specific carve-out for 401(k)/Section 125 was found. NY PFL and DBL, which are insurance premiums rather than income-tax withholding, are NOT covered by this conformity regulation and still use grossPay as before (unchanged, and not independently re-sourced this pass).',
     'New York: the "Method III Top Income Tax Rates" schedule (for very high net wages — roughly above the $20k-$41k per-period range where each exact-calculation table in this file stops, i.e. very high six-figure and up annual pay) is NOT implemented. Employees whose net wages exceed the top bracket of the tables here are rejected rather than approximated — a non-issue for this pack\'s small-business target segment, but rejected explicitly rather than silently mis-taxed.',
     'New York PFL (v6): calculated for every NY employee at 0.432% of gross wages, capped by a cumulative ANNUAL DOLLAR amount ($411.91 for 2026) via a new capTax primitive — distinct from every other capped tax in this file, which caps the taxable WAGE base (ceilingContribution) rather than the computed tax itself. Callers must track and pass ytd_ny_pfl_tax_before (a YTD TAX total, not a YTD wage total) for this one to cap correctly.',
     'New York DBL (v6): calculated only when the caller sets ny_dbl_opt_in (employer elects to deduct it) AND pay_frequency is WEEKLY — DBL\'s statutory cap is $0.60 PER CALENDAR WEEK, which has no clean equivalent for biweekly/semimonthly/monthly pay (is a semimonthly period ~2.17 weeks? ~2 weeks? the source doesn\'t say), so non-weekly employees with ny_dbl_opt_in set are rejected rather than guessed at.',
@@ -2686,11 +2690,21 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       }
     }
     if (employee.state === 'NY') {
-      if (pretax401k > 0 || pretaxSection125 > 0) {
-        const error = new Error(`pretax_401k_deferral and pretax_section125_deduction are not supported for NY employees (${employeeId}) in this rule pack — see limitations`);
-        (error as Error & { status?: number }).status = 409;
-        throw error;
-      }
+      // Pre-tax handling (v24): NY conforms its withholding-tax wage base to
+      // the federal one — 20 NYCRR 171.1(b) adopts the federal Internal
+      // Revenue Code definitions of "wages" etc. for NY State personal
+      // income tax withholding purposes "except as otherwise specifically
+      // provided ... or where such Federal rules ... are clearly
+      // inconsistent", and 20 NYCRR 171.3 states directly: "Payments which
+      // are considered wages for Federal income tax withholding purposes
+      // are also wages for purposes of withholding New York State personal
+      // income tax." Traditional 401(k)/403(b) elective deferrals and
+      // Section 125 cafeteria-plan deductions are both excluded from wages
+      // for FEDERAL income tax withholding purposes (IRC §402(e)(3), §125),
+      // so under 171.1(b)/171.3 they are excluded from NY State (and, by the
+      // same conformity, NYC and Yonkers) withholding wages the same way.
+      // No NY-specific carve-out from this general conformity rule was
+      // found for either deduction type. See evidence below for citations.
       if (employee.ny_filing_status !== 'SINGLE' && employee.ny_filing_status !== 'MARRIED') {
         const error = new Error(`ny_filing_status for ${employeeId} must be 'SINGLE' or 'MARRIED'`);
         (error as Error & { status?: number }).status = 400;
@@ -3209,7 +3223,9 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
       const deductionTable = nyFilingStatus === 'MARRIED' ? p.new_york.deduction_per_period_married : p.new_york.deduction_per_period;
       const deduction = deductionTable[employee.pay_frequency];
       const exemption = money((employee.ny_allowances as number) * p.new_york.exemption_per_allowance[employee.pay_frequency]);
-      const netWages = Math.max(0, money(grossPay - deduction - exemption));
+      // Pre-tax 401(k)/Section 125 reduce NY State taxable wages the same
+      // way they reduce federal taxable wages — see v24 comment above.
+      const netWages = Math.max(0, money(federalTaxableWages - deduction - exemption));
       const methodIiiThreshold = p.new_york.state_method_iii_threshold[employee.pay_frequency][nyFilingStatus];
       if (netWages >= methodIiiThreshold) {
         const error = new Error(`net NY wages for ${employeeId} exceed this engine's supported range (Method III Top Income Tax Rates is not implemented) — see limitations`);
@@ -3222,20 +3238,30 @@ export function calculateUsPayroll(input: UsPayrollRunInput): UsPayrollRunResult
         // NYC uses its OWN (lower) deduction base — not the NY State one.
         const nycDeductionTable = nyFilingStatus === 'MARRIED' ? p.new_york.nyc_deduction_per_period_married : p.new_york.nyc_deduction_per_period;
         const nycDeduction = nycDeductionTable[employee.pay_frequency];
-        const nycNetWages = Math.max(0, money(grossPay - nycDeduction - exemption));
+        const nycNetWages = Math.max(0, money(federalTaxableWages - nycDeduction - exemption));
         nycIncomeTax = bracketLookup(nycNetWages, p.new_york.nyc_rate_table[employee.pay_frequency]);
       }
       if (employee.ny_yonkers_resident) {
         yonkersTax = money(nyIncomeTax * p.new_york.yonkers_resident_surcharge_rate);
       } else if (employee.ny_yonkers_nonresident_workplace) {
+        // Yonkers nonresident earnings tax is also an income-tax-withholding
+        // line under 171.1(b)/171.3 (see v24 comment above), so it uses the
+        // same federally-conformed taxable-wage base as NY State/NYC.
         const exemptionTable = p.new_york.yonkers_nonresident_exemption_tables[employee.pay_frequency];
         let yonkersExemption = 0;
-        let belowFirstThreshold = grossPay < exemptionTable[1][0];
+        let belowFirstThreshold = federalTaxableWages < exemptionTable[1][0];
         for (const [atLeast, exemptionAmount] of exemptionTable) {
-          if (grossPay >= atLeast) yonkersExemption = exemptionAmount;
+          if (federalTaxableWages >= atLeast) yonkersExemption = exemptionAmount;
         }
-        yonkersTax = belowFirstThreshold ? 0 : money(Math.max(0, grossPay - yonkersExemption) * p.new_york.yonkers_nonresident_rate);
+        yonkersTax = belowFirstThreshold ? 0 : money(Math.max(0, federalTaxableWages - yonkersExemption) * p.new_york.yonkers_nonresident_rate);
       }
+      // NY PFL and DBL are NOT income-tax withholding but statutory
+      // employee-paid insurance premiums, so the federal-wage conformity
+      // rule above (171.1(b)/171.3, an income-tax withholding regulation)
+      // does not apply to them; this pass leaves their existing grossPay
+      // wage base unchanged (it was never part of the pretax-fields
+      // restriction being fixed here, and PFL/DBL wage-base treatment of
+      // 401(k)/Section 125 was not independently sourced this pass).
       // PFL applies to every NY employee, no opt-out, capped by cumulative
       // ANNUAL DOLLAR amount rather than by a wage base.
       nyPfl = capTax(money(grossPay * p.new_york.pfl_rate), ytdNyPflTaxBefore, p.new_york.pfl_annual_dollar_cap);
