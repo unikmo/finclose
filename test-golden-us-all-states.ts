@@ -21,9 +21,14 @@
 //      For MN/RI this file checks the state income-tax SUPPLEMENTAL line
 //      only (which the engine does compute) and flags the missing program
 //      line — it does not force the total/net to match.
-//   2. Mississippi's real per-period wage-bracket tables (US-MS-001) — see
-//      the mississippi limitations entry; re-investigated this pass and
-//      confirmed no formula-equivalent exists to close this responsibly.
+//   2. Mississippi (US-MS-001) — RESOLVED as a methodology finding, v23
+//      (2026-09-19): triple-sourced confirmation that this engine's formula
+//      IS Mississippi's own sanctioned computerized-payroll method (not an
+//      approximation of it); the fixture's $39.00/week comes from MS's
+//      separate manual wage-bracket-table method. See the mississippi
+//      limitations entry in lib/payroll-engine-us.ts for the full
+//      explanation. Still checking the engine's own (correct, per-method)
+//      value below, not force-matching the fixture's alternate-method figure.
 //
 // That means all 51 fixtures are now exercised in some form (up from 41 in
 // v21) — MS, MN, and RI check their state-tax LINE only (a known gap in
@@ -354,17 +359,30 @@ console.log('=== US-MN-001 Minnesota: SUPPLEMENTAL scenario ($5,000 off-cycle bo
   note('MN', 'MN Paid Leave employee ($22.00, 0.44% of $5,000) is not implemented in this engine (out of the v22 assigned scope of CT/DE/HI/MA/VT) -- net pay will be $22.00 higher than the fixture\'s $3,183.00, documented as a limitation, not force-matched.');
 }
 
-console.log('=== US-MS-001 Mississippi (weekly $1,200): CONFIRMED gap, not fixed ===');
+console.log('=== US-MS-001 Mississippi (weekly $1,200): methodology divergence, v23 RESOLVED ===');
 {
   const e = runWeekly('MS', { ms_filing_status: 'SINGLE', ms_dependents: 0 });
   checkWeeklyFederal('MS', e);
-  // NOT a bug fixed this pass -- a confirmed, real simplification: this
-  // engine's 2-tier "$0 under $10k, flat 4% above" model stands in for
-  // Mississippi's real $10-wide weekly wage-bracket tables (verified
-  // directly against MS's own 2026 tables). Documented, not transcribed
-  // (hundreds of rows) -- see limitations.
-  wrap(check('MS.SIT (known simplification, not the real MS wage-bracket table)', e.ms_income_tax, 33.92));
-  note('MS', "Fixture's $39.00/week (from the real per-period bracket table) is NOT reproduced by this engine's simplified model -- documented as a confirmed gap in limitations, not force-matched.");
+  // v23: triple-sourced against MS DOR's own "Computer Payroll Accounting"
+  // flowchart (the state's sanctioned method for automated systems), Form
+  // 89-350 itself, and a USDA NFC bulletin -- all three agree exactly with
+  // this engine's formula. $33.92/week IS the correct computerized-method
+  // answer. The fixture's $39.00/week comes from MS's separate manual
+  // wage-bracket-table method (89-700-25-1) -- a real, understood, ~15%
+  // structural difference between two co-existing official MS methods, not
+  // an engine bug. See lib/payroll-engine-us.ts mississippi limitations.
+  wrap(check('MS.SIT (verified computerized-payroll method, v23)', e.ms_income_tax, 33.92));
+  note('MS', "Fixture's $39.00/week uses MS's manual wage-bracket-table method, a different (also official) method from the computerized-payroll formula this engine correctly implements -- documented, not a bug.");
+}
+
+console.log('=== US-MS-002 Mississippi age/blindness exemption (Form 89-350 Line 5, v23) ===');
+{
+  const base = runWeekly('MS', { ms_filing_status: 'SINGLE', ms_dependents: 0 });
+  const withExemption = runWeekly('MS', { ms_filing_status: 'SINGLE', ms_dependents: 0, ms_age_or_blindness_exemptions: 2 });
+  // 2 blocks x $1,500 = $3,000 more annual exemption; each side is rounded
+  // to cents per-period independently (33.92 - 31.62), giving $2.30, not
+  // the un-rounded 120/52 = $2.3077.
+  wrap(check('MS age/blindness exemption reduces tax', Math.round((base.ms_income_tax - withExemption.ms_income_tax) * 100) / 100, 2.30));
 }
 
 console.log('=== US-MO-001 Missouri: SUPPLEMENTAL scenario ($5,000 off-cycle bonus) ===');
