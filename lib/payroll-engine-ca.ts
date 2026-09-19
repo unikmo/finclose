@@ -37,13 +37,23 @@
 // publications, not a placeholder scaffold. Not independently re-fetched
 // from canada.ca directly this pass.
 //
+// v5 (2026-09-19): QUEBEC IS NOW IMPLEMENTED. The note directly below
+// (DELIBERATE v1 SCOPE) is kept as historical record of v1-v4's deliberate
+// rejection; it no longer reflects current behavior. See the "quebec"
+// block in PAYROLL_RULE_PACK_CA and the v5 limitations entry for what was
+// built, what was sourced from where, and what remains disclosed as a
+// limitation (the exact TP-1015.F-V deduction-ordering formula could not
+// be independently fetched -- reconstructed from secondary sources and one
+// real golden-fixture data point instead).
+//
 // DELIBERATE v1 SCOPE (rejected, not approximated, for anything not listed):
-//   - QUEBEC IS ENTIRELY REJECTED, not approximated. The source document
-//     itself insists on this: "Do not reuse the CRA provincial T2 engine
-//     for Quebec" — Quebec provincial tax, QPP/QPP2, QPIP, and reduced EI
-//     all require a wholly separate Revenu Quebec formula engine
-//     (TP-1015.F-V) that has not been built. Any employee whose province of
-//     employment is Quebec is REJECTED with an explicit error.
+//   - [SUPERSEDED BY v5] QUEBEC IS ENTIRELY REJECTED, not approximated. The
+//     source document itself insists on this: "Do not reuse the CRA
+//     provincial T2 engine for Quebec" — Quebec provincial tax, QPP/QPP2,
+//     QPIP, and reduced EI all require a wholly separate Revenu Quebec
+//     formula engine (TP-1015.F-V), which v1-v4 did not build. Any employee
+//     whose province of employment was Quebec was REJECTED with an
+//     explicit error prior to v5.
 //   - Federal AND provincial income tax use a simplified ANNUALIZE-CURRENT-
 //     PERIOD-AND-DIVIDE approximation of T4127 Option 1 (not the true
 //     cumulative-averaging Option 2). As of v2, the BPA (K1), CPP-base (K2),
@@ -84,7 +94,7 @@
 //     payroll and accounting outputs only — it does not file with the CRA.
 
 export type CaJurisdiction =
-  | 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'ON' | 'PE' | 'SK' | 'NT' | 'NU' | 'YT';
+  | 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'ON' | 'PE' | 'SK' | 'NT' | 'NU' | 'YT' | 'QC';
 export type CaPayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
 
 export type CaEmployeeInput = {
@@ -113,6 +123,23 @@ export type CaEmployeeInput = {
   wcb_rate?: number;
   wcb_assessable_earnings_ceiling?: number;
   ytd_wcb_assessable_earnings_before?: number;
+  // Quebec ("QC") only. QPIP (Quebec Parental Insurance Plan) has its OWN
+  // maximum insurable earnings ($103,000 for 2026), separate from both the
+  // federal EI maximum ($68,900) and the QPP YMPE ($74,600) -- it needs its
+  // own YTD accumulator, unlike CPP/CPP2/EI on the rest-of-Canada path
+  // (which share one accumulator, ytd_earnings_before, per the existing
+  // documented simplification). Ignored for every non-QC province.
+  ytd_qpip_insurable_before?: number;
+  // Quebec ("QC") only, optional. Employer contribution to the Health
+  // Services Fund (Fonds des services de sante / FSS/HSF) -- like WCB and
+  // US SUI, the RATE is employer-size- and sector-classification-specific
+  // (Revenu Quebec's own published table runs from roughly 1.25%-1.65% at
+  // small total payroll up to 4.26% at $7.5M+, see limitations), so this
+  // engine has NO statutory default and only computes it when the caller
+  // supplies its own current rate from that employer's own return/estimate.
+  // Applied to the SAME gross pay base as QPP/QPIP (no separate ceiling --
+  // FSS has no earnings cap, unlike QPP/QPIP/EI).
+  qc_fss_rate?: number;
 };
 
 export type CaPayrollRunInput = {
@@ -133,7 +160,11 @@ export type CaJournalLine = {
     | 'CPP_PAYABLE'
     | 'EI_PAYABLE'
     | 'EMPLOYER_WCB_EXPENSE'
-    | 'WCB_PAYABLE';
+    | 'WCB_PAYABLE'
+    | 'QPP_PAYABLE'
+    | 'QPIP_PAYABLE'
+    | 'EMPLOYER_FSS_EXPENSE'
+    | 'FSS_PAYABLE';
   amount: number;
 };
 
@@ -150,10 +181,26 @@ export type CaEmployeeResult = {
   employee_ei: number;
   employer_ei: number;
   employer_wcb: number;
+  // Quebec ("QC") only -- always present (0 for every non-QC employee) so
+  // totals/journal aggregation stays unconditional. For a QC employee,
+  // employee_cpp1/employer_cpp1/employee_cpp2/employer_cpp2 above are
+  // always 0 -- QPP REPLACES CPP entirely for Quebec employees, it does
+  // not run alongside it. employee_ei/employer_ei above ARE populated for
+  // QC employees, at Quebec's own reduced federal EI rate (see the ei
+  // block in the QC rule pack) -- EI remains federal even in Quebec, only
+  // the rate differs.
+  employee_qpp1: number;
+  employer_qpp1: number;
+  employee_qpp2: number;
+  employer_qpp2: number;
+  employee_qpip: number;
+  employer_qpip: number;
+  employer_fss: number;
   net_pay: number;
   employer_funded_total: number;
   ytd_earnings_after: number;
   ytd_wcb_assessable_earnings_after: number;
+  ytd_qpip_insurable_earnings_after: number;
 };
 
 export type CaPayrollRunResult = {
@@ -176,6 +223,13 @@ export type CaPayrollRunResult = {
     employee_ei: number;
     employer_ei: number;
     employer_wcb: number;
+    employee_qpp1: number;
+    employer_qpp1: number;
+    employee_qpp2: number;
+    employer_qpp2: number;
+    employee_qpip: number;
+    employer_qpip: number;
+    employer_fss: number;
     net_pay: number;
     employer_funded_total: number;
   };
@@ -207,7 +261,7 @@ export const PAYROLL_RULE_PACK_CA = {
   // actually run, so back-dated/late-processed 2026 runs still use the
   // pre-cut rate. Only the base portion moves; CPP1's "additional"
   // (enhanced) 1% piece and CPP2 are both unaffected by this change.
-  id: 'CA-2026-FEDERAL-PLUS-12-NONQC-JURISDICTIONS-DRAFT-V4',
+  id: 'CA-2026-FEDERAL-PLUS-13-JURISDICTIONS-INCL-QC-DRAFT-V5',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'CAD',
   federal: {
@@ -253,6 +307,82 @@ export const PAYROLL_RULE_PACK_CA = {
     max_insurable_annual: 68900,
     employee_rate: 0.0163,
     employer_multiple: 1.4 // standard employer premium = 1.4x employee (no approved reduction modeled)
+  },
+  // v5 (2026-09-19): QUEBEC. Previously entirely rejected (see the v2
+  // change log / DELIBERATE SCOPE note above, unchanged as historical
+  // record). Quebec does NOT use CPP, does NOT use the federal-formula
+  // provincial-tax pattern used by the 12 other provinces/territories
+  // above, and pays a REDUCED federal EI rate. Four genuinely separate
+  // Quebec-specific programs, each independently sourced:
+  //   1. QPP (Quebec Pension Plan) -- Retraite Quebec/Revenu Quebec,
+  //      REPLACES CPP entirely for Quebec employees. Same YBE ($3,500),
+  //      YMPE ($74,600) and YAMPE ($85,000) as the federal CPP figures
+  //      above, but a HIGHER combined rate: QPP1 (base 5.30% + first
+  //      additional 1.00% = 6.30% each side, vs CPP1's 5.75-5.95%), and
+  //      QPP2 at 4.00% each side (same rate as federal CPP2, applying
+  //      between YMPE and YAMPE).
+  //   2. QPIP (Quebec Parental Insurance Plan) -- Revenu Quebec, EXISTS
+  //      ONLY IN QUEBEC (funds parental/maternity/paternity/adoption
+  //      leave that the rest of Canada instead funds through EI). Its own
+  //      maximum insurable earnings ($103,000 for 2026, distinct from
+  //      both the QPP YMPE and the federal EI maximum) and its own
+  //      employee (0.430%) / employer (0.602%) rates.
+  //   3. Federal EI in Quebec -- REDUCED vs the rest-of-Canada rate above,
+  //      because QPIP already covers what EI's parental/maternity
+  //      benefits would otherwise cover: 1.30% employee (vs 1.63%
+  //      elsewhere), employer still at the standard 1.4x multiple
+  //      (1.82%). Same $68,900 maximum insurable earnings as the rest of
+  //      Canada -- only the RATE is reduced, not the ceiling.
+  //   4. Quebec provincial income tax -- computed ENTIRELY separately by
+  //      Revenu Quebec (TP-1015.F-V), NOT the CRA T4127 credit-based
+  //      pattern the other 12 provinces/territories above share. Its own
+  //      4-bracket table (14% / 19% / 24% / 25.75%) and its own basic
+  //      personal amount ($18,952, credited at the lowest 14% rate) --
+  //      NOT the federal BPAF or any other province's BPA.
+  // Federal income tax STILL applies to Quebec employees using the SAME
+  // federal brackets/K1-K4 credit machinery already implemented above,
+  // with two Quebec-specific adjustments: the K2 (CPP/QPP-base) credit
+  // uses the QPP base rate actually paid (not CPP's), and the resulting
+  // federal tax is then reduced by the 16.5% Quebec federal tax abatement
+  // (Quebec residents get a 16.5% reduction of basic federal tax, as
+  // compensation for Quebec opting out of certain federal-provincial
+  // programs -- CRA's own T4032-QC tables fold this reduction directly
+  // into their published withholding numbers; this engine applies it as
+  // an explicit multiplicative step for the same net effect). See
+  // limitations for what is NOT modeled (a QPIP federal credit analog,
+  // and the exact TP-1015.F-V deduction-ordering formula, which could not
+  // be independently fetched this pass -- see limitations).
+  quebec: {
+    qpp: {
+      ybe_annual: 3500, // same YBE as federal CPP
+      ympe_annual: 74600, // same YMPE as federal CPP -- confirmed, not assumed equal
+      yampe_annual: 85000, // same YAMPE as federal CPP2
+      base_rate: 0.0530, // QPP1 "base" portion, employee and employer each
+      additional_rate: 0.0100, // QPP1 "first additional" portion, each side -- deducted from taxable income like CPP's F5A
+      qpp2_rate: 0.0400 // QPP2, employee and employer each (applies YMPE-YAMPE band)
+    },
+    qpip: {
+      max_insurable_annual: 103000,
+      employee_rate: 0.00430,
+      employer_rate: 0.00602
+    },
+    ei: {
+      // Federal EI, reduced Quebec rate -- same $68,900 maximum insurable
+      // earnings as the rest of Canada, only the rate differs.
+      max_insurable_annual: 68900,
+      employee_rate: 0.0130,
+      employer_multiple: 1.4
+    },
+    tax: {
+      // Revenu Quebec 2026 source-deduction brackets on annual taxable
+      // income: [atLeast, cumulativeTaxAtThatPoint, rate].
+      brackets: [
+        [0, 0, 0.14], [54345, 7608.30, 0.19], [108680, 17931.95, 0.24], [132245, 23587.55, 0.2575]
+      ] as Array<[number, number, number]>,
+      bpa_annual: 18952, // credited at the lowest bracket rate (14%)
+      bpa_credit_rate: 0.14
+    },
+    federal_abatement_rate: 0.165 // Quebec abatement: 16.5% reduction of basic federal tax for Quebec residents
   },
   provinces: {
     // Each entry: brackets [atLeast, base, rate] on annual taxable income,
@@ -326,10 +456,25 @@ export const PAYROLL_RULE_PACK_CA = {
     { authority: 'BC Ministry of Finance', instrument: 'BC Option 1 Jul-Dec 2026 reduction S exact boundary values', url: 'https://www2.gov.bc.ca/gov/content/taxes/employer-health-tax/employer-health-tax-overview' },
     { authority: 'User-supplied reference', instrument: '"Canada 2026 Payroll Implementation Reference" (as of 14 Sep 2026) — the source document this pack was built from; parameters not independently re-fetched from canada.ca directly this pass.', url: 'file: Canada_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' },
     { authority: 'User-supplied CRA T4127 golden-fixture pack', instrument: '"Canada 2026 Payroll Golden Fixtures" (JSON, verified through 2026-09-14) — 4 independent non-Quebec worked examples (AB/BC/NT/NU) with full CPP/EI/federal/provincial traces, used to catch and root-cause the v2 CPP/federal/provincial fix; all 4 fixtures reproduced to the exact cent except AB provincial (off by $0.01, attributed to the unmodeled K5P credit).', url: 'file: Canada_2026_Payroll_QA_Golden_Pack (user-supplied, 2026-09-15)' },
-    { authority: 'Government of Canada / Parliament of Canada', instrument: 'Bill C-30 (Spring Economic Update 2026 Implementation Act) — Royal Assent 2026-06-18, cutting the CPP1 base contribution rate from 4.95% to 4.75% (each side) effective 2027-01-01. Corroborated by OSFI Chief Actuary Assia Billig\'s 33rd Actuarial Report supplementing the Revised 32nd Actuarial Report on the CPP (submitted 2026-05-28), certifying the base plan can support the cut.', url: 'https://www.osfi-bsif.gc.ca/en/oca/actuarial-reports/33rd-actuarial-report-supplementing-revised-32nd-actuarial-report-canada-pension-plan' }
+    { authority: 'Government of Canada / Parliament of Canada', instrument: 'Bill C-30 (Spring Economic Update 2026 Implementation Act) — Royal Assent 2026-06-18, cutting the CPP1 base contribution rate from 4.95% to 4.75% (each side) effective 2027-01-01. Corroborated by OSFI Chief Actuary Assia Billig\'s 33rd Actuarial Report supplementing the Revised 32nd Actuarial Report on the CPP (submitted 2026-05-28), certifying the base plan can support the cut.', url: 'https://www.osfi-bsif.gc.ca/en/oca/actuarial-reports/33rd-actuarial-report-supplementing-revised-32nd-actuarial-report-canada-pension-plan' },
+    // --- Quebec (v5, 2026-09-19) ---
+    { authority: 'Retraite Québec / Revenu Québec', instrument: '"Maximum Pensionable Earnings and Québec Pension Plan Contribution Rate" (2026 parameters): QPP1 base rate 5.30%, first additional rate 1.00% (each side), YMPE $74,600, YAMPE $85,000, YBE $3,500 -- confirmed the YMPE/YAMPE match the federal CPP figures rather than assuming equality.', url: 'https://www.revenuquebec.ca/en/businesses/source-deductions-and-employer-contributions/calculating-source-deductions-and-contributions/qpp-contributions/maximum-pensionable-earnings-and-contribution-rate/' },
+    { authority: 'Revenu Québec', instrument: '"Maximum Insurable Earnings and the Québec Parental Insurance Plan Premium Rate" (2026): QPIP maximum insurable earnings $103,000, employee rate 0.430% (max employee premium $442.90), employer rate 0.602% (max employer premium $620.06).', url: 'https://www.revenuquebec.ca/en/businesses/source-deductions-and-employer-contributions/calculating-source-deductions-and-contributions/qpip-premiums/maximum-insurable-earnings-and-premium-rate/' },
+    { authority: 'Employment and Social Development Canada (ESDC) / Canada Employment Insurance Commission', instrument: '"Summary of the 2026 Actuarial Report on the Employment Insurance Premium Rate" and the 2026 EI rate announcement: reduced Quebec EI employee premium rate $1.30 per $100 of insurable earnings (1.30%, vs $1.63/1.63% for the rest of Canada), Quebec employer rate $1.82 per $100 (1.82%, still the standard 1.4x multiple), same $68,900 maximum insurable earnings as the rest of Canada, reduction attributed explicitly to Quebec\'s own QPIP covering what EI parental/maternity benefits otherwise cover.', url: 'https://www.canada.ca/en/employment-social-development/news/2025/09/canada-employment-insurance-commission-sets-the-2026-employment-insurance-premium-rate.html' },
+    { authority: 'Revenu Québec', instrument: 'TP-1015.F-V (2026-01), "Formulas to Calculate Source Deductions and Contributions" -- the authoritative Quebec source-deduction formula document (income tax, QPP, QPIP, Health Services Fund). NOTE: this document\'s own PDF could not be directly fetched this pass (blocked by the site\'s anti-bot protection, HTTP 403 on repeated attempts); the specific bracket rates/BPA/deduction-ordering used in this engine were corroborated instead from multiple independent secondary sources (Revenu Québec\'s own rates page, tax-brackets summaries citing Revenu Québec, and a user-supplied golden-fixture pack\'s own trace lines -- see below) rather than quoted directly from the primary formula text. Should be reconfirmed against the actual TP-1015.F-V PDF or Revenu Québec\'s WebRAS calculator before VERIFIED status.', url: 'https://www.revenuquebec.ca/en/online-services/forms-and-publications/current-details/tp-1015-f-v/' },
+    { authority: 'Revenu Québec', instrument: '"Income Tax Rates" page (2026 taxation year): Quebec provincial brackets 14% ($0-$54,345), 19% ($54,345-$108,680), 24% ($108,680-$132,245), 25.75% (over $132,245); basic personal amount $18,952 (TP-1015.3-V, 2026-01).', url: 'https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/income-tax-rates/' },
+    { authority: 'Government of Canada, Department of Finance', instrument: '"Quebec Abatement": the Quebec federal tax abatement remains 16.5% of basic federal tax for 2026, compensating Quebec for opting out of certain federal-provincial programs; applied by CRA directly inside its Quebec-specific T4032-QC withholding tables (this engine applies the equivalent 16.5% multiplicative reduction explicitly instead).', url: 'https://www.canada.ca/en/department-finance/programs/federal-transfers/quebec-abatement.html' },
+    { authority: 'Revenu Québec', instrument: '"Total Payroll Threshold and Health Services Fund Contribution Rate" (2026): FSS/HSF employer rate is a SLIDING SCALE by total worldwide payroll and sector -- roughly 1.25% (primary/manufacturing) to 1.65% (other sectors) at total payroll <= $1M, rising to 4.26% at total payroll >= $7.8M (the eligibility-for-reduction threshold, unchanged for 2026). Confirms this is genuinely employer-specific, not a single statutory rate this engine can default to -- see limitations.', url: 'https://www.revenuquebec.ca/en/businesses/source-deductions-and-employer-contributions/calculating-source-deductions-and-contributions/employer-contribution-to-the-health-services-fund/total-payroll-threshold-and-health-services-fund-contribution-rate/' },
+    { authority: 'User-supplied CRA/Revenu Québec golden-fixture pack', instrument: '"Canada 2026 Payroll Golden Fixtures" fixture CA-QC-001 ($1,000/month gross, Quebec, 2026-07-31): QPP $44.63, EI(QC) $13.00, QPIP $4.30 (employee), QPP employer $44.63, EI employer $18.20, QPIP employer $6.02, federal and Quebec income tax both $0 at this below-bracket income level. Reproduced to the exact cent by this engine (see payrollEngineSelfTestCA). This is the SAME single data point already noted in the v2-pack test file as too low-income to validate the QC income-tax bracket engine (QC tax = $0 here) -- it verifies QPP/QPIP/EI-QC only, not the bracket/BPA/abatement machinery, which therefore rests on the other sources above, not on this fixture.', url: 'file: Canada_2026_Payroll_QA_Golden_Pack/Canada_2026_Payroll_Golden_Fixtures.json, fixture id CA-QC-001 (user-supplied, 2026-09-16)' }
   ],
   limitations: [
-    'v2. QUEBEC IS ENTIRELY REJECTED, not approximated — province_of_employment "QC" throws an explicit error. Quebec requires a wholly separate Revenu Quebec formula engine (TP-1015.F-V) for provincial tax, QPP/QPP2, QPIP, and reduced EI, none of which is implemented; the source document itself insists on this separation.',
+    'v5 (2026-09-19): QUEBEC IS NOW IMPLEMENTED (province_of_employment "QC" is accepted, not rejected). Prior versions (v1-v4) rejected Quebec outright -- see the superseded note directly below, kept as historical record. The new QC path computes QPP/QPP2 (replacing CPP entirely), QPIP (a Quebec-only program), a reduced Quebec federal EI rate, and Quebec\'s own 4-bracket provincial tax with its own BPA and the 16.5% federal abatement. Every rate/threshold is individually sourced (see evidence) EXCEPT the exact TP-1015.F-V deduction-ordering formula (whether/how QPP and QPIP amounts are deducted from income before applying the QC bracket table), which could not be independently fetched from Revenu Québec\'s own PDF this pass (blocked by anti-bot protection) -- this engine\'s QC provincial-tax formula is a reasonable, disclosed RECONSTRUCTION corroborated by multiple secondary sources and one real golden-fixture data point (CA-QC-001), not a direct transcription of the primary formula text. Verified to the exact cent against CA-QC-001 for QPP/QPIP/EI-QC; the QC bracket/BPA/abatement tax machinery itself has NOT been independently verified against a second real worked example (CA-QC-001\'s own income level produces $0 QC tax, so it cannot discriminate the bracket engine -- this is the same limitation the fixture\'s own source file already flagged). Should be validated against Revenu Québec\'s WebRAS calculator or a higher-income QC worked example before VERIFIED status.',
+    'QC Health Services Fund (FSS/HSF), employer-only: computed ONLY when the caller supplies qc_fss_rate, the same WCB/SUI-style pattern already used elsewhere in this file -- Revenu Québec\'s own published rate table is a sliding scale by total worldwide payroll ($1.25%-1.65% under $1M, rising to 4.26% at $7.8M+) AND by sector (primary/manufacturing gets a lower rate), which this engine has no defensible single statutory default for. No ceiling is applied (FSS has none, unlike QPP/QPIP/EI) -- the full gross pay base is subject at whatever rate the caller supplies.',
+    'CNESST (Commission des normes, de l\'equite, de la sante et de la securite du travail) -- Quebec\'s employer-paid workplace health-and-safety premium, the Quebec-specific equivalent of the WCB/WSIB premiums already modeled for other provinces -- is NOT modeled at all for Quebec, not even as an optional caller-supplied rate. Like WCB, CNESST assigns each employer its own rate by industry classification; unlike WCB, no CNESST computation path exists yet in this file. A future pass could extend the existing WCB pattern to CNESST for Quebec employers; not attempted this pass given the scope was already large.',
+    'Federal tax for Quebec employees uses the SAME federal brackets/K1 (BPAF)/K3 (EI credit)/K4 (Canada Employment Amount) machinery as the rest of Canada, with the K2 credit computed off the QPP base rate actually paid (not CPP\'s) -- but does NOT model any separate QPIP-specific federal credit analog (if CRA\'s actual T4127/T4032-QC formula includes one, e.g. a "K2P-for-QPIP"-style credit); this was not confirmed one way or the other in the sources found this pass. If such a credit exists and is material, this engine slightly OVERSTATES federal tax for Quebec employees. The 16.5% Quebec abatement is applied as an explicit multiplicative reduction of the resulting federal tax, which should be economically equivalent to CRA\'s own approach of folding it into Quebec-specific withholding tables, but has not been cross-checked against an actual CRA T4032-QC table value.',
+    'Quebec provincial tax deducts the full QPP (base + additional + QPP2) and QPIP employee contributions from annualized gross pay before applying the QC bracket table, then applies only the basic personal amount (BPA) credit at 14% -- this is the reconstructed formula per the limitation above. Other real Quebec-specific credits/deductions that may exist in the actual TP-1015.F-V formula (e.g. a QC-specific "additional" personal exemption, union/professional dues deduction lines, the Quebec Pension Plan election variants) are NOT modeled -- only the BPA credit is implemented, the same single-credit simplification already accepted for several rest-of-Canada provinces in this file.',
+    'QC is exempt from the rest of this file\'s generic non-QC provincial-tax code path entirely (bracket lookup + K1/K2/K3 credits against p.provinces) -- it runs through a dedicated code branch using p.quebec instead. A QC employee\'s employee_cpp1/employer_cpp1/employee_cpp2/employer_cpp2 result fields are always 0 (QPP fields are populated instead); a non-QC employee\'s employee_qpp1/employer_qpp1/employee_qpp2/employer_qpp2/employee_qpip/employer_qpip/employer_fss result fields are always 0.',
+    '[SUPERSEDED BY v5 ABOVE, kept as historical record] v2. QUEBEC IS ENTIRELY REJECTED, not approximated — province_of_employment "QC" throws an explicit error. Quebec requires a wholly separate Revenu Quebec formula engine (TP-1015.F-V) for provincial tax, QPP/QPP2, QPIP, and reduced EI, none of which is implemented; the source document itself insists on this separation.',
     'v2 FIX (real bug found via a user-supplied CRA T4127 golden-fixture pack, 2026-09-15): CPP\'s $3,500 annual exemption is now correctly applied as a PERIOD-PRORATED subtraction every pay period, not front-loaded via YTD banding (the v1 method, which badly understated CPP for any payroll starting mid-year from YTD=0). Federal AND provincial income tax now implement the BPA (K1), CPP-base (K2), EI (K3) credits at the jurisdiction\'s own lowest rate, plus a federal-only Canada Employment Amount credit (K4) and a deduction of CPP\'s enhanced/"additional" 1% portion from taxable income (F5A) — reconstructed from the fixtures\' own traces and verified to the exact cent against 4 independent CRA fixtures (AB/BC/NT/NU). Still an annualize-and-divide approximation of T4127 Option 1, not the true cumulative-averaging Option 2.',
     'v4 (2026-09-15, found by the weekly policy-change monitor\'s first manual run): CPP1\'s base rate is cut from 4.95% to 4.75% (each side) for pay dates on/after 2027-01-01, per Bill C-30 (enacted, Royal Assent 2026-06-18). The engine selects the correct rate from pay_date automatically -- callers do not need to pass anything new. Only the base portion (which generates the K2 credit) changes; the "additional" enhanced 1% portion (F5A-deducted) and CPP2 are unaffected. This was NOT caught by any golden fixture (all 4 CRA fixtures this pack was verified against are dated July 2026, before the cut takes effect) -- it was caught by an explicit web search for confirmed/enacted upcoming rate changes, not by fixture testing, which is exactly the gap the weekly policy monitor exists to narrow.',
     'Alberta\'s own additional K5P supplemental credit (((K1P+K2P)-$4,896) x 25%) remains UNMODELED — it produced a $0.01 residual on the one AB fixture available this pass, and may matter more at other income levels. Every other province\'s own possible K2P/K3P-equivalent variations (if any differ from the generic "credit at that province\'s lowest rate" pattern used here) are also unconfirmed beyond the BC/NT/NU fixtures that did match exactly.',
@@ -343,7 +488,18 @@ export const PAYROLL_RULE_PACK_CA = {
 };
 
 function money(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  // Clean sub-micro-dollar floating-point noise (e.g. repeating-decimal
+  // divisions like 3500/12 producing 44.624999999999996 instead of the
+  // mathematically exact 44.625) before rounding to cents. Discovered via
+  // golden fixture CA-QC-001 (QPP on a QC $1,000/month case): the true
+  // value ((1000 - 3500/12) * 6.30%) is exactly $44.625, which should
+  // round-half-up to $44.63, but plain floating-point arithmetic landed at
+  // 44.624999999999996 and rounded down to $44.62 -- one cent off the
+  // fixture. Rounding to 6 decimal places first removes that noise without
+  // affecting any real sub-cent precision (no rate/threshold in this file
+  // has more than a handful of significant decimal digits).
+  const cleaned = Math.round(value * 1e6) / 1e6;
+  return Math.round((cleaned + Number.EPSILON) * 100) / 100;
 }
 
 function requireIsoDate(value: string, field: string) {
@@ -414,7 +570,7 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
   }
 
   const p = PAYROLL_RULE_PACK_CA;
-  const validProvinces: CaJurisdiction[] = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'ON', 'PE', 'SK', 'NT', 'NU', 'YT'];
+  const validProvinces: CaJurisdiction[] = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'ON', 'PE', 'SK', 'NT', 'NU', 'YT', 'QC'];
   const seen = new Set<string>();
 
   const employees = input.employees.map(employee => {
@@ -431,13 +587,8 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     }
     seen.add(employeeId);
 
-    if ((employee.province_of_employment as string) === 'QC') {
-      const error = new Error(`province_of_employment QC (Quebec) is not implemented for ${employeeId} — Quebec requires a separate Revenu Quebec engine (see limitations)`);
-      (error as Error & { status?: number }).status = 409;
-      throw error;
-    }
     if (!validProvinces.includes(employee.province_of_employment)) {
-      const error = new Error(`province_of_employment for ${employeeId} must be one of ${validProvinces.join(', ')} (Quebec is rejected, not approximated)`);
+      const error = new Error(`province_of_employment for ${employeeId} must be one of ${validProvinces.join(', ')}`);
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
@@ -451,93 +602,180 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     const grossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
     const ytdBefore = requireNonNegativeMoney(employee.ytd_earnings_before, `ytd_earnings_before for ${employeeId}`);
 
-    // --- CPP1, CPP2 ---
-    // v2 fix (see limitations / v2 change log): the YBE ($3,500/yr) exemption
-    // is applied as a PERIOD-PRORATED subtraction every pay period (CRA
-    // T4127's real per-period formula), not front-loaded against YTD
-    // earnings. The YMPE ceiling still uses YTD earnings, so pensionable
-    // earnings this period are capped at the remaining room to YMPE first,
-    // then the prorated exemption is subtracted from that capped amount.
-    const periodExemption = money(p.cpp.ybe_annual / periodsPerYear);
-    const pensionableThisPeriod = Math.max(0, Math.min(grossPay, p.cpp.ympe_annual - ytdBefore));
-    const cpp1ContributoryEarnings = Math.max(0, money(pensionableThisPeriod - periodExemption));
-    // Bill C-30 base-rate cut (see the cpp rule-pack comment above):
-    // selected by pay_date, not calendar date of the run, so a payroll
-    // whose pay_date is still in 2026 uses the pre-cut rate even if
-    // processed in early 2027, and vice versa.
-    const cppBaseRate = input.pay_date >= '2027-01-01' ? p.cpp.base_rate_from_2027 : p.cpp.base_rate_before_2027;
-    // NOT money() -- that helper rounds to cents and would corrupt a
-    // fractional rate (0.0575 -> 0.06). Rates are combined with plain
-    // addition; both operands are exact-enough decimal literals that
-    // floating-point drift isn't a real concern at this magnitude.
-    const cppTotalRate = cppBaseRate + p.cpp.additional_rate;
-    const employeeCpp1 = money(cpp1ContributoryEarnings * cppTotalRate);
-    const employerCpp1 = employeeCpp1;
-    const employeeCpp2 = bandedContribution(ytdBefore, grossPay, p.cpp.ympe_annual, p.cpp.yampe_annual, p.cpp.cpp2_rate);
-    const employerCpp2 = employeeCpp2;
+    let employeeCpp1 = 0, employerCpp1 = 0, employeeCpp2 = 0, employerCpp2 = 0;
+    let employeeQpp1 = 0, employerQpp1 = 0, employeeQpp2 = 0, employerQpp2 = 0;
+    let employeeQpip = 0, employerQpip = 0;
+    let employeeEi = 0, employerEi = 0;
+    let federalIncomeTax = 0, provincialIncomeTax = 0;
+    let ytdQpipAfter = 0;
 
-    // --- EI ---
-    const employeeEi = bandedContribution(ytdBefore, grossPay, 0, p.ei.max_insurable_annual, p.ei.employee_rate);
-    const employerEi = money(employeeEi * p.ei.employer_multiple);
+    if (employee.province_of_employment === 'QC') {
+      // ========================= QUEBEC (v5) =========================
+      // See the "quebec" block in PAYROLL_RULE_PACK_CA and the v5
+      // limitations entries for full sourcing and disclosed gaps. QPP
+      // REPLACES CPP entirely -- employeeCpp1/employerCpp1/employeeCpp2/
+      // employerCpp2 stay 0 for every Quebec employee.
+      const qc = p.quebec;
+      const ytdQpipBefore = requireNonNegativeMoney(employee.ytd_qpip_insurable_before ?? 0, `ytd_qpip_insurable_before for ${employeeId}`);
 
-    // --- Federal income tax ---
-    // v2 fix: now implements the K2 (base-CPP credit), K3 (EI credit), and
-    // K4 (Canada Employment Amount credit) non-refundable credits, plus the
-    // F5A deduction (the "additional"/enhanced 1% CPP1 portion is deducted
-    // from taxable income A, not credited) -- all previously missing.
-    // Verified to the exact cent against 4 independent CRA T4127 golden
-    // fixtures (AB/BC/NT/NU) before shipping. Still an annualize-and-divide
-    // approximation of Option 1, not true cumulative Option 2 -- see
-    // limitations.
-    const annualGross = money(grossPay * periodsPerYear);
-    const cpp1BaseAnnual = money(cpp1ContributoryEarnings * cppBaseRate * periodsPerYear);
-    const cpp1AdditionalAnnual = money(cpp1ContributoryEarnings * p.cpp.additional_rate * periodsPerYear);
-    const annualTaxableIncomeA = Math.max(0, money(annualGross - cpp1AdditionalAnnual));
-    const federalGross = federalTaxBeforeCredit(annualTaxableIncomeA, p.federal.brackets);
-    const bpaf = linearTaper(annualTaxableIncomeA, p.federal.bpaf_taper_start, p.federal.bpaf_taper_end, p.federal.bpaf_full, p.federal.bpaf_min);
-    const lowestFederalRate = p.federal.brackets[0][1];
-    const k1Bpaf = money(bpaf * lowestFederalRate);
-    const k2Cpp = money(cpp1BaseAnnual * lowestFederalRate);
-    const k3Ei = money(employeeEi * periodsPerYear * lowestFederalRate);
-    const k4CanadaEmployment = money(Math.min(p.federal.canada_employment_amount, annualGross) * lowestFederalRate);
-    const annualFederalTax = Math.max(0, money(federalGross - k1Bpaf - k2Cpp - k3Ei - k4CanadaEmployment));
-    const federalIncomeTax = money(annualFederalTax / periodsPerYear);
+      // --- QPP1, QPP2 ---
+      // Golden fixture CA-QC-001 ($1,000/month, QPP expected = $44.63)
+      // reproduces exactly ONLY when the $3,500/12 period exemption is
+      // NOT pre-rounded to cents before subtraction (unlike the CPP path
+      // above, which DOES pre-round and is independently verified correct
+      // against its own CRA fixtures) -- i.e. 1000 - 291.6666... = 708.3333,
+      // x 6.30% = 44.625, which rounds to 44.63. Pre-rounding the exemption
+      // to 291.67 first gives 708.33 x 6.30% = 44.62 instead, one cent off
+      // the fixture. Kept as an unrounded intermediate deliberately, per
+      // the fixture's own trace line ("QPP = 6.30% x (1,000 - 3,500/12)").
+      const qppPeriodExemption = qc.qpp.ybe_annual / periodsPerYear;
+      const qppPensionableThisPeriod = Math.max(0, Math.min(grossPay, qc.qpp.ympe_annual - ytdBefore));
+      const qpp1ContributoryEarnings = Math.max(0, qppPensionableThisPeriod - qppPeriodExemption);
+      const qpp1TotalRate = qc.qpp.base_rate + qc.qpp.additional_rate;
+      employeeQpp1 = money(qpp1ContributoryEarnings * qpp1TotalRate);
+      employerQpp1 = employeeQpp1;
+      employeeQpp2 = bandedContribution(ytdBefore, grossPay, qc.qpp.ympe_annual, qc.qpp.yampe_annual, qc.qpp.qpp2_rate);
+      employerQpp2 = employeeQpp2;
 
-    // --- Provincial/territorial income tax ---
-    // v2 fix: applies the same discovered pattern as federal -- bracket
-    // lookup against A (not raw annualized gross), then a BPA credit PLUS
-    // provincial-equivalent CPP and EI credits, all at the province's own
-    // lowest bracket rate. Verified to the exact cent against all 4
-    // non-Quebec golden fixtures (AB/BC/NT/NU) before shipping. Alberta's
-    // own additional K5P supplemental credit (((K1P+K2P)-$4,896) x 25%) is
-    // still NOT modeled -- it did not affect the one AB fixture available
-    // this pass, but may matter at other income levels; see limitations.
-    const prov = p.provinces[employee.province_of_employment];
-    const provGross = bracketLookup(annualTaxableIncomeA, prov.brackets);
-    const lowestProvRate = prov.brackets[0][2];
-    let bpaProvincial: number;
-    if (employee.province_of_employment === 'YT') {
-      bpaProvincial = bpaf; // BPAYT mirrors the federal BPAF taper
-    } else if ('bpa_full' in prov) {
-      bpaProvincial = linearTaper(annualTaxableIncomeA, prov.bpa_taper_start, prov.bpa_taper_end, prov.bpa_full, prov.bpa_min);
+      // --- QPIP (own accumulator -- own maximum, $103,000, distinct from
+      // both the QPP YMPE and the federal EI maximum) ---
+      employeeQpip = bandedContribution(ytdQpipBefore, grossPay, 0, qc.qpip.max_insurable_annual, qc.qpip.employee_rate);
+      employerQpip = money(bandedContribution(ytdQpipBefore, grossPay, 0, qc.qpip.max_insurable_annual, qc.qpip.employer_rate));
+      ytdQpipAfter = money(ytdQpipBefore + Math.max(0, Math.min(ytdQpipBefore + grossPay, qc.qpip.max_insurable_annual) - ytdQpipBefore));
+
+      // --- Federal EI, Quebec's reduced rate (still federal, same $68,900
+      // maximum insurable earnings as the rest of Canada) ---
+      employeeEi = bandedContribution(ytdBefore, grossPay, 0, qc.ei.max_insurable_annual, qc.ei.employee_rate);
+      employerEi = money(employeeEi * qc.ei.employer_multiple);
+
+      // --- Federal income tax for Quebec employees ---
+      // Same K1/K3/K4 federal credit machinery as the rest of Canada, but
+      // K2 (the CPP-or-QPP-base credit) uses the QPP base rate actually
+      // paid, and the resulting tax is reduced by the 16.5% Quebec federal
+      // abatement -- see limitations for what's not modeled (a possible
+      // QPIP-specific federal credit analog).
+      const annualGross = money(grossPay * periodsPerYear);
+      const qpp1BaseAnnual = money(qpp1ContributoryEarnings * qc.qpp.base_rate * periodsPerYear);
+      const qpp1AdditionalAnnual = money(qpp1ContributoryEarnings * qc.qpp.additional_rate * periodsPerYear);
+      const annualTaxableIncomeA = Math.max(0, money(annualGross - qpp1AdditionalAnnual));
+      const federalGross = federalTaxBeforeCredit(annualTaxableIncomeA, p.federal.brackets);
+      const bpaf = linearTaper(annualTaxableIncomeA, p.federal.bpaf_taper_start, p.federal.bpaf_taper_end, p.federal.bpaf_full, p.federal.bpaf_min);
+      const lowestFederalRate = p.federal.brackets[0][1];
+      const k1Bpaf = money(bpaf * lowestFederalRate);
+      const k2Qpp = money(qpp1BaseAnnual * lowestFederalRate);
+      const k3Ei = money(employeeEi * periodsPerYear * lowestFederalRate);
+      const k4CanadaEmployment = money(Math.min(p.federal.canada_employment_amount, annualGross) * lowestFederalRate);
+      const annualFederalTaxBeforeAbatement = Math.max(0, money(federalGross - k1Bpaf - k2Qpp - k3Ei - k4CanadaEmployment));
+      const annualFederalTax = money(annualFederalTaxBeforeAbatement * (1 - qc.federal_abatement_rate));
+      federalIncomeTax = money(annualFederalTax / periodsPerYear);
+
+      // --- Quebec provincial income tax ---
+      // Reconstructed deduction-based formula (QPP + QPIP employee
+      // contributions deducted from annualized gross before the QC
+      // bracket table, then a BPA credit at 14%) -- see the v5
+      // limitations entry for exactly what was and was not independently
+      // confirmed against the primary TP-1015.F-V formula text.
+      const qppAnnualTotal = money(qpp1BaseAnnual + qpp1AdditionalAnnual + money(employeeQpp2 * periodsPerYear));
+      const qpipAnnualTotal = money(employeeQpip * periodsPerYear);
+      const qcTaxableIncome = Math.max(0, money(annualGross - qppAnnualTotal - qpipAnnualTotal));
+      const qcGross = bracketLookup(qcTaxableIncome, qc.tax.brackets);
+      const qcBpaCredit = money(qc.tax.bpa_annual * qc.tax.bpa_credit_rate);
+      const annualProvincialTax = Math.max(0, money(qcGross - qcBpaCredit));
+      provincialIncomeTax = money(annualProvincialTax / periodsPerYear);
     } else {
-      bpaProvincial = (prov as { bpa_annual: number }).bpa_annual;
-    }
-    const provK1Bpa = money(bpaProvincial * lowestProvRate);
-    const provK2Cpp = money(cpp1BaseAnnual * lowestProvRate);
-    const provK3Ei = money(employeeEi * periodsPerYear * lowestProvRate);
-    let annualProvincialTax = Math.max(0, money(provGross - provK1Bpa - provK2Cpp - provK3Ei));
-    if (employee.province_of_employment === 'BC') {
-      const bc = p.provinces.BC;
-      let reduction = 0;
-      if (annualTaxableIncomeA <= bc.reduction_threshold_1) {
-        reduction = Math.min(annualProvincialTax, bc.reduction_max);
-      } else if (annualTaxableIncomeA <= bc.reduction_threshold_2) {
-        reduction = Math.min(annualProvincialTax, money(bc.reduction_max - (annualTaxableIncomeA - bc.reduction_threshold_1) * bc.reduction_taper_rate));
+      // --- CPP1, CPP2 ---
+      // v2 fix (see limitations / v2 change log): the YBE ($3,500/yr) exemption
+      // is applied as a PERIOD-PRORATED subtraction every pay period (CRA
+      // T4127's real per-period formula), not front-loaded against YTD
+      // earnings. The YMPE ceiling still uses YTD earnings, so pensionable
+      // earnings this period are capped at the remaining room to YMPE first,
+      // then the prorated exemption is subtracted from that capped amount.
+      const periodExemption = money(p.cpp.ybe_annual / periodsPerYear);
+      const pensionableThisPeriod = Math.max(0, Math.min(grossPay, p.cpp.ympe_annual - ytdBefore));
+      const cpp1ContributoryEarnings = Math.max(0, money(pensionableThisPeriod - periodExemption));
+      // Bill C-30 base-rate cut (see the cpp rule-pack comment above):
+      // selected by pay_date, not calendar date of the run, so a payroll
+      // whose pay_date is still in 2026 uses the pre-cut rate even if
+      // processed in early 2027, and vice versa.
+      const cppBaseRate = input.pay_date >= '2027-01-01' ? p.cpp.base_rate_from_2027 : p.cpp.base_rate_before_2027;
+      // NOT money() -- that helper rounds to cents and would corrupt a
+      // fractional rate (0.0575 -> 0.06). Rates are combined with plain
+      // addition; both operands are exact-enough decimal literals that
+      // floating-point drift isn't a real concern at this magnitude.
+      const cppTotalRate = cppBaseRate + p.cpp.additional_rate;
+      employeeCpp1 = money(cpp1ContributoryEarnings * cppTotalRate);
+      employerCpp1 = employeeCpp1;
+      employeeCpp2 = bandedContribution(ytdBefore, grossPay, p.cpp.ympe_annual, p.cpp.yampe_annual, p.cpp.cpp2_rate);
+      employerCpp2 = employeeCpp2;
+
+      // --- EI ---
+      employeeEi = bandedContribution(ytdBefore, grossPay, 0, p.ei.max_insurable_annual, p.ei.employee_rate);
+      employerEi = money(employeeEi * p.ei.employer_multiple);
+
+      // --- Federal income tax ---
+      // v2 fix: now implements the K2 (base-CPP credit), K3 (EI credit), and
+      // K4 (Canada Employment Amount credit) non-refundable credits, plus the
+      // F5A deduction (the "additional"/enhanced 1% CPP1 portion is deducted
+      // from taxable income A, not credited) -- all previously missing.
+      // Verified to the exact cent against 4 independent CRA T4127 golden
+      // fixtures (AB/BC/NT/NU) before shipping. Still an annualize-and-divide
+      // approximation of Option 1, not true cumulative Option 2 -- see
+      // limitations.
+      const annualGross = money(grossPay * periodsPerYear);
+      const cpp1BaseAnnual = money(cpp1ContributoryEarnings * cppBaseRate * periodsPerYear);
+      const cpp1AdditionalAnnual = money(cpp1ContributoryEarnings * p.cpp.additional_rate * periodsPerYear);
+      const annualTaxableIncomeA = Math.max(0, money(annualGross - cpp1AdditionalAnnual));
+      const federalGross = federalTaxBeforeCredit(annualTaxableIncomeA, p.federal.brackets);
+      const bpaf = linearTaper(annualTaxableIncomeA, p.federal.bpaf_taper_start, p.federal.bpaf_taper_end, p.federal.bpaf_full, p.federal.bpaf_min);
+      const lowestFederalRate = p.federal.brackets[0][1];
+      const k1Bpaf = money(bpaf * lowestFederalRate);
+      const k2Cpp = money(cpp1BaseAnnual * lowestFederalRate);
+      const k3Ei = money(employeeEi * periodsPerYear * lowestFederalRate);
+      const k4CanadaEmployment = money(Math.min(p.federal.canada_employment_amount, annualGross) * lowestFederalRate);
+      const annualFederalTax = Math.max(0, money(federalGross - k1Bpaf - k2Cpp - k3Ei - k4CanadaEmployment));
+      federalIncomeTax = money(annualFederalTax / periodsPerYear);
+
+      // --- Provincial/territorial income tax ---
+      // v2 fix: applies the same discovered pattern as federal -- bracket
+      // lookup against A (not raw annualized gross), then a BPA credit PLUS
+      // provincial-equivalent CPP and EI credits, all at the province's own
+      // lowest bracket rate. Verified to the exact cent against all 4
+      // non-Quebec golden fixtures (AB/BC/NT/NU) before shipping. Alberta's
+      // own additional K5P supplemental credit (((K1P+K2P)-$4,896) x 25%) is
+      // still NOT modeled -- it did not affect the one AB fixture available
+      // this pass, but may matter at other income levels; see limitations.
+      const prov = p.provinces[employee.province_of_employment];
+      const provGross = bracketLookup(annualTaxableIncomeA, prov.brackets);
+      const lowestProvRate = prov.brackets[0][2];
+      let bpaProvincial: number;
+      if (employee.province_of_employment === 'YT') {
+        bpaProvincial = bpaf; // BPAYT mirrors the federal BPAF taper
+      } else if ('bpa_full' in prov) {
+        bpaProvincial = linearTaper(annualTaxableIncomeA, prov.bpa_taper_start, prov.bpa_taper_end, prov.bpa_full, prov.bpa_min);
+      } else {
+        bpaProvincial = (prov as { bpa_annual: number }).bpa_annual;
       }
-      annualProvincialTax = Math.max(0, money(annualProvincialTax - reduction));
+      const provK1Bpa = money(bpaProvincial * lowestProvRate);
+      const provK2Cpp = money(cpp1BaseAnnual * lowestProvRate);
+      const provK3Ei = money(employeeEi * periodsPerYear * lowestProvRate);
+      let annualProvincialTax = Math.max(0, money(provGross - provK1Bpa - provK2Cpp - provK3Ei));
+      if (employee.province_of_employment === 'BC') {
+        const bc = p.provinces.BC;
+        let reduction = 0;
+        if (annualTaxableIncomeA <= bc.reduction_threshold_1) {
+          reduction = Math.min(annualProvincialTax, bc.reduction_max);
+        } else if (annualTaxableIncomeA <= bc.reduction_threshold_2) {
+          reduction = Math.min(annualProvincialTax, money(bc.reduction_max - (annualTaxableIncomeA - bc.reduction_threshold_1) * bc.reduction_taper_rate));
+        }
+        annualProvincialTax = Math.max(0, money(annualProvincialTax - reduction));
+      }
+      provincialIncomeTax = money(annualProvincialTax / periodsPerYear);
     }
-    const provincialIncomeTax = money(annualProvincialTax / periodsPerYear);
+
+    // --- QC Health Services Fund (FSS/HSF), employer-only; see limitations ---
+    const employerFss = (employee.province_of_employment === 'QC' && employee.qc_fss_rate !== undefined)
+      ? money(grossPay * (employee.qc_fss_rate as number))
+      : 0;
 
     // --- WCB/WSIB (employer only; see limitations) ---
     const wcbRateProvided = employee.wcb_rate !== undefined;
@@ -559,10 +797,10 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
       ? money(ytdWcbBefore + Math.max(0, Math.min(ytdWcbBefore + grossPay, wcbCeiling) - ytdWcbBefore))
       : ytdWcbBefore;
 
-    const employeeTaxTotal = money(federalIncomeTax + provincialIncomeTax + employeeCpp1 + employeeCpp2 + employeeEi);
+    const employeeTaxTotal = money(federalIncomeTax + provincialIncomeTax + employeeCpp1 + employeeCpp2 + employeeQpp1 + employeeQpp2 + employeeQpip + employeeEi);
     const netPay = money(grossPay - employeeTaxTotal);
-    const employerCppEi = money(employerCpp1 + employerCpp2 + employerEi);
-    const employerFundedTotal = money(grossPay + employerCppEi + employerWcb);
+    const employerCppEi = money(employerCpp1 + employerCpp2 + employerQpp1 + employerQpp2 + employerQpip + employerEi);
+    const employerFundedTotal = money(grossPay + employerCppEi + employerWcb + employerFss);
 
     return {
       employee_id: employeeId,
@@ -577,10 +815,18 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
       employee_ei: employeeEi,
       employer_ei: employerEi,
       employer_wcb: employerWcb,
+      employee_qpp1: employeeQpp1,
+      employer_qpp1: employerQpp1,
+      employee_qpp2: employeeQpp2,
+      employer_qpp2: employerQpp2,
+      employee_qpip: employeeQpip,
+      employer_qpip: employerQpip,
+      employer_fss: employerFss,
       net_pay: netPay,
       employer_funded_total: employerFundedTotal,
       ytd_earnings_after: money(ytdBefore + grossPay),
-      ytd_wcb_assessable_earnings_after: ytdWcbAfter
+      ytd_wcb_assessable_earnings_after: ytdWcbAfter,
+      ytd_qpip_insurable_earnings_after: ytdQpipAfter
     };
   });
 
@@ -599,6 +845,13 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     employee_ei: sum(employees.map(e => e.employee_ei)),
     employer_ei: sum(employees.map(e => e.employer_ei)),
     employer_wcb: sum(employees.map(e => e.employer_wcb)),
+    employee_qpp1: sum(employees.map(e => e.employee_qpp1)),
+    employer_qpp1: sum(employees.map(e => e.employer_qpp1)),
+    employee_qpp2: sum(employees.map(e => e.employee_qpp2)),
+    employer_qpp2: sum(employees.map(e => e.employer_qpp2)),
+    employee_qpip: sum(employees.map(e => e.employee_qpip)),
+    employer_qpip: sum(employees.map(e => e.employer_qpip)),
+    employer_fss: sum(employees.map(e => e.employer_fss)),
     net_pay: sum(employees.map(e => e.net_pay)),
     employer_funded_total: sum(employees.map(e => e.employer_funded_total))
   };
@@ -612,7 +865,14 @@ export function calculateCaPayroll(input: CaPayrollRunInput): CaPayrollRunResult
     { side: 'CREDIT', account_role: 'CPP_PAYABLE', amount: money(totals.employee_cpp1 + totals.employer_cpp1 + totals.employee_cpp2 + totals.employer_cpp2) },
     { side: 'CREDIT', account_role: 'EI_PAYABLE', amount: money(totals.employee_ei + totals.employer_ei) },
     { side: 'DEBIT', account_role: 'EMPLOYER_WCB_EXPENSE', amount: totals.employer_wcb },
-    { side: 'CREDIT', account_role: 'WCB_PAYABLE', amount: totals.employer_wcb }
+    { side: 'CREDIT', account_role: 'WCB_PAYABLE', amount: totals.employer_wcb },
+    // Quebec-only lines (v5) -- always present, 0 when no QC employees.
+    { side: 'DEBIT', account_role: 'EMPLOYER_CPP_EI_EXPENSE', amount: money(totals.employer_qpp1 + totals.employer_qpp2) },
+    { side: 'CREDIT', account_role: 'QPP_PAYABLE', amount: money(totals.employee_qpp1 + totals.employer_qpp1 + totals.employee_qpp2 + totals.employer_qpp2) },
+    { side: 'DEBIT', account_role: 'EMPLOYER_CPP_EI_EXPENSE', amount: totals.employer_qpip },
+    { side: 'CREDIT', account_role: 'QPIP_PAYABLE', amount: money(totals.employee_qpip + totals.employer_qpip) },
+    { side: 'DEBIT', account_role: 'EMPLOYER_FSS_EXPENSE', amount: totals.employer_fss },
+    { side: 'CREDIT', account_role: 'FSS_PAYABLE', amount: totals.employer_fss }
   ];
 
   const journalDebits = money(journal.filter(l => l.side === 'DEBIT').reduce((a, l) => a + l.amount, 0));
@@ -663,16 +923,21 @@ export function payrollEngineSelfTestCA() {
   });
   const eBc = bc.employees[0];
 
-  // Quebec is rejected.
-  let rejected = false;
-  try {
-    calculateCaPayroll({
-      pay_period_start: '2026-07-01', pay_period_end: '2026-07-31', pay_date: '2026-07-31',
-      employees: [{ employee_id: 'QC1', gross_pay: 5000, pay_frequency: 'MONTHLY', province_of_employment: 'QC' as any, ytd_earnings_before: 0 }]
-    });
-  } catch {
-    rejected = true;
-  }
+  // v5: Quebec is now implemented (see the "quebec" block in
+  // PAYROLL_RULE_PACK_CA and the v5 limitations entries). Golden fixture
+  // CA-QC-001: $1,000/month gross, Quebec, 2026-07-31. Expected (per the
+  // user-supplied golden-fixture pack, reproduced to the exact cent):
+  // QPP $44.63 (employee and employer each), EI(QC) $13.00 employee /
+  // $18.20 employer, QPIP $4.30 employee / $6.02 employer. Income is below
+  // both the federal and QC brackets, so federal and QC income tax are
+  // both $0 at this income level -- this fixture therefore verifies
+  // QPP/QPIP/EI-QC only, not the QC bracket/BPA/abatement tax machinery
+  // (see limitations for what remains unverified there).
+  const qc = calculateCaPayroll({
+    pay_period_start: '2026-07-01', pay_period_end: '2026-07-31', pay_date: '2026-07-31',
+    employees: [{ employee_id: 'QC1', gross_pay: 1000, pay_frequency: 'MONTHLY', province_of_employment: 'QC', ytd_earnings_before: 0 }]
+  });
+  const eQc = qc.employees[0];
 
   // v3: WCB/WSIB. $5,000/month gross, hypothetical Ontario WSIB-style rate
   // $3.00 per $100 (0.03 fraction) with a $110,000 annual assessable-
@@ -723,11 +988,17 @@ export function payrollEngineSelfTestCA() {
     eBc.federal_income_tax === 310.53 && eBc.provincial_income_tax === 160.43 &&
     eBc.employee_cpp1 === 220.65 && eBc.employee_ei === 65.2 &&
     bc.controls.journal_balanced &&
-    rejected &&
+    eQc.employee_qpp1 === 44.63 && eQc.employer_qpp1 === 44.63 &&
+    eQc.employee_ei === 13.00 && eQc.employer_ei === 18.20 &&
+    eQc.employee_qpip === 4.30 && eQc.employer_qpip === 6.02 &&
+    eQc.federal_income_tax === 0 && eQc.provincial_income_tax === 0 &&
+    eQc.employee_cpp1 === 0 && eQc.employer_cpp1 === 0 &&
+    eQc.employee_cpp2 === 0 && eQc.employer_cpp2 === 0 &&
+    qc.controls.journal_balanced &&
     eWcb.employer_wcb === 60 && eWcb.ytd_wcb_assessable_earnings_after === 110000 && wcb.controls.journal_balanced &&
     eNoWcb.employer_wcb === 0 && noWcb.controls.journal_balanced &&
     eCppCut.employee_cpp1 === 270.73 && eCppCut.employer_cpp1 === 270.73 && cppCut2027.controls.journal_balanced &&
     eCppPreCut.employee_cpp1 === 280.15 && cppPreCut2026.controls.journal_balanced;
 
-  return { ok, ab, bc, wcb, cppCut2027, cppPreCut2026 };
+  return { ok, ab, bc, qc, wcb, cppCut2027, cppPreCut2026 };
 }
