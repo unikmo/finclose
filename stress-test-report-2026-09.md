@@ -12,11 +12,13 @@
 
 | Outcome | Employee-months | Why |
 |---|---:|---|
-| Processed successfully | 980 | All 8 fully-implemented country engines ran clean |
-| Skipped (known, deliberate gap) | 70 | Canada/Quebec — 10 employees x 7 months. The Canada engine (`lib/payroll-engine-ca.ts`) explicitly rejects `province_of_employment: 'QC'` — Quebec needs its own Revenu Québec formula set (TP-1015.F-V, QPP/QPP2, QPIP) that has never been built. This is a known, deliberate gap, not a bug. |
+| Processed successfully | 1,050 | All 8 fully-implemented country engines ran clean, including Quebec (see update below) |
+| Skipped (known, deliberate gap) | 0 | — |
 | Crashed with a real error | **0** | No engine crashes anywhere in the run. |
 
-**Total: 1,050 rows in, 980 processed, 70 skipped, 0 crashes.**
+**Total: 1,050 rows in, 1,050 processed, 0 skipped, 0 crashes.**
+
+**Update (2026-09-19, follow-up pass):** the original run of this stress test (2026-09-15/16) skipped Canada/Quebec's 70 employee-months (10 employees x 7 months) because `lib/payroll-engine-ca.ts` explicitly rejected `province_of_employment: 'QC'` at the time. A subsequent pass built out Quebec support (QPP replacing CPP, QPIP, Quebec's reduced federal EI rate, and Quebec's own provincial tax — see that file's v5 change log and limitations for full sourcing), and this driver (`stress-test-driver.ts`) was updated to route Quebec rows through it instead of skipping them. Re-running the full dataset now processes all 1,050 rows with zero skips. Every other country's totals in this report are unchanged from the original run.
 
 ---
 
@@ -30,11 +32,11 @@ All figures cover the full 7-month period (Jan-Jul 2026), local currency, per co
 |---|---|---:|---:|---:|
 | United States | USD | 1,430,153.17 | 1,102,011.89 | **380,550.34** |
 | Germany | EUR | 699,781.29 | 433,404.27 | **410,198.70** |
+| Canada (Ontario + Quebec) | CAD | 655,705.46 | 510,355.91 | **198,406.41** |
 | South Africa | ZAR | 578,617.93 | 543,220.61 | **46,371.02** |
 | United Kingdom | GBP | 405,768.19 | 283,242.70 | **166,642.42** |
 | Georgia | GEL | 376,585.86 | 293,736.95 | **96,460.56** |
 | Rwanda | RWF | 339,646.84 | 318,249.05 | **49,588.52** |
-| Canada (Ontario only) | CAD | 333,200.69 | 265,629.33 | **93,785.60** |
 | Mauritius | MUR | 310,432.33 | 302,148.35 | **45,291.58** |
 | Kenya | KES | 304,046.57 | 260,243.11 | **70,106.92** |
 | Cameroon | XAF | 276,722.00 | 262,755.00 | **55,659.00** |
@@ -102,14 +104,30 @@ Germany and the US carry the two largest remittance burdens in absolute terms �
 | **Total (incl. PAYE)** | **49,588.52** |
 *(RAMA and CBHI are both opt-in in this engine and were left off — see §5.)*
 
-### Canada — Ontario only (CAD) — 10 employees, 70 employee-months (Quebec's 10 employees/70 months are SKIPPED, not in this total)
+### Canada — Ontario + Quebec (CAD) — 20 employees, 140 employee-months
+**Update (2026-09-19, follow-up pass):** Quebec is no longer skipped. `lib/payroll-engine-ca.ts` now implements Quebec (QPP replacing CPP, QPIP, Quebec's reduced federal EI rate, and Quebec's own provincial tax) — see that file's v5 change log and limitations for full sourcing. All 70 previously-skipped Quebec employee-months (10 employees x 7 months) now process cleanly; **0 Canada rows are skipped**. The two provinces use different program sets (QPP is Quebec-only, CPP is everywhere-but-Quebec), so they are broken out separately below rather than merged into misleading combined "CPP+QPP" or "EI" lines.
+
+**Ontario (10 employees, 70 employee-months):**
 | Agency / program | Amount |
 |---|---:|
 | CRA — Federal income tax | 30,221.89 |
 | Ontario — Provincial income tax | 13,307.63 |
 | CRA — CPP (employee + employer, CPP1+CPP2) | 37,221.26 |
-| CRA — EI (employee + employer) | 13,034.82 |
-| **Total** | **93,785.60** |
+| CRA — EI (employee + employer, standard rate) | 13,034.82 |
+| **Ontario total** | **93,785.60** |
+
+**Quebec (10 employees, 70 employee-months):**
+| Agency / program | Amount |
+|---|---:|
+| CRA — Federal income tax (incl. the 16.5% Quebec federal abatement) | 24,618.91 |
+| Revenu Québec — Provincial income tax | 28,548.37 |
+| Retraite Québec — QPP (employee + employer, QPP1+QPP2, replaces CPP) | 38,063.10 |
+| CRA — EI (employee + employer, Quebec's reduced 1.30%/1.82% rate) | 10,062.18 |
+| Revenu Québec — QPIP (employee + employer) | 3,328.25 |
+| **Quebec total** | **104,620.81** |
+*(Quebec's Health Services Fund/FSS and CNESST are not included — the engine has no statutory-default rate for either; see the engine's own disclosed limitations and §5/§6 below.)*
+
+**Combined Canada total (Ontario + Quebec): 198,406.41**
 
 ### Mauritius (MUR) — 10 employees, 70 employee-months (Plaines Wilhems)
 | Agency / program | Amount |
@@ -149,7 +167,9 @@ Germany and the US carry the two largest remittance burdens in absolute terms �
 
 ## 4. Bugs found and fixed
 
-**None.** Every one of the 1,050 rows was traced to completion — 980 succeeded, 70 hit the known/deliberate Quebec gap, and **zero** rows crashed on a genuine engine defect. `run-selftest-all.ts` was re-confirmed green before and after this pass; no changes were made to any `lib/payroll-engine-*.ts` file, and no `status:` field on any rule pack was touched (all remain `DRAFT_NEEDS_LEGAL_REVIEW`).
+**None, in the original 2026-09-15/16 pass.** Every one of the 1,050 rows was traced to completion — 980 succeeded, 70 hit the then-current known/deliberate Quebec gap, and **zero** rows crashed on a genuine engine defect. `run-selftest-all.ts` was re-confirmed green before and after that pass; no changes were made to any `lib/payroll-engine-*.ts` file, and no `status:` field on any rule pack was touched (all remain `DRAFT_NEEDS_LEGAL_REVIEW`).
+
+**Follow-up pass (2026-09-19):** Quebec support was built into `lib/payroll-engine-ca.ts` (see §1 and the Canada section of §3). Re-running the driver with Quebec wired in now processes all 1,050 rows, 0 skipped, still 0 crashes. `run-selftest-all.ts` remains green (see §7) and no `status:` field was touched.
 
 Two things initially looked like crashes but on investigation were correct, by-design engine behavior, not bugs — driver-side fixes only (see §5 for the first, which is a genuine dataset/engine-scope gap; the second was simply a missing default input):
 - **US/NY + 401(k):** the US engine (`lib/payroll-engine-us.ts`) *deliberately* rejects a nonzero `pretax_401k_deferral` for NY employees, because its own documented limitations say NY's wage-base treatment of 401(k)/Section 125 deferrals was never independently verified. This affected 10 NY employees x 7 months = 70 rows and is a genuine, disclosed gap — see §5.
@@ -163,7 +183,7 @@ This is exactly the kind of thing a 1,050-row, 7-month run is supposed to surfac
 
 1. **US/NY 401(k) deferrals are engine-rejected, not just unverified.** 10 of the 40 US employees are NY-based, and several have nonzero `US_401k_Deduction`. The engine's NY path throws rather than approximate. The driver worked around this by running those NY employees' payroll **without** the 401(k) pre-tax reduction applied (i.e., taxed on full gross) so the stress test could still complete — their gross/net figures in this report do **not** reflect the 401(k) deferral. This is a real product gap: a NY employee with an active 401(k) cannot be run through this engine today at all without either dropping the deferral or getting an unverified number. Recommend prioritizing NY 401(k)/Section 125 wage-base verification.
 
-2. **Quebec has zero engine coverage**, confirmed at volume exactly as flagged going in: 10 employees x 7 months = 70 employee-months cleanly skipped, no crash, no guessed numbers.
+2. **Quebec had zero engine coverage** as of the original run, confirmed at volume exactly as flagged going in: 10 employees x 7 months = 70 employee-months cleanly skipped, no crash, no guessed numbers. **Update (2026-09-19):** this gap has since been closed — `lib/payroll-engine-ca.ts` now implements Quebec (QPP/QPIP/reduced EI/QC provincial tax), and all 70 Quebec employee-months now process; see §3's Canada section. Two items remain genuinely unmodeled for Quebec, disclosed rather than guessed: the QC Health Services Fund (FSS/HSF, an employer-size/sector-rated rate with no defensible single default) and CNESST (Quebec's industry-rated workplace-safety premium, which has no computation path in the engine at all, unlike WCB for other provinces).
 
 3. **German BAV (Betriebliche Altersvorsorge) has no dedicated input field.** The DE engine only exposes `taxable_gross_pay` / `sv_gross_pay` (post-any-deferral) — there's no separate "pension deferral amount" parameter. The driver modeled `German_BAV` as reducing both the tax base and the SV base by that amount (a standard deferred-comp treatment), which is a reasonable reading but is a modeling assumption, not a feature the engine itself understands or validates. All 20 DE employees have nonzero BAV every month, so this assumption was exercised on all 140 DE employee-months.
 
@@ -193,7 +213,7 @@ Because the spreadsheet doesn't carry every field each engine needs, the driver 
 - **US:** `federal_filing_status: SINGLE_MFS`, `federal_step2_checkbox: false`; CA: `SINGLE`, 0 regular/estimated allowances; NY: `SINGLE`, 0 allowances; pay frequency `MONTHLY`.
 - **Germany:** tax class I, not church-tax-liable, no childless surcharge, statutory (not private) health insurance.
 - **UK:** tax code `1257L` (standard England/NI cumulative code), NI category A, no student/postgrad loan, auto-enrolled in the workplace pension.
-- **Canada:** province of employment = Ontario for every non-Quebec CA employee (matches the dataset — the only two CA provinces present are Ontario and Quebec); no WCB rate supplied (see below), pay frequency `MONTHLY`.
+- **Canada:** province of employment = Ontario for non-Quebec CA employees, QC for Quebec employees (matches the dataset — the only two CA provinces present are Ontario and Quebec); no WCB rate supplied for Ontario and no `qc_fss_rate` supplied for Quebec (see below), pay frequency `MONTHLY`.
 - **Kenya:** resident status = RESIDENT.
 - **South Africa:** `employee_age: 35` (a plain placeholder — the dataset has no birth-date field), not a medical scheme main member, employer SDL-liable, ETI not claimed.
 - **Rwanda:** employee type REGULAR, first employer = true (progressive PAYE, not the 30% flat non-first-employer rate), not a RAMA member, CBHI not applied (matches this engine's own conservative default — CBHI's net-salary base is explicitly unverified per its rule pack).
@@ -201,7 +221,7 @@ Because the spreadsheet doesn't carry every field each engine needs, the driver 
 - **Cameroon:** sector regime GENERAL_OR_DOMESTIC, CNPS occupational-risk group A (lowest risk), not CFC/FNE-exempt, not CRTV-exempt.
 - **Georgia:** pension participant = true for every employee (the dataset has no opt-out signal).
 - **Pay dates:** the 28th of each 2026 calendar month (Jan-Jul), chosen to be safely inside every month regardless of month length.
-- **Canada WCB and US SUI** were left uncomputed (both fields are optional and employer-/board-specific-rate-dependent per those engines' own design — no statutory default exists, and the dataset supplies no rate). This means the US and Canada "remit" totals in §2/§3 are understated by whatever SUI/WCB premiums a real employer would owe; flagged rather than guessed at.
+- **Canada WCB, Quebec FSS, and US SUI** were left uncomputed (all are optional and employer-size-/sector-/board-specific-rate-dependent per those engines' own design — no statutory default exists, and the dataset supplies no rate). This means the US and Canada "remit" totals in §2/§3 are understated by whatever SUI/WCB/FSS premiums a real employer would owe; flagged rather than guessed at. Quebec's CNESST premium is additionally not computed because the engine has no CNESST calculation path at all yet (unlike WCB/FSS, which are at least optional caller-supplied-rate fields).
 
 ---
 

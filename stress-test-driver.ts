@@ -130,7 +130,7 @@ type UsYtd = {
   ytd_futa_wages_before: number;
 };
 type DeYtd = { ytd_sv_gross_before: number };
-type CaYtd = { ytd_earnings_before: number };
+type CaYtd = { ytd_earnings_before: number; ytd_qpip_insurable_before?: number };
 type MuYtd = { cumulative_emoluments_before: number; paye_withheld_ytd_before: number; sequence: number };
 type GeYtd = { ytd_taxable_salary_before: number };
 
@@ -271,29 +271,45 @@ for (const [employeeId, rows] of byEmployee) {
           break;
         }
         case 'Canada': {
-          if (row.State_Province === 'Quebec') {
-            recordSkip('Canada', employeeId, month, 'Quebec has no engine implementation (province_of_employment "QC" is explicitly rejected by payroll-engine-ca.ts) -- known, deliberate gap.');
-            skipRows++;
-            continue;
-          }
-          const prev = caYtd.get(employeeId) || { ytd_earnings_before: 0 };
+          // v5 follow-up (2026-09-19): Quebec is no longer skipped now that
+          // payroll-engine-ca.ts implements it (see PAYROLL_RULE_PACK_CA's
+          // "quebec" block and the engine's own v5 limitations). Every other
+          // province in this driver is (pre-existing behavior, unchanged
+          // here) hardcoded to 'ON' rather than the row's actual
+          // State_Province -- out of scope for this pass, which only
+          // restores Quebec rows that were previously hard-skipped.
+          const isQuebec = row.State_Province === 'Quebec';
+          const prev = caYtd.get(employeeId) || { ytd_earnings_before: 0, ytd_qpip_insurable_before: 0 };
           const input: CaEmployeeInput = {
             employee_id: employeeId,
             gross_pay: gross,
             pay_frequency: 'MONTHLY',
-            province_of_employment: 'ON',
-            ytd_earnings_before: prev.ytd_earnings_before
+            province_of_employment: isQuebec ? 'QC' : 'ON',
+            ytd_earnings_before: prev.ytd_earnings_before,
+            ...(isQuebec ? { ytd_qpip_insurable_before: prev.ytd_qpip_insurable_before || 0 } : {})
           };
           const result = calculateCaPayroll({ pay_period_start: ps, pay_period_end: pe, pay_date: pd, employees: [input] });
           const e = result.employees[0];
-          caYtd.set(employeeId, { ytd_earnings_before: e.ytd_earnings_after });
-          const lines: RemittanceLine[] = [
+          caYtd.set(employeeId, {
+            ytd_earnings_before: e.ytd_earnings_after,
+            ytd_qpip_insurable_before: isQuebec ? e.ytd_qpip_insurable_earnings_after : prev.ytd_qpip_insurable_before
+          });
+          const lines: RemittanceLine[] = isQuebec ? [
+            { agency: 'CRA - Federal Income Tax', amount: e.federal_income_tax },
+            { agency: 'Revenu Quebec - Provincial Income Tax', amount: e.provincial_income_tax },
+            { agency: 'Retraite Quebec - QPP (Employee + Employer, QPP1 + QPP2)', amount: money(e.employee_qpp1 + e.employer_qpp1 + e.employee_qpp2 + e.employer_qpp2) },
+            { agency: 'CRA - EI, Quebec reduced rate (Employee + Employer)', amount: money(e.employee_ei + e.employer_ei) },
+            { agency: 'Revenu Quebec - QPIP (Employee + Employer)', amount: money(e.employee_qpip + e.employer_qpip) }
+          ] : [
             { agency: 'CRA - Federal Income Tax', amount: e.federal_income_tax },
             { agency: 'Ontario - Provincial Income Tax', amount: e.provincial_income_tax },
             { agency: 'CRA - CPP (Employee + Employer, CPP1 + CPP2)', amount: money(e.employee_cpp1 + e.employer_cpp1 + e.employee_cpp2 + e.employer_cpp2) },
             { agency: 'CRA - EI (Employee + Employer)', amount: money(e.employee_ei + e.employer_ei) }
           ];
           recordSuccess('Canada', 'CAD', employeeId, month, e.gross_pay, e.net_pay, lines);
+          if (isQuebec) {
+            gapsFound.add('Canada (Quebec): QC Health Services Fund (FSS) and CNESST are not modeled in this driver run -- no qc_fss_rate supplied (employer-size/sector-specific, no statutory default per the engine\'s own disclosed limitation), and CNESST has no computation path in the engine at all. Employer remittance totals for Quebec rows therefore exclude both.');
+          }
           break;
         }
         case 'UK': {
