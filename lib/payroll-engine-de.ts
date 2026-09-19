@@ -1,4 +1,17 @@
-// Germany (DE) payroll rule pack — v4.
+// Germany (DE) payroll rule pack — v6.
+//
+// v6 change log (from v5): adds a dedicated betriebliche Altersvorsorge
+// (bAV) / Entgeltumwandlung input (bav_salary_sacrifice_deferral) with the
+// correct asymmetric §3 Nr. 63 EStG (8% of the RV Beitragsbemessungsgrenze,
+// tax-exempt) / §1 Abs. 1 Satz 1 Nr. 9 SvEV (4% of the same ceiling,
+// additionally SV-exempt) treatment, tracked via two separate YTD ceilings,
+// plus the mandatory §1a Abs. 1a BetrAVG 15% employer subsidy on the
+// SV-exempt portion. Previously there was no dedicated field for this — a
+// caller had to pre-net taxable_gross_pay/sv_gross_pay by hand using a
+// generic pre-tax-deduction assumption, which cannot represent the real
+// (asymmetric) rule. See the evidence/limitations entries for full detail
+// and what is still NOT modeled (one-time-payment bAV; whether the
+// employer's own subsidy counts toward the employee's ceilings).
 //
 // STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
@@ -95,6 +108,26 @@ export type DeEmployeeInput = {
   // formula to it).
   private_health_premium?: number;
   private_care_premium?: number;
+  // bAV (betriebliche Altersvorsorge) salary-sacrifice deferral (Entgelt-
+  // umwandlung) for this period — v6. This is the amount of REGULAR pay
+  // (not one-time payments; those are out of scope) the employee converts
+  // into employer-side pension contributions (Direktversicherung/
+  // Pensionskasse/Pensionsfonds under §3 Nr. 63 EStG). taxable_gross_pay and
+  // sv_gross_pay above must still be supplied as the employee's FULL regular
+  // gross pay BEFORE this deferral — the engine applies the deferral's
+  // (asymmetric) tax/SV treatment internally, it does not expect the caller
+  // to have already netted it out. Must not exceed either taxable_gross_pay
+  // or sv_gross_pay. See the bAV limitations entry for what is and is not
+  // modeled (e.g. one-time payments are excluded from BAV treatment here).
+  bav_salary_sacrifice_deferral?: number;
+  // YTD amount of bav_salary_sacrifice_deferral already treated as SV-exempt
+  // this calendar year (against the 4%-of-BBG-RV annual ceiling), and
+  // separately as income-tax-exempt (against the 8%-of-BBG-RV annual
+  // ceiling) — these are two DIFFERENT running totals against two different
+  // ceilings, not the same YTD figure, because the tax-exempt ceiling is
+  // double the SV-exempt one (see the bAV evidence/limitations entries).
+  ytd_bav_sv_exempt_before?: number;
+  ytd_bav_tax_exempt_before?: number;
 };
 
 export type DePayrollRunInput = {
@@ -113,7 +146,9 @@ export type DeJournalLine = {
     | 'INCOME_TAX_PAYABLE'
     | 'SOLIDARITY_SURCHARGE_PAYABLE'
     | 'CHURCH_TAX_PAYABLE'
-    | 'SOCIAL_INSURANCE_PAYABLE';
+    | 'SOCIAL_INSURANCE_PAYABLE'
+    | 'EMPLOYER_BAV_SUBSIDY_EXPENSE'
+    | 'BAV_CONTRIBUTION_PAYABLE';
   amount: number;
 };
 
@@ -138,6 +173,13 @@ export type DeEmployeeResult = {
   net_pay: number;
   employer_funded_total: number;
   ytd_sv_gross_after: number;
+  // bAV (v6) — all zero when bav_salary_sacrifice_deferral is 0/omitted.
+  bav_salary_sacrifice_deferral: number;
+  bav_sv_exempt_amount: number; // portion of the deferral excluded from SV wages this period
+  bav_tax_exempt_amount: number; // portion of the deferral excluded from income-tax wages this period
+  employer_bav_subsidy: number; // mandatory §1a Abs. 1a BetrAVG 15% employer top-up
+  ytd_bav_sv_exempt_after: number;
+  ytd_bav_tax_exempt_after: number;
 };
 
 export type DePayrollRunResult = {
@@ -158,6 +200,8 @@ export type DePayrollRunResult = {
     employer_social_insurance: number;
     net_pay: number;
     employer_funded_total: number;
+    bav_salary_sacrifice_deferral: number;
+    employer_bav_subsidy: number;
   };
   journal: DeJournalLine[];
   controls: {
@@ -213,6 +257,27 @@ export const PAYROLL_RULE_PACK_DE = {
     care_rate_total: 0.036,
     care_childless_surcharge_employee: 0.006
   },
+  bav: {
+    // §3 Nr. 63 EStG: employer contributions to a Direktversicherung/
+    // Pensionskasse/Pensionsfonds (incl. Entgeltumwandlung) are income-tax
+    // exempt up to 8% of the general pension insurance contribution ceiling
+    // (Beitragsbemessungsgrenze der allgemeinen Rentenversicherung, West) —
+    // reuses social_insurance.pension_ceiling_annual (EUR 101,400 for 2026).
+    tax_exempt_rate: 0.08,
+    // § 1 Abs. 1 Satz 1 Nr. 9 SvEV: only HALF of that tax-exempt amount —
+    // 4% of the same ceiling — is also exempt from social-insurance
+    // contributions. The asymmetry means an Entgeltumwandlung amount between
+    // 4% and 8% of the ceiling stays income-tax-free but becomes SV-liable
+    // again.
+    sv_exempt_rate: 0.04,
+    // §1a Abs. 1a BetrAVG (Betriebsrentenstärkungsgesetz): the employer must
+    // add a mandatory 15% subsidy on top of an employee's Entgeltumwandlung
+    // contribution, to the extent the employer actually saves SV
+    // contributions because of the conversion — i.e. only on the portion
+    // that falls within the SV-exempt ceiling above. Applies to contracts
+    // from 2019-01-01 (new) / 2022-01-01 (all contracts, incl. pre-2019).
+    mandatory_employer_subsidy_rate: 0.15
+  },
   evidence: [
     { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Einkommensteuergesetz (EStG) §32a', url: 'https://www.gesetze-im-internet.de/estg/__32a.html' },
     { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Einkommensteuergesetz (EStG) §39b Abs. 3 (Besteuerung sonstiger Bezüge)', url: 'https://www.gesetze-im-internet.de/estg/__39b.html' },
@@ -225,7 +290,11 @@ export const PAYROLL_RULE_PACK_DE = {
     { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialgesetzbuch V (SGB V) §241 (statutory health insurance rate)', url: 'https://www.gesetze-im-internet.de/sgb_5/__241.html' },
     { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialgesetzbuch XI (SGB XI) §55 (statutory care insurance rate)', url: 'https://www.gesetze-im-internet.de/sgb_11/__55.html' },
     { authority: 'Bundesregierung', instrument: '2026 contribution ceilings (Beitragsbemessungsgrenzen): RV/ALV €101,400/yr, KV/PV €69,750/yr', url: 'https://www.bundesregierung.de/breg-de/aktuelles/beitragsgemessungsgrenzen-2386514' },
-    { authority: 'GKV-Spitzenverband', instrument: '2026 Rechengrößen factsheet (SV rates, incl. 2.9% average Zusatzbeitrag)', url: 'https://www.gkv-spitzenverband.de/media/dokumente/presse/zahlen_und_grafiken/20260101_Faktenblatt_Rechengroessen_Beitragsrecht.pdf' }
+    { authority: 'GKV-Spitzenverband', instrument: '2026 Rechengrößen factsheet (SV rates, incl. 2.9% average Zusatzbeitrag)', url: 'https://www.gkv-spitzenverband.de/media/dokumente/presse/zahlen_und_grafiken/20260101_Faktenblatt_Rechengroessen_Beitragsrecht.pdf' },
+    { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Einkommensteuergesetz (EStG) §3 Nr. 63 — employer/salary-sacrifice pension contributions (Direktversicherung, Pensionskasse, Pensionsfonds) are income-tax-exempt up to 8% of the general RV Beitragsbemessungsgrenze', url: 'https://www.gesetze-im-internet.de/estg/__3.html' },
+    { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Sozialversicherungsentgeltverordnung (SvEV) §1 Abs. 1 Satz 1 Nr. 9 — only 4% of the same RV Beitragsbemessungsgrenze (half of the tax-exempt 8%) is additionally exempt from social-insurance contributions', url: 'https://www.gesetze-im-internet.de/svev/__1.html' },
+    { authority: 'Bundesministerium der Justiz (gesetze-im-internet.de)', instrument: 'Betriebsrentengesetz (BetrAVG) §1a Abs. 1a — mandatory 15% employer subsidy on Entgeltumwandlung contributions, to the extent the employer saves social-insurance contributions as a result; may be applied per-employee exactly or as this flat 15% (capped at actual SV savings when that is less than 15%)', url: 'https://www.gesetze-im-internet.de/betravg/__1a.html' },
+    { authority: 'Deutsche Rentenversicherung', instrument: '2026 Beitragsbemessungsgrenze der allgemeinen Rentenversicherung (West), EUR 101,400/yr — the base for both the 8% tax-exempt and 4% SV-exempt bAV ceilings (same figure already used for social_insurance.pension_ceiling_annual above)', url: 'https://www.bundesregierung.de/breg-de/aktuelles/beitragsgemessungsgrenzen-2386514' }
   ],
   limitations: [
     'Tax class I (single, no children, standard case) only. Tax classes II–VI are rejected, not approximated.',
@@ -237,7 +306,8 @@ export const PAYROLL_RULE_PACK_DE = {
     'The statutory health-insurance employee/employer split uses a published national average additional contribution (Zusatzbeitrag), not the employee’s actual fund rate. (The private-insurance employer subsidy formula does not use the Zusatzbeitrag average at all, per statute — validated against real payslips.)',
     'Figures are 2026 values sourced via AI web research (not a professional review) as of September 2026 and must still be verified against the official BMF Programmablaufplan, Sozialversicherungs-Rechengrößenverordnung and SolZG before this pack is marked VERIFIED_BASIC_RULES.',
     'v5 (2026-09-15): pay dates on/after 2027-01-01 are REJECTED with an explicit error rather than silently computed on the 2026 KV/PV contribution ceiling. The GKV-Beitragssatzstabilisierungsgesetz (Bundesgesetzblatt, published 2026-07-29) enacts an extra increase to that ceiling for 2027 beyond the normal annual wage-indexed adjustment, and separately raises the long-term-care (Pflegeversicherung) ceiling to match the health-insurance ceiling for the first time (this file currently assumes they are always equal, via one shared health_ceiling_annual figure — that assumption itself needs re-confirming once the real 2027 ceilings are known, not just the euro value). Secondary sources estimate roughly EUR 72,450/year, but every one explicitly warns the final number isn\'t official yet and isn\'t a simple sum of the regular indexation and the special increase. Reconfirm against the actual Sozialversicherungs-Rechengrößenverordnung for 2027 (typically published autumn/winter) before removing this rejection.',
-    'This engine prepares payroll and accounting outputs only. It does not submit tax or social-insurance filings and does not initiate payments.'
+    'This engine prepares payroll and accounting outputs only. It does not submit tax or social-insurance filings and does not initiate payments.',
+    'bAV / Entgeltumwandlung (v6, new): bav_salary_sacrifice_deferral now gets its own dedicated, correctly-asymmetric treatment rather than the caller having to pre-net taxable_gross_pay/sv_gross_pay by a single generic amount (which cannot represent the real rule, since up to 4% of the RV Beitragsbemessungsgrenze is BOTH tax- and SV-exempt, the next 4% up to 8% is tax-exempt only, and any amount above 8% is fully taxable and SV-liable). Only applied to REGULAR pay — one-time payments (Einmalzahlung) with a bAV component are not modeled; a caller with bAV-eligible bonus pay must still handle that outside this engine. The mandatory §1a Abs. 1a BetrAVG 15% employer subsidy is modeled as 15% of the amount that actually fell within the SV-exempt ceiling this period (the portion on which the employer genuinely saves SV contributions) — this matches the statute\'s own flat-rate option, which caps the subsidy at actual SV savings when those are below 15%, but does not do the alternative "exact, per-employee actual-SV-rate" calculation the law also permits. Whether the employer\'s 15% subsidy itself also counts toward the employee\'s own 4%/8% Beitragsbemessungsgrenze ceilings (a genuinely disputed/technical point in German bAV practice, since the subsidy is legally an employer contribution to the same pension vehicle) is NOT modeled — this engine tracks the ceilings against the employee\'s own converted salary only. Get specialist confirmation on this point before relying on the ceiling tracking for an employee already close to either limit.'
   ]
 };
 
@@ -342,6 +412,7 @@ export function calculateGermanyPayroll(input: DePayrollRunInput): DePayrollRunR
   }
 
   const sv = PAYROLL_RULE_PACK_DE.social_insurance;
+  const bav = PAYROLL_RULE_PACK_DE.bav;
   const seen = new Set<string>();
 
   const employees = input.employees.map(employee => {
@@ -386,11 +457,40 @@ export function calculateGermanyPayroll(input: DePayrollRunInput): DePayrollRunR
       }
     }
 
-    const taxableGross = requireNonNegativeMoney(employee.taxable_gross_pay, `taxable_gross_pay for ${employeeId}`);
-    const svGross = requireNonNegativeMoney(employee.sv_gross_pay, `sv_gross_pay for ${employeeId}`);
+    const taxableGrossBeforeBav = requireNonNegativeMoney(employee.taxable_gross_pay, `taxable_gross_pay for ${employeeId}`);
+    const svGrossBeforeBav = requireNonNegativeMoney(employee.sv_gross_pay, `sv_gross_pay for ${employeeId}`);
     const ezTaxable = requireNonNegativeMoney(employee.one_time_payment_taxable ?? 0, `one_time_payment_taxable for ${employeeId}`);
     const ezSv = requireNonNegativeMoney(employee.one_time_payment_sv ?? 0, `one_time_payment_sv for ${employeeId}`);
     const ytdSvBefore = requireNonNegativeMoney(employee.ytd_sv_gross_before, `ytd_sv_gross_before for ${employeeId}`);
+
+    // bAV / Entgeltumwandlung (v6) — see the change log and evidence above.
+    const bavDeferral = requireNonNegativeMoney(employee.bav_salary_sacrifice_deferral ?? 0, `bav_salary_sacrifice_deferral for ${employeeId}`);
+    if (bavDeferral > taxableGrossBeforeBav || bavDeferral > svGrossBeforeBav) {
+      const error = new Error(`bav_salary_sacrifice_deferral for ${employeeId} cannot exceed taxable_gross_pay or sv_gross_pay`);
+      (error as Error & { status?: number }).status = 400;
+      throw error;
+    }
+    const ytdBavSvExemptBefore = requireNonNegativeMoney(employee.ytd_bav_sv_exempt_before ?? 0, `ytd_bav_sv_exempt_before for ${employeeId}`);
+    const ytdBavTaxExemptBefore = requireNonNegativeMoney(employee.ytd_bav_tax_exempt_before ?? 0, `ytd_bav_tax_exempt_before for ${employeeId}`);
+    const bavSvExemptCeilingAnnual = money(sv.pension_ceiling_annual * bav.sv_exempt_rate);
+    const bavTaxExemptCeilingAnnual = money(sv.pension_ceiling_annual * bav.tax_exempt_rate);
+    // Two INDEPENDENT ceilings (the tax-exempt one is double the SV-exempt
+    // one) — each caps how much of THIS period's deferral gets that
+    // treatment, given what's already been used this year.
+    const bavSvExempt = Math.min(bavDeferral, Math.max(0, money(bavSvExemptCeilingAnnual - ytdBavSvExemptBefore)));
+    const bavTaxExempt = Math.min(bavDeferral, Math.max(0, money(bavTaxExemptCeilingAnnual - ytdBavTaxExemptBefore)));
+    // Mandatory employer subsidy (§1a Abs. 1a BetrAVG) — 15% of the portion
+    // that is actually SV-exempt this period, i.e. the portion on which the
+    // employer genuinely saves SV contributions (see limitations for the
+    // flat-rate-vs-exact-calculation caveat).
+    const employerBavSubsidy = money(bavSvExempt * bav.mandatory_employer_subsidy_rate);
+
+    // Reduced bases used for the tax/SV calculations below — reusing the
+    // existing `taxableGross`/`svGross` names keeps everything downstream
+    // (income tax, pension, health, care, etc.) unchanged. gross_pay/net_pay
+    // are reconciled against bavDeferral directly further down instead.
+    const taxableGross = Math.max(0, money(taxableGrossBeforeBav - bavTaxExempt));
+    const svGross = Math.max(0, money(svGrossBeforeBav - bavSvExempt));
 
     // Pension and unemployment insurance apply regardless of health-insurance type.
     const pensionRegular = ceilingContribution(ytdSvBefore, svGross, sv.pension_ceiling_annual, sv.pension_rate_total / 2);
@@ -489,8 +589,18 @@ export function calculateGermanyPayroll(input: DePayrollRunInput): DePayrollRunR
     const solidarityTax = money(monthlySoliRegular + ezSoli);
     const churchTax = employee.church_tax_liable ? money(incomeTax * (employee.church_tax_rate as number)) : 0;
 
-    const grossPay = money(taxableGross + ezTaxable);
-    const netPay = money(grossPay - incomeTax - solidarityTax - churchTax - employeeSocialTotal);
+    // gross_pay reports the employee's FULL economic regular-pay gross
+    // (before the bAV deferral is carved out), matching how a real German
+    // payslip shows Gesamtbrutto with the Entgeltumwandlung as its own
+    // deduction line, not as a reduction of Brutto itself. net_pay then
+    // subtracts bavDeferral once, directly — taxableGross/svGross above
+    // (already reduced by bavTaxExempt/bavSvExempt) only fed into computing
+    // incomeTax/employeeSocialTotal, so this is not a double subtraction:
+    // for a fully-exempt deferral, grossPay - tax - sv - bavDeferral equals
+    // exactly (grossPay - bavDeferral) - tax - sv, i.e. the same Steuer-/
+    // SV-Brutto a real payslip would compute this from.
+    const grossPay = money(taxableGrossBeforeBav + ezTaxable);
+    const netPay = money(grossPay - incomeTax - solidarityTax - churchTax - employeeSocialTotal - bavDeferral);
 
     return {
       employee_id: employeeId,
@@ -511,8 +621,14 @@ export function calculateGermanyPayroll(input: DePayrollRunInput): DePayrollRunR
       employer_care_insurance: employerCare,
       employer_social_insurance_total: employerSocialTotal,
       net_pay: netPay,
-      employer_funded_total: money(grossPay + employerSocialTotal),
-      ytd_sv_gross_after: money(ytdSvBefore + svGross + ezSv)
+      employer_funded_total: money(grossPay + employerSocialTotal + employerBavSubsidy),
+      ytd_sv_gross_after: money(ytdSvBefore + svGross + ezSv),
+      bav_salary_sacrifice_deferral: bavDeferral,
+      bav_sv_exempt_amount: bavSvExempt,
+      bav_tax_exempt_amount: bavTaxExempt,
+      employer_bav_subsidy: employerBavSubsidy,
+      ytd_bav_sv_exempt_after: money(ytdBavSvExemptBefore + bavSvExempt),
+      ytd_bav_tax_exempt_after: money(ytdBavTaxExemptBefore + bavTaxExempt)
     };
   });
 
@@ -524,17 +640,26 @@ export function calculateGermanyPayroll(input: DePayrollRunInput): DePayrollRunR
     employee_social_insurance: sum(employees.map(e => e.employee_social_insurance_total)),
     employer_social_insurance: sum(employees.map(e => e.employer_social_insurance_total)),
     net_pay: sum(employees.map(e => e.net_pay)),
-    employer_funded_total: sum(employees.map(e => e.employer_funded_total))
+    employer_funded_total: sum(employees.map(e => e.employer_funded_total)),
+    bav_salary_sacrifice_deferral: sum(employees.map(e => e.bav_salary_sacrifice_deferral)),
+    employer_bav_subsidy: sum(employees.map(e => e.employer_bav_subsidy))
   };
 
   const journal: DeJournalLine[] = [
     { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.gross_pay },
     { side: 'DEBIT', account_role: 'EMPLOYER_SOCIAL_INSURANCE_EXPENSE', amount: totals.employer_social_insurance },
+    { side: 'DEBIT', account_role: 'EMPLOYER_BAV_SUBSIDY_EXPENSE', amount: totals.employer_bav_subsidy },
     { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: totals.net_pay },
     { side: 'CREDIT', account_role: 'INCOME_TAX_PAYABLE', amount: totals.income_tax },
     { side: 'CREDIT', account_role: 'SOLIDARITY_SURCHARGE_PAYABLE', amount: totals.solidarity_surcharge },
     { side: 'CREDIT', account_role: 'CHURCH_TAX_PAYABLE', amount: totals.church_tax },
-    { side: 'CREDIT', account_role: 'SOCIAL_INSURANCE_PAYABLE', amount: money(totals.employee_social_insurance + totals.employer_social_insurance) }
+    { side: 'CREDIT', account_role: 'SOCIAL_INSURANCE_PAYABLE', amount: money(totals.employee_social_insurance + totals.employer_social_insurance) },
+    // The employee's own converted salary (bavDeferral) never appears as a
+    // debit here — it was already inside SALARY_EXPENSE (gross_pay is the
+    // FULL pre-conversion gross) and simply doesn't flow to
+    // NET_PAYROLL_PAYABLE. This line is what keeps the journal balanced:
+    // it's owed to the pension provider instead of the employee.
+    { side: 'CREDIT', account_role: 'BAV_CONTRIBUTION_PAYABLE', amount: money(totals.bav_salary_sacrifice_deferral + totals.employer_bav_subsidy) }
   ].filter(line => line.amount !== 0) as DeJournalLine[];
 
   const journalDebits = sum(journal.filter(l => l.side === 'DEBIT').map(l => l.amount));
@@ -739,6 +864,62 @@ export function payrollEngineSelfTestDE() {
     employees: [{ employee_id: 'E2026', taxable_gross_pay: 4000, sv_gross_pay: 4000, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: false, ytd_sv_gross_before: 0, insurance_type: 'STATUTORY' }]
   });
 
+  // Case 9 (v6): bAV Entgeltumwandlung, fully within both the 4% SV-exempt
+  // and 8% tax-exempt ceilings (plenty of YTD room) — both amounts equal
+  // the full deferral, and the mandatory 15% employer subsidy applies to
+  // the whole thing.
+  const bavCase = calculateGermanyPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [
+      { employee_id: 'E011', taxable_gross_pay: 4000, sv_gross_pay: 4000, bav_salary_sacrifice_deferral: 200, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: false, ytd_sv_gross_before: 0, ytd_bav_sv_exempt_before: 0, ytd_bav_tax_exempt_before: 0, insurance_type: 'STATUTORY' }
+    ]
+  });
+  const bav = bavCase.employees[0];
+
+  // Case 10 (v6): the asymmetric-ceiling case the task specifically calls
+  // out — YTD SV-exempt room is nearly exhausted (only 56 of this period's
+  // 200 deferral still fits under the 4%-of-BBG SV-exempt ceiling) while
+  // the 8%-of-BBG tax-exempt ceiling still has full room, so the full 200
+  // stays income-tax-exempt but only 56 stays SV-exempt — svGross must end
+  // up HIGHER than taxableGross for this employee as a direct result.
+  const bbg = PAYROLL_RULE_PACK_DE.social_insurance.pension_ceiling_annual;
+  const svExemptCeiling = money(bbg * PAYROLL_RULE_PACK_DE.bav.sv_exempt_rate); // 4,056
+  const asymmetricCase = calculateGermanyPayroll({
+    pay_period_start: '2026-08-01',
+    pay_period_end: '2026-08-31',
+    pay_date: '2026-08-31',
+    employees: [
+      {
+        employee_id: 'E012',
+        taxable_gross_pay: 4000,
+        sv_gross_pay: 4000,
+        bav_salary_sacrifice_deferral: 200,
+        tax_class: 'I',
+        church_tax_liable: false,
+        childless_surcharge_applicable: false,
+        ytd_sv_gross_before: 0,
+        ytd_bav_sv_exempt_before: money(svExemptCeiling - 56),
+        ytd_bav_tax_exempt_before: 0,
+        insurance_type: 'STATUTORY'
+      }
+    ]
+  });
+  const asym = asymmetricCase.employees[0];
+
+  // Case 11 (v6): bav_salary_sacrifice_deferral exceeding taxable_gross_pay
+  // must be rejected, not silently clamped.
+  let bavOverGrossRejected = false;
+  try {
+    calculateGermanyPayroll({
+      pay_period_start: '2026-08-01', pay_period_end: '2026-08-31', pay_date: '2026-08-31',
+      employees: [{ employee_id: 'E013', taxable_gross_pay: 1000, sv_gross_pay: 1000, bav_salary_sacrifice_deferral: 1500, tax_class: 'I', church_tax_liable: false, childless_surcharge_applicable: false, ytd_sv_gross_before: 0, insurance_type: 'STATUTORY' }]
+    });
+  } catch {
+    bavOverGrossRejected = true;
+  }
+
   return {
     ok:
       e.employee_pension_insurance === expectedPension &&
@@ -779,7 +960,20 @@ export function payrollEngineSelfTestDE() {
       pv.employee_care_insurance === money(200 - expectedPrivateCareSubsidy) &&
       privateCase.controls.journal_balanced &&
       rejected2027 &&
-      stillWorks2026.controls.journal_balanced,
+      stillWorks2026.controls.journal_balanced &&
+      bav.bav_sv_exempt_amount === 200 &&
+      bav.bav_tax_exempt_amount === 200 &&
+      bav.employer_bav_subsidy === money(200 * 0.15) &&
+      bav.net_pay === money(bav.gross_pay - bav.income_tax - bav.solidarity_surcharge - bav.church_tax - bav.employee_social_insurance_total - 200) &&
+      bav.gross_pay === 4000 &&
+      bavCase.controls.journal_balanced &&
+      asym.bav_sv_exempt_amount === 56 &&
+      asym.bav_tax_exempt_amount === 200 &&
+      asym.bav_tax_exempt_amount > asym.bav_sv_exempt_amount &&
+      asym.employer_bav_subsidy === money(56 * 0.15) &&
+      asym.employee_social_insurance_total > bav.employee_social_insurance_total &&
+      asymmetricCase.controls.journal_balanced &&
+      bavOverGrossRejected,
     sample,
     dualBasisCase,
     pensionCeilingCase,
@@ -789,6 +983,8 @@ export function payrollEngineSelfTestDE() {
     bonusCase,
     zeroSoliWithBonus,
     churchTaxCase,
+    bavCase,
+    asymmetricCase,
     privateCase
   };
 }
