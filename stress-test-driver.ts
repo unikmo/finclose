@@ -68,6 +68,67 @@ function grossForRow(row: RawRow): number {
 
 type RemittanceLine = { agency: string; amount: number };
 
+// ---------------------------------------------------------------------------
+// Payslip-register + monthly-remittance detail capture (additive only --
+// reuses the exact same `e` engine-result objects and `lines` arrays the
+// aggregate bookkeeping above already computes; does not change any
+// existing aggregate value).
+// ---------------------------------------------------------------------------
+
+type LineItem = { label: string; amount: number };
+
+type PayslipRow = {
+  employee_id: string;
+  month: string;
+  month_num: string;
+  country: string;
+  state_province: string;
+  currency: string;
+  gross_pay: number;
+  base_pay: number;
+  overtime_pay: number;
+  bonus_pay: number;
+  employee_lines: LineItem[];
+  employer_lines: LineItem[];
+  total_employee_deductions: number;
+  net_pay: number;
+  total_employer_contributions: number;
+  employer_cost_total: number;
+  notes: string;
+};
+
+const payslips: PayslipRow[] = [];
+
+function payComponents(row: RawRow) {
+  if (row.Is_Hourly === 'Yes') {
+    const base = money(row.Base_Rate * row.Hours_Worked);
+    const overtime = money(row.Base_Rate * 1.5 * (row.Overtime_Hours || 0));
+    return { base, overtime, bonus: money(row.Variable_Bonus || 0) };
+  }
+  return { base: money(row.Base_Rate), overtime: 0, bonus: money(row.Variable_Bonus || 0) };
+}
+
+function pushPayslip(p: Omit<PayslipRow, 'total_employee_deductions' | 'total_employer_contributions'>) {
+  const totalEe = money(p.employee_lines.reduce((s, l) => s + l.amount, 0));
+  const totalEr = money(p.employer_lines.reduce((s, l) => s + l.amount, 0));
+  payslips.push({ ...p, total_employee_deductions: totalEe, total_employer_contributions: totalEr });
+}
+
+// country -> month -> agency -> amount (local currency). Built from the same
+// `lines` arrays passed into recordSuccess() for every employee-month, so it
+// is guaranteed to sum to the same 7-month countryAgencyTotals already
+// verified below.
+const monthlyCountryAgencyTotals: Record<string, Record<string, Record<string, number>>> = {};
+function addMonthlyAgency(country: string, month: string, lines: RemittanceLine[]) {
+  monthlyCountryAgencyTotals[country] = monthlyCountryAgencyTotals[country] || {};
+  monthlyCountryAgencyTotals[country][month] = monthlyCountryAgencyTotals[country][month] || {};
+  const bucket = monthlyCountryAgencyTotals[country][month];
+  for (const l of lines) {
+    if (!l.amount) continue;
+    bucket[l.agency] = money((bucket[l.agency] || 0) + l.amount);
+  }
+}
+
 type EmployeeMonthOutcome = {
   employee_id: string;
   month: string;
@@ -227,8 +288,44 @@ for (const [employeeId, rows] of byEmployee) {
             ...(stCode === 'NY' ? [{ agency: 'NY DTF - State/NYC/Yonkers Income Tax + PFL/DBL', amount: money(e.ny_income_tax + e.nyc_income_tax + e.yonkers_tax + e.ny_pfl + e.ny_dbl) }] : [])
           ];
           recordSuccess('US', 'USD', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('US', month, lines);
           if (row.US_401k_Deduction > 0) {
             // supported directly by the engine; nothing to flag.
+          }
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'Federal Income Tax', amount: e.federal_income_tax },
+              { label: 'Social Security (Employee)', amount: e.employee_social_security },
+              { label: 'Medicare (Employee)', amount: e.employee_medicare },
+              { label: 'Additional Medicare (Employee)', amount: e.employee_additional_medicare },
+              { label: '401(k) Deferral (Pre-Tax)', amount: e.pretax_401k_deferral },
+              ...(stCode === 'CA' ? [
+                { label: 'CA State Income Tax', amount: e.ca_income_tax },
+                { label: 'CA SDI (Employee)', amount: e.ca_sdi }
+              ] : []),
+              ...(stCode === 'NY' ? [
+                { label: 'NY State Income Tax', amount: e.ny_income_tax },
+                { label: 'NYC Income Tax', amount: e.nyc_income_tax },
+                { label: 'Yonkers Tax', amount: e.yonkers_tax },
+                { label: 'NY Paid Family Leave (Employee)', amount: e.ny_pfl },
+                { label: 'NY Disability Benefits (Employee)', amount: e.ny_dbl }
+              ] : [])
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'Social Security (Employer)', amount: e.employer_social_security },
+              { label: 'Medicare (Employer)', amount: e.employer_medicare },
+              { label: 'FUTA (Employer)', amount: e.employer_futa },
+              { label: 'SUI (Employer)', amount: e.employer_sui }
+            ];
+            const notes = stCode === 'NY' && row.US_401k_Deduction > 0
+              ? '401(k) deferral NOT applied (engine rejects nonzero pretax_401k_deferral for NY) -- full gross taxed.'
+              : '';
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'US', state_province: row.State_Province, currency: 'USD',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_cost_total, notes
+            });
           }
           break;
         }
@@ -267,7 +364,35 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'Sozialversicherung - Pflegeversicherung / Care (Employee + Employer)', amount: money(e.employee_care_insurance + e.employer_care_insurance) }
           ];
           recordSuccess('Germany', 'EUR', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('Germany', month, lines);
           gapsFound.add('Germany: German_BAV has no dedicated engine input; modeled as a pre-tax/pre-SV salary-sacrifice reduction of both taxable_gross_pay and sv_gross_pay (a documented assumption, not a native field).');
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'Income Tax (Lohnsteuer)', amount: e.income_tax },
+              { label: 'Solidarity Surcharge', amount: e.solidarity_surcharge },
+              { label: 'Church Tax', amount: e.church_tax },
+              { label: 'Pension Insurance (Employee)', amount: e.employee_pension_insurance },
+              { label: 'Unemployment Insurance (Employee)', amount: e.employee_unemployment_insurance },
+              { label: 'Health Insurance (Employee)', amount: e.employee_health_insurance },
+              { label: 'Care Insurance (Employee)', amount: e.employee_care_insurance }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'Pension Insurance (Employer)', amount: e.employer_pension_insurance },
+              { label: 'Unemployment Insurance (Employer)', amount: e.employer_unemployment_insurance },
+              { label: 'Health Insurance (Employer)', amount: e.employer_health_insurance },
+              { label: 'Care Insurance (Employer)', amount: e.employer_care_insurance }
+            ];
+            const rawGross = money(pc.base + pc.overtime + pc.bonus);
+            const notes = bav > 0
+              ? `BAV salary-sacrifice deferral of ${bav} applied pre-tax/pre-SV (modeled by reducing gross before the engine call); raw contractual base+bonus = ${rawGross}, gross_pay shown here (${e.gross_pay}) is already net of BAV.`
+              : '';
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Germany', state_province: row.State_Province, currency: 'EUR',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total, notes
+            });
+          }
           break;
         }
         case 'Canada': {
@@ -307,8 +432,45 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'CRA - EI (Employee + Employer)', amount: money(e.employee_ei + e.employer_ei) }
           ];
           recordSuccess('Canada', 'CAD', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('Canada', month, lines);
           if (isQuebec) {
             gapsFound.add('Canada (Quebec): QC Health Services Fund (FSS) and CNESST are not modeled in this driver run -- no qc_fss_rate supplied (employer-size/sector-specific, no statutory default per the engine\'s own disclosed limitation), and CNESST has no computation path in the engine at all. Employer remittance totals for Quebec rows therefore exclude both.');
+          }
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = isQuebec ? [
+              { label: 'Federal Income Tax', amount: e.federal_income_tax },
+              { label: 'Provincial Income Tax (Quebec)', amount: e.provincial_income_tax },
+              { label: 'QPP1 (Employee)', amount: e.employee_qpp1 },
+              { label: 'QPP2 (Employee)', amount: e.employee_qpp2 },
+              { label: 'EI, Quebec Reduced Rate (Employee)', amount: e.employee_ei },
+              { label: 'QPIP (Employee)', amount: e.employee_qpip }
+            ] : [
+              { label: 'Federal Income Tax', amount: e.federal_income_tax },
+              { label: 'Provincial Income Tax (Ontario)', amount: e.provincial_income_tax },
+              { label: 'CPP1 (Employee)', amount: e.employee_cpp1 },
+              { label: 'CPP2 (Employee)', amount: e.employee_cpp2 },
+              { label: 'EI (Employee)', amount: e.employee_ei }
+            ];
+            const employer_lines: LineItem[] = isQuebec ? [
+              { label: 'QPP1 (Employer)', amount: e.employer_qpp1 },
+              { label: 'QPP2 (Employer)', amount: e.employer_qpp2 },
+              { label: 'EI, Quebec Reduced Rate (Employer)', amount: e.employer_ei },
+              { label: 'QPIP (Employer)', amount: e.employer_qpip },
+              { label: 'WCB (Employer)', amount: e.employer_wcb },
+              { label: 'FSS (Employer) -- not modeled, see notes', amount: e.employer_fss }
+            ] : [
+              { label: 'CPP1 (Employer)', amount: e.employer_cpp1 },
+              { label: 'CPP2 (Employer)', amount: e.employer_cpp2 },
+              { label: 'EI (Employer)', amount: e.employer_ei },
+              { label: 'WCB (Employer)', amount: e.employer_wcb }
+            ];
+            const notes = isQuebec ? 'QC Health Services Fund (FSS) and CNESST not modeled by the engine -- excluded from employer cost.' : '';
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Canada', state_province: isQuebec ? 'Quebec' : row.State_Province, currency: 'CAD',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total, notes
+            });
           }
           break;
         }
@@ -329,7 +491,28 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'HMRC - National Insurance (Employee + Employer)', amount: money(e.employee_ni + e.employer_ni) }
           ];
           recordSuccess('UK', 'GBP', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('UK', month, lines);
           gapsFound.add('UK: workplace pension (employee 5% + employer 3% of qualifying earnings) is modeled but excluded from the government-remittance total -- it is paid to a private pension provider, not a UK government agency.');
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'PAYE Income Tax', amount: e.paye_income_tax },
+              { label: 'National Insurance (Employee)', amount: e.employee_ni },
+              { label: 'Student Loan Deduction', amount: e.student_loan_deduction },
+              { label: 'Postgraduate Loan Deduction', amount: e.postgraduate_loan_deduction },
+              { label: 'Workplace Pension (Employee, private -- not remitted to govt)', amount: e.employee_pension }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'National Insurance (Employer)', amount: e.employer_ni },
+              { label: 'Workplace Pension (Employer, private -- not remitted to govt)', amount: e.employer_pension }
+            ];
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'UK', state_province: row.State_Province, currency: 'GBP',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total,
+              notes: 'Workplace pension lines are private, not government remittance -- excluded from Monthly Remittance sheet.'
+            });
+          }
           break;
         }
         case 'Kenya': {
@@ -348,6 +531,26 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'NITA - Industrial Training Levy (Employer)', amount: e.employer_nita }
           ];
           recordSuccess('Kenya', 'KES', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('Kenya', month, lines);
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'PAYE', amount: e.paye },
+              { label: 'NSSF Pension (Employee)', amount: e.employee_nssf },
+              { label: 'SHIF Health (Employee)', amount: e.employee_shif },
+              { label: 'AHL - Affordable Housing Levy (Employee)', amount: e.employee_ahl }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'NSSF Pension (Employer)', amount: e.employer_nssf },
+              { label: 'AHL - Affordable Housing Levy (Employer)', amount: e.employer_ahl },
+              { label: 'NITA - Industrial Training Levy (Employer)', amount: e.employer_nita }
+            ];
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Kenya', state_province: row.State_Province, currency: 'KES',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total, notes: ''
+            });
+          }
           break;
         }
         case 'South Africa': {
@@ -367,8 +570,29 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'SDL (Employer)', amount: e.employer_sdl }
           ];
           recordSuccess('South Africa', 'ZAR', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('South Africa', month, lines);
           if (isExec && row.Exec_Fringe_Benefits > 0) {
             gapsFound.add('South Africa: this engine does not model taxable fringe benefits at all ("gross_pay is assumed to be cash remuneration only" per its own limitations) -- Exec_Fringe_Benefits could not be applied and is excluded from ZA gross/PAYE.');
+          }
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'PAYE (before ETI)', amount: e.paye },
+              { label: 'UIF (Employee)', amount: e.employee_uif }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'UIF (Employer)', amount: e.employer_uif },
+              { label: 'SDL (Employer)', amount: e.employer_sdl },
+              { label: 'Employment Tax Incentive (ETI, reduces PAYE remitted -- shown as negative)', amount: -e.eti }
+            ];
+            const notes = isExec && row.Exec_Fringe_Benefits > 0
+              ? 'Exec_Fringe_Benefits could not be applied -- engine assumes gross_pay is cash remuneration only.'
+              : '';
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'South Africa', state_province: row.State_Province, currency: 'ZAR',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total, notes
+            });
           }
           break;
         }
@@ -390,8 +614,33 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'RSSB - Maternity (Employee + Employer)', amount: money(e.employee_maternity + e.employer_maternity) }
           ];
           recordSuccess('Rwanda', 'RWF', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('Rwanda', month, lines);
           if (isExec && row.Exec_Fringe_Benefits > 0) {
             gapsFound.add('Rwanda: benefit-in-kind is modeled only as vehicle_benefit (10%) / accommodation_benefit (20%) flags, not a caller-supplied cash amount -- Exec_Fringe_Benefits (an arbitrary cash figure) does not map to either flag and was excluded from the PAYE taxable base.');
+          }
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'PAYE', amount: e.paye },
+              { label: 'Pension (Employee)', amount: e.employee_pension },
+              { label: 'Maternity (Employee)', amount: e.employee_maternity },
+              { label: 'RAMA (Employee)', amount: e.employee_rama },
+              { label: 'CBHI (Employee)', amount: e.employee_cbhi }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'Pension (Employer)', amount: e.employer_pension },
+              { label: 'Occupational Hazards (Employer)', amount: e.employer_oh },
+              { label: 'Maternity (Employer)', amount: e.employer_maternity },
+              { label: 'RAMA (Employer)', amount: e.employer_rama }
+            ];
+            const notes = isExec && row.Exec_Fringe_Benefits > 0
+              ? 'Exec_Fringe_Benefits does not map to a vehicle/accommodation benefit-in-kind flag -- excluded from PAYE taxable base.'
+              : '';
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Rwanda', state_province: row.State_Province, currency: 'RWF',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total, notes
+            });
           }
           break;
         }
@@ -420,6 +669,26 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'PRGF (Employer)', amount: e.employer_prgf }
           ];
           recordSuccess('Mauritius', 'MUR', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('Mauritius', month, lines);
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'PAYE', amount: e.paye },
+              { label: 'CSG (Employee)', amount: e.employee_csg },
+              { label: 'NSF (Employee)', amount: e.employee_nsf }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'CSG (Employer)', amount: e.employer_csg },
+              { label: 'NSF (Employer)', amount: e.employer_nsf },
+              { label: 'Training Levy (Employer)', amount: e.employer_training_levy },
+              { label: 'PRGF (Employer)', amount: e.employer_prgf }
+            ];
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Mauritius', state_province: row.State_Province, currency: 'MUR',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total, notes: ''
+            });
+          }
           break;
         }
         case 'Georgia': {
@@ -442,6 +711,23 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'Pension Agency - Pension (Employee + Employer + State)', amount: money(e.employee_pension + e.employer_pension + e.state_pension) }
           ];
           recordSuccess('Georgia', 'GEL', employeeId, month, e.taxable_salary, e.net_pay, lines);
+          addMonthlyAgency('Georgia', month, lines);
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'Income Tax', amount: e.income_tax },
+              { label: 'Pension (Employee)', amount: e.employee_pension }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'Pension (Employer)', amount: e.employer_pension }
+            ];
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Georgia', state_province: row.State_Province, currency: 'GEL',
+              gross_pay: e.taxable_salary, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total,
+              notes: `State-funded pension top-up of ${e.state_pension} also remitted to the Pension Agency (included in Monthly Remittance) but is government-funded, not a company cost -- excluded from Employer Cost Total.`
+            });
+          }
           break;
         }
         case 'Cameroon': {
@@ -467,6 +753,31 @@ for (const [employeeId, rows] of byEmployee) {
             { agency: 'CRTV - Broadcasting Fee', amount: e.crtv }
           ];
           recordSuccess('Cameroon', 'XAF', employeeId, month, e.gross_pay, e.net_pay, lines);
+          addMonthlyAgency('Cameroon', month, lines);
+          {
+            const pc = payComponents(row);
+            const employee_lines: LineItem[] = [
+              { label: 'IRPP', amount: e.irpp },
+              { label: 'CAC', amount: e.cac },
+              { label: 'CNPS Pension (Employee)', amount: e.employee_cnps_pension },
+              { label: 'CFC - Housing Fund (Employee)', amount: e.employee_cfc },
+              { label: 'TDL - Local Development Tax', amount: e.tdl },
+              { label: 'CRTV - Broadcasting Fee', amount: e.crtv }
+            ];
+            const employer_lines: LineItem[] = [
+              { label: 'CNPS Pension (Employer)', amount: e.employer_cnps_pension },
+              { label: 'CNPS Family Allowance (Employer)', amount: e.employer_cnps_family_allowance },
+              { label: 'CNPS Occupational Risk (Employer)', amount: e.employer_cnps_occupational_risk },
+              { label: 'CFC - Housing Fund (Employer)', amount: e.employer_cfc },
+              { label: 'FNE - Employment Fund (Employer)', amount: e.employer_fne }
+            ];
+            pushPayslip({
+              employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Cameroon', state_province: row.State_Province, currency: 'XAF',
+              gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
+              employee_lines, employer_lines, net_pay: e.net_pay, employer_cost_total: e.employer_funded_total,
+              notes: 'TDL and CRTV are deducted from the employee\'s net pay by the engine, not added to employer cost (see employer_funded_total formula).'
+            });
+          }
           break;
         }
         default:
@@ -528,4 +839,11 @@ fs.writeFileSync('./_stress_test_results.json', JSON.stringify({
   countryGross, countryNet, countryRemit, countryCurrency, countryEmployeeMonths,
   countryAgencyTotals,
   gapsFound: [...gapsFound]
+}, null, 2));
+
+// Detailed payslip register + monthly remittance -- separate file so the
+// existing verified aggregate output above is untouched byte-for-byte.
+fs.writeFileSync('./_stress_test_payslips.json', JSON.stringify({
+  payslips,
+  monthlyCountryAgencyTotals
 }, null, 2));
