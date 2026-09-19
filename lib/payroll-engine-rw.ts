@@ -80,6 +80,22 @@ export type RwEmployeeInput = {
   // GOLDEN fixtures all set CBHI_applicable=false and whose expected net
   // pay figures have zero CBHI deduction.
   cbhi_applicable?: boolean;
+  // Executive/other cash fringe benefit or allowance paid in CASH this
+  // period (e.g. a cash allowance, executive cash perk) — v4. Distinct
+  // from vehicle_benefit/accommodation_benefit above, which are true
+  // benefits-in-kind valued at 10%/20% of employment income and added to
+  // the PAYE base ONLY (never received in cash). A CASH allowance is
+  // ordinary employment income under RRA's PAYE law, AND (per the source's
+  // own RSSB pension-base formula, "Basic Salary + BIK House + BIK Others +
+  // Cash Allowance House + Cash Allowance Others") part of the RSSB
+  // pension/maternity contribution base too — it is added to gross_pay for
+  // PAYE, pension, maternity, and (because the employee actually receives
+  // it) net_pay/CBHI purposes. Omit or 0 leaves every existing caller's
+  // figures unchanged. NOT added to oh_contribution_base by default (OH has
+  // its own unspecified authority-defined base — see limitations) or to
+  // rama_basic_salary (a separately-declared figure this engine does not
+  // infer from gross_pay).
+  exec_cash_fringe_benefit?: number;
 };
 
 export type RwPayrollRunInput = {
@@ -108,6 +124,7 @@ export type RwEmployeeResult = {
   employee_id: string;
   name?: string;
   gross_pay: number;
+  exec_cash_fringe_benefit: number;
   benefit_in_kind: number;
   paye: number;
   employee_pension: number;
@@ -133,6 +150,7 @@ export type RwPayrollRunResult = {
   employees: RwEmployeeResult[];
   totals: {
     gross_pay: number;
+    exec_cash_fringe_benefit: number;
     benefit_in_kind: number;
     paye: number;
     employee_pension: number;
@@ -179,7 +197,13 @@ export const PAYROLL_RULE_PACK_RW = {
   // only computed/deducted when a caller opts in; all five golden fixtures
   // now pass net pay exactly. CBHI's net-salary base itself remains
   // UNVERIFIED and unchanged from v2 — this fix only corrects when it fires.
-  id: 'RW-2026-PAYE-RSSB-RAMA-CBHI-BIK-DRAFT-V3',
+  //
+  // v4: adds exec_cash_fringe_benefit — a cash allowance/benefit is
+  // ordinary employment income (PAYE) and, per the source's own RSSB
+  // pension-base formula, part of the pension/maternity contribution base
+  // too. Distinct from vehicle_benefit/accommodation_benefit, which are
+  // non-cash and only ever affect the PAYE base. See evidence/limitations.
+  id: 'RW-2026-PAYE-RSSB-RAMA-CBHI-BIK-FRINGE-DRAFT-V4',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'RWF',
   paye: {
@@ -202,7 +226,9 @@ export const PAYROLL_RULE_PACK_RW = {
     { authority: 'Rwanda Social Security Board (RSSB)', instrument: '2025 pension reform notice — 12% total (6% employee + 6% employer) for 2026, gross-salary base, OH unchanged', url: 'https://www.rssb.rw/' },
     { authority: 'Official Gazette of Rwanda', instrument: 'Future pension rate schedule (2027: 14%, 2028: 16%, 2029: 18%, 2030: 20%) — NOT implemented in this pack, deliberately, per the source\'s own revalidation warning', url: 'https://www.minijust.gov.rw/official-gazette' },
     { authority: 'RRA / RSSB', instrument: 'Maternity Leave Benefits (0.3%/0.3%) and RAMA medical scheme (7.5%/7.5% of basic salary)', url: 'https://www.rssb.rw/' },
-    { authority: 'User-supplied reference', instrument: '"Rwanda 2026 Payroll Implementation Reference" (verified to 14 Sep 2026) — the source document this pack was built from. Not independently re-fetched from rra.gov.rw/rssb.rw directly this pass.', url: 'file: Rwanda_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' }
+    { authority: 'User-supplied reference', instrument: '"Rwanda 2026 Payroll Implementation Reference" (verified to 14 Sep 2026) — the source document this pack was built from. Not independently re-fetched from rra.gov.rw/rssb.rw directly this pass.', url: 'file: Rwanda_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' },
+    { authority: 'Rwanda Revenue Authority (RRA) — Tax Handbook, "Explanation of PAYE"', instrument: 'Employment income subject to PAYE includes all payments to an employee in cash or in kind, incl. allowances (e.g. medical allowance) — a cash allowance/benefit is ordinary employment income, no separate in-kind valuation rule applies to it', url: 'https://tax-handbook.rra.gov.rw/handbook/explanation-of-paye/' },
+    { authority: 'RSSB / RRA payroll guidance (pension-base definition)', instrument: 'Pension contribution base = Basic Salary + Benefit in Kind House + Benefit in Kind Others + Cash Allowance House + Cash Allowance Others, charged on all employment income except transport allowances/benefits — confirms a general cash allowance is part of the RSSB pension (and, by the same "employment income" base, maternity) contribution base, not just the PAYE base', url: 'https://tax-handbook.rra.gov.rw/handbook/explanation-of-rssb-contributions/' }
   ],
   limitations: [
     'v1 initial build, monthly payroll only. PAYE has three paths: REGULAR + first_employer=true uses progressive bands; REGULAR + first_employer=false uses a flat 30% rate; CASUAL uses 0% up to RWF60,000 and 15% above.',
@@ -211,7 +237,8 @@ export const PAYROLL_RULE_PACK_RW = {
     'Occupational Hazards (OH) contribution base defaults to gross pay when no oh_contribution_base is separately supplied — the source notes OH has its own authority-defined base distinct from the pension base, but did not give that base numerically.',
     'Vehicle/accommodation benefit-in-kind, v2: computed ONLY when the caller sets vehicle_benefit and/or accommodation_benefit to true, adding 10% (vehicle) and/or 20% (accommodation) of gross_pay to the PAYE taxable base only, per the source\'s own stated percentages. RSSB pension/OH/maternity, RAMA, and CBHI stay on the cash gross_pay base — the source did not specify how (or whether) these benefits affect those bases, and this engine does not guess. Both flags default to false/omitted, exactly matching v1 behavior for every existing caller.',
     'NOT IMPLEMENTED: low-interest employee advances, expense-reimbursement classification, and all statutory filing (Ishema monthly declarations). This engine prepares payroll and accounting outputs only — it does not file with RRA/RSSB.',
-    'Source parameters come from a user-supplied implementation-reference document (itself citing RRA/RSSB), not independently re-fetched directly this pass. Should be reconfirmed against RRA\'s own PAYE guidance and RSSB\'s current rate notices before this pack is marked VERIFIED_BASIC_RULES.'
+    'Source parameters come from a user-supplied implementation-reference document (itself citing RRA/RSSB), not independently re-fetched directly this pass. Should be reconfirmed against RRA\'s own PAYE guidance and RSSB\'s current rate notices before this pack is marked VERIFIED_BASIC_RULES.',
+    'exec_cash_fringe_benefit (v4, new): a cash allowance/benefit (e.g. an executive cash perk) is ordinary employment income under RRA\'s PAYE rules, and — per RRA/RSSB\'s own published pension-base formula ("Basic Salary + BIK House + BIK Others + Cash Allowance House + Cash Allowance Others") — also part of the RSSB pension contribution base. This engine adds it to the PAYE taxable base, to the RSSB pension and maternity bases (both employee and employer sides), and to net_pay (it is cash the employee actually receives, unlike vehicle_benefit/accommodation_benefit, which are non-cash and PAYE-base-only). It is NOT added to oh_contribution_base by default (Occupational Hazards has its own authority-defined base this pack could not source numerically — a caller who knows OH should include it must pass an explicit oh_contribution_base), to rama_basic_salary (a separately-declared figure not derived from gross_pay). It IS picked up automatically by the CBHI net-salary formula (gross_pay + exec_cash_fringe_benefit - PAYE - pension - maternity - RAMA) when cbhi_applicable is true, since that formula already starts from total cash pay — but CBHI\'s base itself remains UNVERIFIED against real Ishema output regardless (see the CBHI limitations entry above), so combining both features compounds that existing uncertainty rather than adding a new one. This field was not part of the user-supplied implementation reference the rest of this pack was built from; it follows RRA/RSSB\'s general employment-income and pension-base definitions (see evidence) and should be reconfirmed the same way as the rest of this pack before VERIFIED_BASIC_RULES.'
   ]
 };
 
@@ -302,13 +329,22 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
 
     const grossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
     const ohBase = requireNonNegativeMoney(employee.oh_contribution_base ?? grossPay, `oh_contribution_base for ${employeeId}`);
+    const execCashFringeBenefit = requireNonNegativeMoney(employee.exec_cash_fringe_benefit ?? 0, `exec_cash_fringe_benefit for ${employeeId}`);
 
-    // --- Benefit in kind (v2; PAYE base only — see limitations) ---
+    // A cash allowance/benefit is ordinary employment income (unlike
+    // vehicle/accommodation BIK below, it is actually paid in cash) — it is
+    // part of the PAYE, pension and maternity bases. See the
+    // exec_cash_fringe_benefit evidence/limitations entries.
+    const cashGrossPay = money(grossPay + execCashFringeBenefit);
+
+    // --- Benefit in kind (v2; PAYE base only — see limitations). Computed
+    // off the cash salary/allowance total, consistent with the source's
+    // "% of employment income" phrasing. ---
     const benefitInKind = money(
-      (employee.vehicle_benefit ? 0.10 : 0) * grossPay +
-      (employee.accommodation_benefit ? 0.20 : 0) * grossPay
+      (employee.vehicle_benefit ? 0.10 : 0) * cashGrossPay +
+      (employee.accommodation_benefit ? 0.20 : 0) * cashGrossPay
     );
-    const payeTaxableIncome = money(grossPay + benefitInKind);
+    const payeTaxableIncome = money(cashGrossPay + benefitInKind);
 
     // --- PAYE ---
     let paye: number;
@@ -321,16 +357,21 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
     }
     paye = Math.ceil(paye); // RRA rounding rule: round up to whole RWF
 
-    // --- RSSB pension ---
-    const employeePension = money(grossPay * p.rssb.pension_employee_rate);
-    const employerPension = money(grossPay * p.rssb.pension_employer_rate);
+    // --- RSSB pension (base includes the cash fringe benefit — see
+    // exec_cash_fringe_benefit evidence: RRA/RSSB's own pension-base
+    // formula explicitly includes "Cash Allowance ... Others") ---
+    const employeePension = money(cashGrossPay * p.rssb.pension_employee_rate);
+    const employerPension = money(cashGrossPay * p.rssb.pension_employer_rate);
 
-    // --- Occupational Hazards (employer-only) ---
+    // --- Occupational Hazards (employer-only). Base defaults to gross_pay
+    // ONLY (not cashGrossPay) unless oh_contribution_base is explicitly
+    // supplied — OH's own base is not numerically specified in the source,
+    // so this engine does not guess whether it includes a cash fringe. ---
     const employerOh = money(ohBase * p.rssb.oh_employer_rate);
 
-    // --- Maternity ---
-    const employeeMaternity = money(grossPay * p.rssb.maternity_employee_rate);
-    const employerMaternity = money(grossPay * p.rssb.maternity_employer_rate);
+    // --- Maternity (same base as pension — see above) ---
+    const employeeMaternity = money(cashGrossPay * p.rssb.maternity_employee_rate);
+    const employerMaternity = money(cashGrossPay * p.rssb.maternity_employer_rate);
 
     // --- RAMA ---
     const employeeRama = employee.rama_member ? money((employee.rama_basic_salary as number) * p.rama.employee_rate) : 0;
@@ -338,16 +379,17 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
 
     // --- CBHI (unverified net-salary base; opt-in only — see limitations) ---
     const cbhiApplicable = employee.cbhi_applicable === true;
-    const netSalaryForCbhi = Math.max(0, money(grossPay - paye - employeePension - employeeMaternity - employeeRama));
+    const netSalaryForCbhi = Math.max(0, money(cashGrossPay - paye - employeePension - employeeMaternity - employeeRama));
     const employeeCbhi = cbhiApplicable ? money(netSalaryForCbhi * p.cbhi.employee_rate) : 0;
 
-    const netPay = money(grossPay - paye - employeePension - employeeMaternity - employeeRama - employeeCbhi);
-    const employerFundedTotal = money(grossPay + employerPension + employerOh + employerMaternity + employerRama);
+    const netPay = money(cashGrossPay - paye - employeePension - employeeMaternity - employeeRama - employeeCbhi);
+    const employerFundedTotal = money(cashGrossPay + employerPension + employerOh + employerMaternity + employerRama);
 
     return {
       employee_id: employeeId,
       name: employee.name ? String(employee.name).trim() : undefined,
       gross_pay: grossPay,
+      exec_cash_fringe_benefit: execCashFringeBenefit,
       benefit_in_kind: benefitInKind,
       paye,
       employee_pension: employeePension,
@@ -369,6 +411,7 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
 
   const totals = {
     gross_pay: sum(employees.map(e => e.gross_pay)),
+    exec_cash_fringe_benefit: sum(employees.map(e => e.exec_cash_fringe_benefit)),
     benefit_in_kind: sum(employees.map(e => e.benefit_in_kind)),
     paye: sum(employees.map(e => e.paye)),
     employee_pension: sum(employees.map(e => e.employee_pension)),
@@ -384,7 +427,11 @@ export function calculateRwPayroll(input: RwPayrollRunInput): RwPayrollRunResult
   };
 
   const journal: RwJournalLine[] = [
-    { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.gross_pay },
+    // SALARY_EXPENSE reflects total cash pay (gross_pay plus any
+    // exec_cash_fringe_benefit) — the fringe amount is actual cash paid to
+    // the employee and flows through paye/pension/maternity/net_pay exactly
+    // like the rest of gross_pay, so it belongs in the same expense line.
+    { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: money(totals.gross_pay + totals.exec_cash_fringe_benefit) },
     { side: 'DEBIT', account_role: 'EMPLOYER_RSSB_EXPENSE', amount: money(totals.employer_pension + totals.employer_oh + totals.employer_maternity + totals.employer_rama) },
     { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: totals.net_pay },
     { side: 'CREDIT', account_role: 'PAYE_PAYABLE', amount: totals.paye },
@@ -460,12 +507,27 @@ export function payrollEngineSelfTestRW() {
     employees: [{ employee_id: 'R6', gross_pay: 300000, employee_type: 'REGULAR', first_employer: true, rama_member: false, vehicle_benefit: true, accommodation_benefit: true }]
   });
 
+  // v4 test: exec_cash_fringe_benefit. gross_pay 300,000 + cash fringe
+  // 50,000 = 350,000 cash-pay base -> bracket [200000,24000,0.30]:
+  // 24,000 + 0.30*(350,000-200,000) = 69,000 PAYE. Pension = 350,000*6% =
+  // 21,000 each side (proving the fringe is IN the pension base, per the
+  // source's own "Cash Allowance ... Others" pension-base formula).
+  // Maternity = 350,000*0.3% = 1,050 each side. OH stays on the
+  // oh_contribution_base default (gross_pay only, 300,000) = 6,000 —
+  // proving the fringe does NOT leak into OH by default. net_pay =
+  // 350,000 - 69,000 - 21,000 - 1,050 = 258,950 (no RAMA/CBHI here).
+  const execFringe = calculateRwPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{ employee_id: 'R7', gross_pay: 300000, exec_cash_fringe_benefit: 50000, employee_type: 'REGULAR', first_employer: true, rama_member: false }]
+  });
+
   const e1 = firstEmployer.employees[0];
   const e2 = secondEmployer.employees[0];
   const e3 = pensionMaternity.employees[0];
   const e4 = rama.employees[0];
   const e5 = vehicleBik.employees[0];
   const e6 = bothBik.employees[0];
+  const e7 = execFringe.employees[0];
 
   const ok =
     e1.paye === 54000 && firstEmployer.controls.journal_balanced &&
@@ -475,7 +537,10 @@ export function payrollEngineSelfTestRW() {
     e4.employee_rama === 30000 && e4.employer_rama === 30000 && rama.controls.journal_balanced &&
     e5.benefit_in_kind === 30000 && e5.paye === 63000 && vehicleBik.controls.journal_balanced &&
     e6.benefit_in_kind === 90000 && e6.paye === 81000 && bothBik.controls.journal_balanced &&
-    e1.benefit_in_kind === 0;
+    e1.benefit_in_kind === 0 &&
+    e7.paye === 69000 && e7.employee_pension === 21000 && e7.employer_pension === 21000 &&
+    e7.employee_maternity === 1050 && e7.employer_maternity === 1050 &&
+    e7.employer_oh === 6000 && e7.net_pay === 258950 && execFringe.controls.journal_balanced;
 
-  return { ok, firstEmployer, secondEmployer, pensionMaternity, rama, vehicleBik, bothBik };
+  return { ok, firstEmployer, secondEmployer, pensionMaternity, rama, vehicleBik, bothBik, execFringe };
 }
