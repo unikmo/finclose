@@ -331,6 +331,80 @@ const varianceRowsOut = varianceRows.map(v => [
 ]);
 
 // ---------------------------------------------------------------------------
+// Employee-level month-to-month table: one row per employee, months as
+// columns (Net Pay and Gross Pay), with a delta-explanation column covering
+// every >15% swing for that specific employee. This sits in the SAME
+// "Month-to-Month Variance" tab as the country/agency table above, as a
+// second block below it (per-employee never blended across currencies --
+// each employee's own local currency is shown in its own column).
+// ---------------------------------------------------------------------------
+
+type EmpMonthVal = { gross: number; net: number; bonus: number };
+const empIndex: Record<string, { country: string; currency: string; months: Record<string, EmpMonthVal> }> = {};
+for (const p of payslips) {
+  const key = p.employee_id;
+  if (!empIndex[key]) empIndex[key] = { country: p.country, currency: p.currency, months: {} };
+  empIndex[key].months[p.month] = { gross: p.gross_pay, net: p.net_pay, bonus: p.bonus_pay };
+}
+const empIds = Object.keys(empIndex).sort((a, b) => {
+  const ci = COUNTRY_ORDER.indexOf(empIndex[a].country) - COUNTRY_ORDER.indexOf(empIndex[b].country);
+  return ci !== 0 ? ci : a.localeCompare(b);
+});
+
+function empDriver(empId: string, fromMonth: string, toMonth: string, fromVal: EmpMonthVal | undefined, toVal: EmpMonthVal | undefined): string {
+  const country = empIndex[empId].country;
+  if (!fromVal && toVal) return 'New hire this month (no prior-month payslip).';
+  if (fromVal && !toVal) return 'No payslip this month (left/inactive).';
+  if (!fromVal || !toVal) return '';
+  const parts: string[] = [];
+  if (toVal.bonus > fromVal.bonus) parts.push(`bonus of ${money(toVal.bonus)} paid this month (vs ${money(fromVal.bonus)} prior month)`);
+  else if (fromVal.bonus > toVal.bonus) parts.push(`reverting after prior month's bonus of ${money(fromVal.bonus)} (this month: ${money(toVal.bonus)})`);
+  if (country === 'US') {
+    const capped = ssWageBaseCapCrossers(toMonth);
+    if (capped.includes(empId)) parts.push('crossed the Social Security wage base cap this month, stopped accruing OASDI');
+  }
+  return parts.length > 0 ? parts.join('; ') : 'driver not attributable to a bonus or wage-base cap in this employee\'s own data -- likely a base pay/hours change.';
+}
+
+const empHeader = [
+  'Employee ID', 'Country', 'Currency',
+  ...MONTH_ORDER.map(m => `${m} Gross`),
+  ...MONTH_ORDER.map(m => `${m} Net`),
+  'Delta Explanation (>15% swings only)'
+];
+const empRows: (string | number)[][] = [];
+for (const empId of empIds) {
+  const rec = empIndex[empId];
+  const grossCols = MONTH_ORDER.map(m => rec.months[m] ? rec.months[m].gross : '');
+  const netCols = MONTH_ORDER.map(m => rec.months[m] ? rec.months[m].net : '');
+  const explanations: string[] = [];
+  for (let i = 1; i < MONTH_ORDER.length; i++) {
+    const fromMonth = MONTH_ORDER[i - 1];
+    const toMonth = MONTH_ORDER[i];
+    const fromVal = rec.months[fromMonth];
+    const toVal = rec.months[toMonth];
+    if (!fromVal && !toVal) continue;
+    const fromNet = fromVal?.net ?? 0;
+    const toNet = toVal?.net ?? 0;
+    const pct = pctChange(fromNet, toNet);
+    const notable = (!fromVal && !!toVal) || (!!fromVal && !toVal) || (pct !== null && Math.abs(pct) > NOTABLE_THRESHOLD);
+    if (!notable) continue;
+    const driver = empDriver(empId, fromMonth, toMonth, fromVal, toVal);
+    const pctLabel = pct === null ? 'N/A' : `${pct}%`;
+    explanations.push(`${fromMonth}->${toMonth} (${pctLabel}): ${driver}`);
+  }
+  empRows.push([empId, rec.country, rec.currency, ...grossCols, ...netCols, explanations.join(' | ')]);
+}
+
+const varianceSheetRows: (string | number)[][] = [
+  ...[varianceHeader, ...varianceRowsOut],
+  [''],
+  ['Employee-Level Month-to-Month (one row per employee, months as columns; each employee shown in their own local currency, never blended across countries)'],
+  empHeader,
+  ...empRows
+];
+
+// ---------------------------------------------------------------------------
 // Summary sheet
 // ---------------------------------------------------------------------------
 
@@ -353,7 +427,7 @@ const summaryRows: (string | number)[][] = [
   ['Sheet guide', ''],
   ['Payslip Register', `One row per employee per month (${totalEmployeeMonths} rows): gross pay broken into base/overtime/bonus, every employee-side deduction and employer-side contribution by name and amount (country-prefixed columns; blank where not applicable to that country), net pay, and total employer cost.`],
   ['Monthly Remittance by Country', 'What the company owes each government agency, by month, by country, by agency -- the "payment instruction" view. Flat Country/Month/Agency/Amount table with a TOTAL row per country-month.'],
-  ['Month-to-Month Variance', 'Gross payroll, total remittance, and each agency line, month over month, with $ and % change and a one-line driver explanation for every swing over 15%.'],
+  ['Month-to-Month Variance', 'Two blocks in one tab: (1) country/agency-level gross payroll, total remittance, and each agency line, month over month, with $ and % change and a driver explanation for every swing over 15%; (2) one row per employee, months as columns (Gross and Net Pay, each employee in their own local currency), with a Delta Explanation column listing every >15% swing for that employee by name.'],
   [''],
   ['Reconciliation', 'Monthly remittance detail in this workbook sums EXACTLY to the already-verified 7-month totals in _stress_test_results.json (checked programmatically before this workbook was built -- see console output of build-payroll-workbook.ts).'],
   ['Note on Quebec', 'Quebec is included: 10 employees x 7 months = 70 employee-months, using QPP/QPIP/Quebec provincial tax/reduced-rate EI in place of CPP -- confirmed present in the Payslip Register and Monthly Remittance sheets.']
@@ -380,8 +454,11 @@ wsRemit['!cols'] = [{ wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 48 }, { wch: 14
 (wsRemit as any)['!views'] = [{ state: 'frozen', ySplit: 1 }];
 XLSX.utils.book_append_sheet(wb, wsRemit, 'Monthly Remittance by Country');
 
-const wsVariance = XLSX.utils.aoa_to_sheet([varianceHeader, ...varianceRowsOut]);
-wsVariance['!cols'] = [{ wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 44 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 70 }];
+const wsVariance = XLSX.utils.aoa_to_sheet(varianceSheetRows);
+wsVariance['!cols'] = [
+  { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 44 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 70 },
+  ...Array(Math.max(0, empHeader.length - 10)).fill({ wch: 13 })
+];
 (wsVariance as any)['!views'] = [{ state: 'frozen', ySplit: 1 }];
 XLSX.utils.book_append_sheet(wb, wsVariance, 'Month-to-Month Variance');
 
@@ -391,7 +468,7 @@ console.log(`Wrote ${OUT_PATH}`);
 console.log(`  Summary: 1 page overview`);
 console.log(`  Payslip Register: ${registerRows.length} rows, ${registerHeader.length} columns`);
 console.log(`  Monthly Remittance by Country: ${remittanceRows.length} rows`);
-console.log(`  Month-to-Month Variance: ${varianceRowsOut.length} rows (${varianceRows.filter(v => v.notable).length} flagged notable >${NOTABLE_THRESHOLD}%)`);
+console.log(`  Month-to-Month Variance: ${varianceRowsOut.length} country/agency rows (${varianceRows.filter(v => v.notable).length} flagged notable >${NOTABLE_THRESHOLD}%) + ${empRows.length} employee rows`);
 
 // ---------------------------------------------------------------------------
 // Notable findings for console + markdown append
