@@ -19,6 +19,8 @@ import { calculateMuPayroll, payrollEngineSelfTestMU, PAYROLL_RULE_PACK_MU } fro
 import type { MuPayrollRunInput, MuPayrollRunResult } from './payroll-engine-mu';
 import { calculateCmPayroll, payrollEngineSelfTestCM, PAYROLL_RULE_PACK_CM } from './payroll-engine-cm';
 import type { CmPayrollRunInput, CmPayrollRunResult } from './payroll-engine-cm';
+import { calculateTzPayroll, payrollEngineSelfTestTZ, PAYROLL_RULE_PACK_TZ } from './payroll-engine-tz';
+import type { TzPayrollRunInput, TzPayrollRunResult } from './payroll-engine-tz';
 import type { UsPayrollRunInput, UsPayrollRunResult } from './payroll-engine-us';
 
 export type PayrollEmployeeInput = {
@@ -525,9 +527,10 @@ export function payrollEngineSelfTestAll() {
   const rw = payrollEngineSelfTestRW();
   const mu = payrollEngineSelfTestMU();
   const cm = payrollEngineSelfTestCM();
+  const tz = payrollEngineSelfTestTZ();
   return {
-    ok: ge.ok && de.ok && us.ok && uk.ok && ca.ok && ke.ok && za.ok && rw.ok && mu.ok && cm.ok,
+    ok: ge.ok && de.ok && us.ok && uk.ok && ca.ok && ke.ok && za.ok && rw.ok && mu.ok && cm.ok && tz.ok,
     georgia: ge, germany: de, unitedStates: us, unitedKingdom: uk, canada: ca, kenya: ke, southAfrica: za,
-    rwanda: rw, mauritius: mu, cameroon: cm
+    rwanda: rw, mauritius: mu, cameroon: cm, zanzibar: tz
   };
 }
