@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 
 type Firm = { firm_id: string; name: string; role: string };
+type FirmBranding = { display_name: string; logo_url: string | null; primary_color: string; accent_color: string } | null;
 type PortfolioRow = {
   company_id: string;
   organization_id: string;
@@ -56,6 +57,7 @@ export default function FirmPortfolioPage() {
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [authError, setAuthError] = useState(false);
   const [expandedCompanyId, setExpandedCompanyId] = useState<string | null>(null);
+  const [branding, setBranding] = useState<FirmBranding>(null);
 
   useEffect(() => {
     fetch('/api/my-firms')
@@ -70,12 +72,16 @@ export default function FirmPortfolioPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedFirmId) { setPortfolio(null); return; }
+    if (!selectedFirmId) { setPortfolio(null); setBranding(null); return; }
     setLoadingPortfolio(true);
     fetch('/api/firm-portfolio?firm_id=' + encodeURIComponent(selectedFirmId))
       .then(r => r.json())
       .then(setPortfolio)
       .finally(() => setLoadingPortfolio(false));
+    fetch('/api/firm-branding?firm_id=' + encodeURIComponent(selectedFirmId))
+      .then(r => r.json())
+      .then(body => setBranding(body.branding || null))
+      .catch(() => setBranding(null));
   }, [selectedFirmId]);
 
   const selectedFirm = useMemo(() => firms?.find(f => f.firm_id === selectedFirmId) || null, [firms, selectedFirmId]);
@@ -104,19 +110,33 @@ export default function FirmPortfolioPage() {
     <main className="fp-shell">
       <header className="fp-nav">
         <Link href="/" className="fp-brand" aria-label="FinClose home">
-          <span className="fp-logo">F</span>
-          <span>FinClose <em>Firm Workspace</em></span>
+          {branding?.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={branding.logo_url} alt={branding.display_name} className="fp-logo-img" />
+          ) : (
+            <span className="fp-logo" style={branding ? { background: branding.primary_color } : undefined}>
+              {branding ? branding.display_name.trim().charAt(0).toUpperCase() || 'F' : 'F'}
+            </span>
+          )}
+          {branding ? (
+            <span>{branding.display_name} <em style={{ color: branding.accent_color }}>Workspace</em></span>
+          ) : (
+            <span>FinClose <em>Firm Workspace</em></span>
+          )}
         </Link>
-        {firms && firms.length > 1 && (
-          <select
-            className="fp-firm-select"
-            value={selectedFirmId}
-            onChange={e => setSelectedFirmId(e.target.value)}
-            aria-label="Select firm"
-          >
-            {firms.map(f => <option key={f.firm_id} value={f.firm_id}>{f.name}</option>)}
-          </select>
-        )}
+        <nav className="fp-settings-nav">
+          <Link href="/firm/settings" className="fp-link">Settings</Link>
+          {firms && firms.length > 1 && (
+            <select
+              className="fp-firm-select"
+              value={selectedFirmId}
+              onChange={e => setSelectedFirmId(e.target.value)}
+              aria-label="Select firm"
+            >
+              {firms.map(f => <option key={f.firm_id} value={f.firm_id}>{f.name}</option>)}
+            </select>
+          )}
+        </nav>
       </header>
 
       {(!firms || firms.length === 0) && (

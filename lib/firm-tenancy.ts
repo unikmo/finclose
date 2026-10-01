@@ -5,15 +5,14 @@
 // delegation/authorization model, cross-client tenant-isolation
 // enforcement, firm roles + client-scoped permissions).
 //
-// NOT built in this pass (deliberately, not silently): the portfolio
-// status/control aggregation engine (item 5, requires reading bookkeeping/
-// reconciliation/close state per company — a separate, larger piece), the
-// portfolio dashboard UI (item 6), the cross-client exception queue (item
-// 7), the close calendar (item 8), API route wiring beyond what a caller
-// needs to exercise this layer, billing hooks (item 11), and branding
-// (item 12). Each of those is real, substantial, separate work — building
-// them without the foundation below correctly isolating tenants first
-// would risk shipping a dashboard on top of a leaky permission model.
+// Built in later passes on top of this foundation: the portfolio status/
+// control aggregation engine (item 5, lib/portfolio-status.ts), the
+// portfolio dashboard UI (item 6, app/firm/portfolio/page.tsx), billing
+// (item 11, lib/firm-billing.ts), and white-label branding (item 12,
+// lib/firm-branding.ts, gated on an ACTIVE WHITE_LABEL billing tier).
+// STILL NOT built (deliberately, not silently): the cross-client
+// exception queue (item 7) and the close calendar (item 8) — both are
+// real, substantial, separate work.
 //
 // CRITICAL DESIGN INVARIANT (Mandatory QA in the brief): a client
 // organization's own tenant boundary is NEVER touched by this file. A
