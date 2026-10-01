@@ -246,17 +246,12 @@ for (const [employeeId, rows] of byEmployee) {
           if (!stCode) throw new Error(`unrecognized US state_province ${row.State_Province}`);
           const prev = usYtd.get(employeeId) || { ytd_ss_wages_before: 0, ytd_medicare_wages_before: 0, ytd_futa_wages_before: 0 };
 
-          // NY (like NJ) is a documented exception: the engine explicitly
-          // REJECTS a nonzero pretax_401k_deferral/pretax_section125_deduction
-          // for NY employees (its NY/NYC/Yonkers wage-base treatment of those
-          // deferrals was not independently verified -- see the engine's own
-          // limitations). Rather than crash or silently apply an unverified
-          // wage-base treatment, this driver omits the 401(k) deferral for NY
-          // employees only and records it as a gap.
-          const applyable401k = stCode === 'NY' ? 0 : (row.US_401k_Deduction || 0);
-          if (stCode === 'NY' && row.US_401k_Deduction > 0) {
-            gapsFound.add('US/NY: the engine explicitly rejects a nonzero pretax_401k_deferral for NY employees (unverified NY/NYC/Yonkers wage-base treatment) -- NY employees\' 401(k) deferrals were run WITHOUT the pre-tax deduction applied (full gross taxed) rather than being dropped from the stress test entirely; their gross/net figures therefore do not reflect the 401(k) reduction.');
-          }
+          // v24: the engine now applies pretax_401k_deferral/pretax_section125_deduction
+          // to NY State/NYC/Yonkers wages (20 NYCRR 171.1(b)/171.3 conformity --
+          // see lib/payroll-engine-us.ts limitations). No special-casing needed here
+          // for any of the 4 states this dataset uses (NY/CA/TX/FL); TX/FL have no
+          // state income tax and CA already applied it before this fix too.
+          const applyable401k = row.US_401k_Deduction || 0;
 
           const input: UsEmployeeInput = {
             employee_id: employeeId,
@@ -318,9 +313,7 @@ for (const [employeeId, rows] of byEmployee) {
               { label: 'FUTA (Employer)', amount: e.employer_futa },
               { label: 'SUI (Employer)', amount: e.employer_sui }
             ];
-            const notes = stCode === 'NY' && row.US_401k_Deduction > 0
-              ? '401(k) deferral NOT applied (engine rejects nonzero pretax_401k_deferral for NY) -- full gross taxed.'
-              : '';
+            const notes = '';
             pushPayslip({
               employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'US', state_province: row.State_Province, currency: 'USD',
               gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
@@ -560,7 +553,11 @@ for (const [employeeId, rows] of byEmployee) {
             gross_pay: gross,
             employee_age: 35,
             medical_scheme_main_member: false,
-            employer_sdl_liable: true
+            employer_sdl_liable: true,
+            // v3 (engine commit 5f12243): a cash allowance/benefit is ordinary
+            // SARS remuneration, not a Seventh Schedule in-kind benefit -- wire
+            // it straight through rather than dropping it as an unmodeled gap.
+            exec_cash_fringe_benefit: isExec ? (row.Exec_Fringe_Benefits || 0) : 0
           };
           const result = calculateZaPayroll({ pay_period_start: ps, pay_period_end: pe, pay_date: pd, employees: [input] });
           const e = result.employees[0];
@@ -571,9 +568,6 @@ for (const [employeeId, rows] of byEmployee) {
           ];
           recordSuccess('South Africa', 'ZAR', employeeId, month, e.gross_pay, e.net_pay, lines);
           addMonthlyAgency('South Africa', month, lines);
-          if (isExec && row.Exec_Fringe_Benefits > 0) {
-            gapsFound.add('South Africa: this engine does not model taxable fringe benefits at all ("gross_pay is assumed to be cash remuneration only" per its own limitations) -- Exec_Fringe_Benefits could not be applied and is excluded from ZA gross/PAYE.');
-          }
           {
             const pc = payComponents(row);
             const employee_lines: LineItem[] = [
@@ -585,9 +579,7 @@ for (const [employeeId, rows] of byEmployee) {
               { label: 'SDL (Employer)', amount: e.employer_sdl },
               { label: 'Employment Tax Incentive (ETI, reduces PAYE remitted -- shown as negative)', amount: -e.eti }
             ];
-            const notes = isExec && row.Exec_Fringe_Benefits > 0
-              ? 'Exec_Fringe_Benefits could not be applied -- engine assumes gross_pay is cash remuneration only.'
-              : '';
+            const notes = '';
             pushPayslip({
               employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'South Africa', state_province: row.State_Province, currency: 'ZAR',
               gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
@@ -603,7 +595,14 @@ for (const [employeeId, rows] of byEmployee) {
             gross_pay: gross,
             employee_type: 'REGULAR',
             first_employer: true,
-            rama_member: false
+            rama_member: false,
+            // v4 (engine commit 5f12243): a cash allowance is ordinary RRA
+            // employment income and part of the RSSB pension/maternity base
+            // -- wire it through rather than dropping it as an unmodeled gap.
+            // Distinct from vehicle_benefit/accommodation_benefit (non-cash
+            // BIK flags), which this dataset's Exec_Fringe_Benefits figure
+            // does not map to.
+            exec_cash_fringe_benefit: isExec ? (row.Exec_Fringe_Benefits || 0) : 0
           };
           const result = calculateRwPayroll({ pay_period_start: ps, pay_period_end: pe, pay_date: pd, employees: [input] });
           const e = result.employees[0];
@@ -615,9 +614,6 @@ for (const [employeeId, rows] of byEmployee) {
           ];
           recordSuccess('Rwanda', 'RWF', employeeId, month, e.gross_pay, e.net_pay, lines);
           addMonthlyAgency('Rwanda', month, lines);
-          if (isExec && row.Exec_Fringe_Benefits > 0) {
-            gapsFound.add('Rwanda: benefit-in-kind is modeled only as vehicle_benefit (10%) / accommodation_benefit (20%) flags, not a caller-supplied cash amount -- Exec_Fringe_Benefits (an arbitrary cash figure) does not map to either flag and was excluded from the PAYE taxable base.');
-          }
           {
             const pc = payComponents(row);
             const employee_lines: LineItem[] = [
@@ -633,9 +629,7 @@ for (const [employeeId, rows] of byEmployee) {
               { label: 'Maternity (Employer)', amount: e.employer_maternity },
               { label: 'RAMA (Employer)', amount: e.employer_rama }
             ];
-            const notes = isExec && row.Exec_Fringe_Benefits > 0
-              ? 'Exec_Fringe_Benefits does not map to a vehicle/accommodation benefit-in-kind flag -- excluded from PAYE taxable base.'
-              : '';
+            const notes = '';
             pushPayslip({
               employee_id: employeeId, month, month_num: MONTH_NUM[month], country: 'Rwanda', state_province: row.State_Province, currency: 'RWF',
               gross_pay: e.gross_pay, base_pay: pc.base, overtime_pay: pc.overtime, bonus_pay: pc.bonus,
