@@ -5,6 +5,7 @@
 .fp-brand{display:flex;align-items:center;gap:13px;color:var(--fc-parchment);font-size:16px;font-weight:700}
 .fp-brand em{font-style:normal;color:var(--fc-brass);font-weight:750}
 .fp-logo{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:var(--fc-brass);color:var(--fc-ink);font-size:15px;font-weight:900}
+.fp-logo-img{width:36px;height:36px;border-radius:10px;object-fit:cover}
 .fp-firm-select{min-height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(141,183,227,.27);background:rgba(255,255,255,.02);color:var(--fc-parchment);font-size:12px;font-weight:700}
 .fp-loading,.fp-note{width:min(1180px,100%);margin:24px auto;color:var(--fc-parchment-dim);font-size:13px}
 .fp-empty{width:min(560px,100%);margin:80px auto;text-align:center;padding:36px 28px;border:1px solid var(--fc-line);border-radius:20px;background:linear-gradient(145deg,rgba(23,62,107,.98),rgba(18,52,90,.96))}
@@ -49,4 +50,24 @@
   .fp-nav{height:70px}
   .fp-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .fp-table{display:block;overflow-x:auto}
+}
+
+/* Settings page (billing + branding) */
+.fp-settings-nav{display:flex;align-items:center;gap:16px}
+.fp-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.fp-settings-card{padding:22px 20px;border-radius:16px;border:1px solid var(--fc-line);background:rgba(255,255,255,.02)}
+.fp-settings-card h2{font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif;font-size:19px;font-weight:600;margin:0 0 16px}
+.fp-settings-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;font-size:13px;border-bottom:1px solid rgba(141,183,227,.1)}
+.fp-settings-row span{color:var(--fc-parchment-dim)}
+.fp-field{display:flex;flex-direction:column;gap:5px;margin-top:14px;font-size:12px;color:var(--fc-parchment-dim);font-weight:700}
+.fp-field input{min-height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(141,183,227,.27);background:rgba(255,255,255,.02);color:var(--fc-parchment);font-size:13px;font-weight:600}
+.fp-field input[type="color"]{padding:3px;width:64px}
+.fp-settings-actions{display:flex;gap:10px;margin-top:18px}
+.fp-btn{min-height:38px;padding:0 16px;border-radius:10px;border:1px solid rgba(141,183,227,.27);background:transparent;color:var(--fc-parchment);font-size:12px;font-weight:750;cursor:pointer}
+.fp-btn:disabled{opacity:.45;cursor:not-allowed}
+.fp-btn-primary{background:var(--fc-brass);border-color:var(--fc-brass);color:var(--fc-ink)}
+.fp-settings-message{margin:12px 0 0;font-size:12px;color:var(--fc-brass);font-weight:700}
+.fp-settings-hint{margin:14px 0 0;font-size:12px;color:var(--fc-parchment-dim);line-height:1.6}
+@media(max-width:760px){
+  .fp-settings-grid{grid-template-columns:1fr}
 }

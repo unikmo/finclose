@@ -8,8 +8,10 @@ export const dynamic = 'force-dynamic';
 
 // POST /api/firms { name } -- registers a new accounting firm. The
 // creating user becomes its first PARTNER (see lib/firm-tenancy.ts's
-// createFirm). Deliberately minimal: no billing/branding fields yet
-// (Firm Workspace brief items 11-12, not built this pass).
+// createFirm). Deliberately minimal here: a new firm starts on the
+// STANDARD billing tier with no branding set, by firm-billing.ts's own
+// default -- see /api/firm-billing and /api/firm-branding (and the
+// app/firm/settings page) for setting those up afterward.
 export async function POST(req: NextRequest) {
   try {
     const auth = await authenticateRequest(req);
