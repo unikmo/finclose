@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "project": {
+    "team_id": "team_sVekjWxQpKBAOb3DWW89HdvK",
+    "project_id": "prj_fn9VRSUOqwpOHkXEuLDGHVvoMHSC",
+    "production_url": "https://finclose-lab-preview.vercel.app"
+  },
+  "stages": {
+    "LAB_SAFE": {
+      "runtime_mode": "LAB",
+      "pilot_release_gate": "BLOCKED",
+      "production_release_gate": "BLOCKED",
+      "upload_quarantine_mode": "BLOCK",
+      "upload_scanner_verified": "NO",
+      "requires_pilot_evidence": false
+    },
+    "CERTIFY_LAB": {
+      "runtime_mode": "LAB",
+      "pilot_release_gate": "BLOCKED",
+      "production_release_gate": "BLOCKED",
+      "upload_quarantine_mode": "MANUAL_REVIEW",
+      "upload_scanner_verified": "NO",
+      "requires_pilot_evidence": true
+    },
+    "PILOT": {
+      "runtime_mode": "PILOT",
+      "pilot_release_gate": "APPROVED",
+      "production_release_gate": "BLOCKED",
+      "upload_quarantine_mode": "MANUAL_REVIEW",
+      "upload_scanner_verified": "NO",
+      "requires_pilot_evidence": true
+    }
+  }
+}

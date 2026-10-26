@@ -5,6 +5,10 @@ on:
     branches: [main, vercel-firebase]
   pull_request:
 
+concurrency:
+  group: finclose-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,5 +35,10 @@ jobs:
             $errors | ForEach-Object { Write-Error $_.Message }
             exit 1
           }
+      - name: Validate Vercel release helper syntax
+        shell: bash
+        run: |
+          bash -n scripts/vercel-release-deploy.sh
+          bash -n scripts/vercel-release-verify.sh
       - name: Build Vercel Next.js application
         run: npm run build
