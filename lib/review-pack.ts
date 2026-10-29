@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type { NormalisedBankTransaction } from './statement-intake';
 import type { CategorySuggestion } from './categorisation-engine';
+import type { AccountingFinding } from './statement-accounting';
 
 // Accountant review pack: turns normalised transactions plus categorisation
 // suggestions into one document an accountant can review quickly. It lists what
@@ -16,7 +17,12 @@ export type ExceptionCode =
   | 'OUTSIDE_PERIOD'
   | 'VAT_REVIEW'
   | 'JUDGEMENT_REQUIRED'
-  | 'UNRECONCILED';
+  | 'UNRECONCILED'
+  | 'TRANSFER_UNMATCHED'
+  | 'POSSIBLE_TRANSFER'
+  | 'REFUND_UNMATCHED'
+  | 'BALANCE_MISMATCH'
+  | 'FX_REVIEW';
 
 export type Severity = 'HIGH' | 'MEDIUM' | 'LOW';
 
@@ -36,6 +42,8 @@ export type ReviewPackInput = {
   suggestions: CategorySuggestion[];
   document_links?: Record<string, string[]>; // transaction_id -> document ids the owner uploaded
   unreconciled_transaction_ids?: string[]; // from the ledger reconciliation, if one was run
+  accounting_findings?: AccountingFinding[]; // from statement-accounting
+  base_currency?: string; // other currencies are kept out of the totals; default: currency of the first row
   high_value_cents?: number; // missing-document severity threshold; default 50000 (500.00)
   generated_at?: number; // injected so output is reproducible
 };
@@ -77,6 +85,9 @@ export type ReviewPack = {
     accountant_ready: boolean;
     accountant_ready_rule: string;
     exception_counts: Record<string, number>;
+    transfer_count: number; // own-account transfers, excluded from inflow and outflow
+    foreign_currency_count: number; // left out of totals, not converted
+    base_currency: string;
   };
   category_totals: { category_code: string; category_name: string; count: number; total_cents: number }[];
   entries: ProposedEntry[];
@@ -121,6 +132,9 @@ export function buildReviewPack(input: ReviewPackInput): ReviewPack {
   let inflow = 0;
   let outflow = 0;
   let inPeriod = 0;
+  let transferCount = 0;
+  let foreignCount = 0;
+  const baseCurrency = input.base_currency || input.transactions[0]?.currency || 'EUR';
 
   const add = (tx: NormalisedBankTransaction, code: ExceptionCode, severity: Severity, message: string, action: string) => {
     exceptions.push({ code, severity, transaction_id: tx.transaction_id, message, suggested_action: action, evidence: evidenceOf(tx) });
@@ -134,7 +148,10 @@ export function buildReviewPack(input: ReviewPackInput): ReviewPack {
       continue;
     }
     inPeriod += 1;
-    if (tx.amount_cents >= 0) inflow += tx.amount_cents; else outflow += -tx.amount_cents;
+    const isTransfer = suggestion?.category_code === 'TRANSFER';
+    if (isTransfer) transferCount += 1;
+    if (tx.currency !== baseCurrency) foreignCount += 1;
+    else if (!isTransfer) { if (tx.amount_cents >= 0) inflow += tx.amount_cents; else outflow += -tx.amount_cents; }
     const docs = documents[tx.transaction_id] || [];
     const amountText = formatCents(tx.amount_cents, tx.currency);
     const who = tx.counterparty || tx.description || 'unknown';
@@ -190,6 +207,17 @@ export function buildReviewPack(input: ReviewPackInput): ReviewPack {
     });
   }
 
+  const txById = new Map(input.transactions.map(tx => [tx.transaction_id, tx]));
+  for (const finding of input.accounting_findings || []) {
+    const first = finding.transaction_ids[0] ? txById.get(finding.transaction_ids[0]) : undefined;
+    if (finding.transaction_ids.length && !first) continue;
+    if (first && !(first.date >= input.period.start && first.date <= input.period.end)) continue;
+    exceptions.push({ code: finding.code, severity: finding.severity, transaction_id: first ? first.transaction_id : null, message: finding.message, suggested_action: finding.suggested_action, evidence: first ? evidenceOf(first) : null });
+    if (first && (finding.code === 'TRANSFER_UNMATCHED' || finding.code === 'POSSIBLE_TRANSFER' || finding.code === 'REFUND_UNMATCHED')) {
+      ownerQuestions.push({ transaction_id: first.transaction_id, question: finding.message + ' ' + finding.suggested_action });
+    }
+  }
+
   // A reverse-charge note on its own does not make a transaction "unclean"; it is a
   // confirm-once item. Everything else does.
   const unclean = new Set<string>();
@@ -234,7 +262,10 @@ export function buildReviewPack(input: ReviewPackInput): ReviewPack {
       readiness_definition: READINESS_DEFINITION,
       accountant_ready: readiness >= 90 && !hasHigh,
       accountant_ready_rule: READY_RULE,
-      exception_counts: exceptionCounts
+      exception_counts: exceptionCounts,
+      transfer_count: transferCount,
+      foreign_currency_count: foreignCount,
+      base_currency: baseCurrency
     },
     category_totals: [...totals.values()].sort((a, b) => a.category_code.localeCompare(b.category_code)),
     entries,
