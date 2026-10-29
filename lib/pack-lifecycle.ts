@@ -4,6 +4,9 @@ import { buildRulePack, learnFromCorrection, type VatTreatment } from './categor
 import { parseBankStatementCsv } from './statement-intake';
 import { prepareStatementReview, type PrepExtras, type StatementPrepRequest, type StatementPrepResult } from './statement-prep';
 import type { Correction, OwnerAnswer, PackEvent, PackRecord, PackStore } from './pack-store';
+import { assertLinkable } from './document-intake';
+import type { DocumentStore } from './document-store';
+import { allowedVatRates } from './vat-summary';
 
 // Saved review packs: create, reload, record the owner's answers, record a
 // reviewer's corrections (optionally remembered for the company), delete.
@@ -42,6 +45,15 @@ export function packInput(request: StatementPrepRequest): string {
   return gz.toString('base64');
 }
 
+export function readPackInput(blob: string): StatementPrepRequest {
+  return readInput(blob);
+}
+
+function assertOpen(record: PackRecord) {
+  if (record.status === 'SIGNED_OFF') throw httpError('this pack has been signed off and is locked; create a new version to change it', 409);
+  if (record.status !== 'OPEN') throw httpError('this pack has been superseded by a newer version', 409);
+}
+
 function readInput(blob: string): StatementPrepRequest {
   return JSON.parse(zlib.gunzipSync(Buffer.from(blob, 'base64')).toString('utf8')) as StatementPrepRequest;
 }
@@ -54,7 +66,7 @@ async function extrasFor(store: PackStore, record: PackRecord): Promise<PrepExtr
     if (answer.confirm_duplicate) dismissed.push(answer.transaction_id);
   }
   const overrides: NonNullable<PrepExtras['overrides']> = {};
-  for (const c of Object.values(record.corrections)) overrides[c.transaction_id] = { category_code: c.category_code, vat_treatment: c.vat_treatment };
+  for (const c of Object.values(record.corrections)) overrides[c.transaction_id] = { category_code: c.category_code, vat_treatment: c.vat_treatment, ...(c.vat_rate !== undefined ? { vat_rate: c.vat_rate } : {}) };
   return { learned_rules: await store.learnedRules(record.company_id), document_links, dismissed_duplicates: dismissed, overrides };
 }
 
@@ -130,14 +142,16 @@ export async function recordOwnerAnswer(
   packId: string,
   companyId: string,
   actor: Actor,
-  input: { transaction_id?: unknown; document_ids?: unknown; note?: unknown; confirm_duplicate?: unknown }
+  input: { transaction_id?: unknown; document_ids?: unknown; note?: unknown; confirm_duplicate?: unknown },
+  docStore?: DocumentStore // when given, cited documents must exist for this company and be CLEAN
 ): Promise<LoadedPack> {
   const { record, request } = await load(store, packId, companyId);
-  if (record.status !== 'OPEN') throw httpError('this pack has been superseded by a newer version', 409);
+  assertOpen(record);
   const id = String(input.transaction_id || '');
   if (!transactionIds(request).has(id)) throw httpError('transaction_id is not in this pack', 400);
   const documents = Array.isArray(input.document_ids) ? input.document_ids.map(d => String(d).trim()).filter(Boolean) : [];
   if (documents.length > 20 || documents.some(d => d.length > 200)) throw httpError('at most 20 document ids of up to 200 characters', 400);
+  if (docStore && documents.length) await assertLinkable(docStore, companyId, documents);
   const note = String(input.note || '').slice(0, 1000);
   const confirmDuplicate = input.confirm_duplicate === true;
   if (!documents.length && !note && !confirmDuplicate) throw httpError('give a document id, a note, or confirm_duplicate', 400);
@@ -154,22 +168,27 @@ export async function recordCorrection(
   packId: string,
   companyId: string,
   actor: Actor,
-  input: { transaction_id?: unknown; category_code?: unknown; vat_treatment?: unknown; remember?: unknown }
+  input: { transaction_id?: unknown; category_code?: unknown; vat_treatment?: unknown; vat_rate?: unknown; remember?: unknown }
 ): Promise<LoadedPack> {
   const { record, request } = await load(store, packId, companyId);
-  if (record.status !== 'OPEN') throw httpError('this pack has been superseded by a newer version', 409);
+  assertOpen(record);
   const id = String(input.transaction_id || '');
   const category = String(input.category_code || '');
   const vat = String(input.vat_treatment || '') as VatTreatment;
   const jurisdiction = String(request.jurisdiction ?? 'GENERIC').toUpperCase() === 'EE' ? 'EE' : 'GENERIC';
   if (!buildRulePack(jurisdiction).categories.some(c => c.code === category)) throw httpError('category_code is not in this rule pack', 400);
   if (!VAT_VALUES.includes(vat)) throw httpError('vat_treatment is not valid', 400);
+  let vatRate: number | undefined;
+  if (input.vat_rate !== undefined && input.vat_rate !== null && input.vat_rate !== '') {
+    vatRate = Number(input.vat_rate);
+    if (!allowedVatRates(jurisdiction).includes(vatRate)) throw httpError(`vat_rate must be one of ${allowedVatRates(jurisdiction).join(', ') || 'none for this jurisdiction'}`, 400);
+  }
   const before = await rebuild(store, record, request);
   const entry = before.pack.entries.find(e => e.transaction_id === id);
   if (!entry) throw httpError('transaction_id is not an in-period transaction of this pack', 400);
   const remember = input.remember === true;
   const expected = record.revision;
-  const correction: Correction = { transaction_id: id, category_code: category, vat_treatment: vat, remember, corrected_by: actor.user_id, corrected_at: Date.now() };
+  const correction: Correction = { transaction_id: id, category_code: category, vat_treatment: vat, ...(vatRate !== undefined ? { vat_rate: vatRate } : {}), remember, corrected_by: actor.user_id, corrected_at: Date.now() };
   const next: PackRecord = { ...record, revision: expected + 1, corrections: { ...record.corrections, [id]: correction } };
   pushEvents(next, event('CORRECTION', actor, { transaction_id: id, from: entry.category_code, to: category, remember }));
   await store.update(next, expected);
@@ -178,6 +197,43 @@ export async function recordCorrection(
     if (rule) await store.addLearnedRule(record.company_id, rule); // scoped to this company only
   }
   return { record: next, result: await rebuild(store, next, request) };
+}
+
+export function signOffEnabled(): boolean {
+  return process.env.FINCLOSE_SIGNOFF_ENABLED === 'true';
+}
+
+// Accountant sign-off. Off unless FINCLOSE_SIGNOFF_ENABLED=true, because it is meant to be
+// switched on only after the logic has been tested on real statements. It records WHO accepted
+// WHICH version (the pack hash they saw) and locks the pack. It does not post to any ledger and
+// does not hand over to the close-governance engine: the pack stays NO_EXTERNAL_POSTING.
+export async function signOffPack(
+  store: PackStore,
+  packId: string,
+  companyId: string,
+  actor: Actor,
+  input: { pack_hash?: unknown; note?: unknown; accept_open_items?: unknown },
+  enabled = signOffEnabled()
+): Promise<LoadedPack> {
+  if (!enabled) throw httpError('accountant sign-off is not enabled in this deployment', 403);
+  const { record, request } = await load(store, packId, companyId);
+  assertOpen(record);
+  const result = await rebuild(store, record, request);
+  if (String(input.pack_hash || '') !== result.pack.pack_hash) throw httpError('the pack changed since you reviewed it; reload and review again', 409);
+  const hasHigh = result.pack.exceptions.some(e => e.severity === 'HIGH');
+  if (hasHigh) throw httpError('a HIGH exception is still open; resolve it before sign-off', 409);
+  const acceptOpen = input.accept_open_items === true;
+  const note = String(input.note || '').trim().slice(0, 1000);
+  if (!result.pack.summary.accountant_ready) {
+    if (!acceptOpen) throw httpError('the pack is not accountant-ready; resolve the open items or sign off with accept_open_items and a note', 409);
+    if (note.length < 10) throw httpError('give a note of at least 10 characters explaining why open items are accepted', 400);
+  }
+  const expected = record.revision;
+  const at = Date.now();
+  const next: PackRecord = { ...record, status: 'SIGNED_OFF', revision: expected + 1, signoff: { by: actor.user_id, at, pack_hash: result.pack.pack_hash, note, accepted_open_items: acceptOpen && !result.pack.summary.accountant_ready } };
+  pushEvents(next, event('SIGNED_OFF', actor, { pack_hash: result.pack.pack_hash, accepted_open_items: next.signoff!.accepted_open_items }));
+  await store.update(next, expected);
+  return { record: next, result };
 }
 
 export async function deletePack(store: PackStore, packId: string, companyId: string): Promise<void> {

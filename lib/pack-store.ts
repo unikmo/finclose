@@ -9,7 +9,7 @@ import type { LearnedRule, VatTreatment } from './categorisation-engine';
 export type PackEvent = { type: string; actor: string; at: number; detail?: Record<string, unknown> };
 
 export type OwnerAnswer = { transaction_id: string; document_ids: string[]; note: string; confirm_duplicate: boolean; answered_by: string; answered_at: number };
-export type Correction = { transaction_id: string; category_code: string; vat_treatment: VatTreatment; remember: boolean; corrected_by: string; corrected_at: number };
+export type Correction = { transaction_id: string; category_code: string; vat_treatment: VatTreatment; vat_rate?: number; remember: boolean; corrected_by: string; corrected_at: number };
 
 export type PackRecord = {
   pack_id: string;
@@ -17,13 +17,14 @@ export type PackRecord = {
   organization_id: string;
   period: { start: string; end: string };
   version: number; // 1, 2, ... per company and period
-  status: 'OPEN' | 'SUPERSEDED';
+  status: 'OPEN' | 'SUPERSEDED' | 'SIGNED_OFF';
   revision: number; // bumped on every write, for optimistic concurrency
   pack_hash: string;
   readiness_percent: number;
   answers: Record<string, OwnerAnswer>; // by transaction_id, latest answer wins
   corrections: Record<string, Correction>;
   events: PackEvent[];
+  signoff?: { by: string; at: number; pack_hash: string; note: string; accepted_open_items: boolean };
   created_by: string;
   created_at: number;
   expires_at: number; // retention: the stored statement is purged after this
@@ -37,6 +38,7 @@ export interface PackStore {
   delete(packId: string): Promise<void>;
   learnedRules(companyId: string): Promise<LearnedRule[]>;
   addLearnedRule(companyId: string, rule: LearnedRule): Promise<void>;
+  deleteLearnedRules(companyId: string): Promise<number>;
 }
 
 function conflict() {
@@ -64,4 +66,5 @@ export class InMemoryPackStore implements PackStore {
     const list = (this.rules.get(companyId) || []).filter(r => !(r.merchant_key === rule.merchant_key && r.direction === rule.direction));
     this.rules.set(companyId, [...list, rule]);
   }
+  async deleteLearnedRules(companyId: string) { const n = (this.rules.get(companyId) || []).length; this.rules.delete(companyId); return n; }
 }

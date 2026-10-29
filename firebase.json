@@ -18,6 +18,12 @@
     },
     "database": {
       "port": 9000
+    },
+    "auth": {
+      "port": 9099
+    },
+    "storage": {
+      "port": 9199
     }
   }
 }

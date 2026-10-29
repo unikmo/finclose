@@ -1,6 +1,7 @@
 import { parseAmountToCents, parseBankStatementCsv, type IntakeResult } from './statement-intake';
 import { applyAccountingAdjustments } from './statement-accounting';
 import { buildRulePack, categoriseAll, type CategorySuggestion, type LearnedRule, type VatTreatment } from './categorisation-engine';
+import { unreconciledIds, type LedgerLine } from './reconciliation';
 import { buildReviewPack, renderEntriesCsv, renderReviewPackMarkdown, type ReviewPack } from './review-pack';
 
 // Orchestrates statement CSV -> categorisation -> accountant review pack.
@@ -28,7 +29,8 @@ export type StatementPrepRequest = {
 export type PrepExtras = {
   learned_rules?: LearnedRule[];
   document_links?: Record<string, string[]>;
-  overrides?: Record<string, { category_code: string; vat_treatment: VatTreatment }>;
+  overrides?: Record<string, { category_code: string; vat_treatment: VatTreatment; vat_rate?: number }>;
+  ledger_lines?: LedgerLine[]; // posted ledger movements for this bank account; enables the reconciliation check
   dismissed_duplicates?: string[]; // transaction ids the owner confirmed are real
 };
 
@@ -103,7 +105,7 @@ export function prepareStatementReview(request: StatementPrepRequest, generatedA
   const overridden: CategorySuggestion[] = categorised.map(suggestion => {
     const override = extras.overrides?.[suggestion.transaction_id];
     if (!override || !names.has(override.category_code)) return suggestion;
-    return { ...suggestion, category_code: override.category_code, category_name: names.get(override.category_code)!, vat_treatment: override.vat_treatment, confidence: 1, reason: 'LEARNED_RULE' as const, needs_review: false, notes: [...suggestion.notes, 'Set by a reviewer correction.'] };
+    return { ...suggestion, category_code: override.category_code, category_name: names.get(override.category_code)!, vat_treatment: override.vat_treatment, vat_rate: vatRegistered && override.vat_rate !== undefined ? override.vat_rate : suggestion.vat_rate, confidence: 1, reason: 'LEARNED_RULE' as const, needs_review: false, notes: [...suggestion.notes, 'Set by a reviewer correction.'] };
   });
   const adjusted = applyAccountingAdjustments(transactions, overridden, {
     company_name: companyName,
@@ -120,6 +122,7 @@ export function prepareStatementReview(request: StatementPrepRequest, generatedA
     suggestions,
     document_links: extras.document_links,
     accounting_findings: adjusted.findings,
+    unreconciled_transaction_ids: extras.ledger_lines ? unreconciledIds(transactions, extras.ledger_lines) : undefined,
     base_currency: currencyInput,
     generated_at: generatedAt
   });

@@ -39,3 +39,12 @@ test('Realtime Database source rules deny all direct client reads and writes wit
 test('Storage source rules deny all direct client reads and writes', () => {
   assertSingleDenyAllRule(read('storage.rules'), 'Storage');
 });
+
+test('firestore.indexes.json declares TTL policies on timestamp fields and the document index', async () => {
+  const { readFileSync } = await import('node:fs');
+  const idx = JSON.parse(readFileSync(new URL('../firestore.indexes.json', import.meta.url), 'utf8'));
+  for (const c of ['finclose_prod_rate_limits', 'finclose_prod_review_packs', 'finclose_prod_review_pack_inputs', 'finclose_prod_documents']) {
+    assert.ok(idx.fieldOverrides.some((o: { collectionGroup: string; fieldPath: string; ttl: boolean }) => o.collectionGroup === c && o.fieldPath === 'ttl_at' && o.ttl === true), `TTL missing for ${c}`);
+  }
+  assert.ok(idx.indexes.some((i: { collectionGroup: string }) => i.collectionGroup === 'finclose_prod_documents'));
+});

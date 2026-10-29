@@ -4,6 +4,7 @@ import { requireCompanyAccess, type OrganizationRole } from './tenancy';
 import { isRealDataMode } from './runtime-mode';
 import { InMemoryPackStore, type PackStore } from './pack-store';
 import { checkRateLimit } from './rate-limit';
+import { InMemoryDocumentStore, type DocumentStore } from './document-store';
 
 type Identity = Awaited<ReturnType<typeof authenticateRequest>>;
 export type Limiter = (key: string, limit: number, windowMs: number) => Promise<void>;
@@ -33,6 +34,17 @@ export async function packStore(): Promise<PackStore> {
   }
   if (!globalForStore.__finclosePackStore) globalForStore.__finclosePackStore = new InMemoryPackStore();
   return globalForStore.__finclosePackStore;
+}
+
+const globalForDocs = globalThis as unknown as { __finclosePackDocs?: DocumentStore };
+
+export async function documentStore(): Promise<DocumentStore> {
+  if (isRealDataMode()) {
+    const { FirebaseDocumentStore } = await import('./document-store-firebase');
+    return new FirebaseDocumentStore();
+  }
+  if (!globalForDocs.__finclosePackDocs) globalForDocs.__finclosePackDocs = new InMemoryDocumentStore();
+  return globalForDocs.__finclosePackDocs;
 }
 
 export type PackCaller = { company_id: string; organization_id: string; user_id: string };
