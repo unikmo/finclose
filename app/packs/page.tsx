@@ -9,7 +9,7 @@ type Entry = { transaction_id: string; date: string; amount_cents: number; curre
 type Exception = { code: string; severity: 'HIGH' | 'MEDIUM' | 'LOW'; transaction_id: string | null; message: string; suggested_action: string };
 type PackView = {
   error?: string;
-  record: { pack_id: string; company_id: string; status: string; version: number; revision: number; expires_at: number; signoff?: { by: string; at: number; note: string } };
+  record: { pack_id: string; company_id: string; status: string; version: number; revision: number; expires_at: number; answers?: Record<string, { note: string; document_ids: string[]; confirm_duplicate: boolean }>; signoff?: { by: string; at: number; note: string } };
   pack: {
     pack_hash: string;
     status: string;
@@ -65,6 +65,7 @@ export default function PacksPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [onlyReview, setOnlyReview] = useState(true);
+  const [fixed, setFixed] = useState<Set<string>>(new Set()); // rows corrected on this screen stay visible, marked as saved
   const [confirmErase, setConfirmErase] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
   const [form, setForm] = useState({ company_name: '', jurisdiction: 'EE', vat_registered: false, period_start: '', period_end: '', date_order: 'DMY', csv_text: '', opening_balance: '', closing_balance: '' });
@@ -99,6 +100,11 @@ export default function PacksPage() {
 
   const open = (id: string) => run(async () => setView(await call(`/api/review-packs/${id}?${q()}`)));
   const create = (e: React.FormEvent) => { e.preventDefault(); return run(async () => { const body = await post('/api/review-packs', form); setView(await call(`/api/review-packs/${body.record.pack_id}?${q()}`)); await refresh(); }); };
+  // Marked as saved only when the server accepted the change.
+  const correct = (transactionId: string, payload: Record<string, unknown>) => run(async () => {
+    setView(await post(`/api/review-packs/${view!.record.pack_id}`, { action: 'correct', transaction_id: transactionId, ...payload }));
+    setFixed(prev => new Set(prev).add(transactionId));
+  });
   const act = (action: string, payload: Record<string, unknown>) => run(async () => setView(await post(`/api/review-packs/${view!.record.pack_id}`, { action, ...payload })));
 
   const upload = (file: File | undefined) => file && run(async () => {
@@ -122,7 +128,7 @@ export default function PacksPage() {
   const clean = docs.filter(d => d.status === 'CLEAN' || d.status === 'RECEIVED');
   const open_ = view?.record.status === 'OPEN';
   const needsLook = view ? view.pack.entries.filter(e => e.status === 'NEEDS_REVIEW') : [];
-  const shownEntries = view ? (onlyReview && needsLook.length ? needsLook : view.pack.entries) : [];
+  const shownEntries = view ? (onlyReview && needsLook.length + fixed.size ? view.pack.entries.filter(e => e.status === 'NEEDS_REVIEW' || fixed.has(e.transaction_id)) : view.pack.entries) : [];
   const overall = view ? OVERALL[view.portfolio_status.status] || { label: humanise(view.portfolio_status.status), tone: '' } : null;
 
   return (
@@ -234,7 +240,7 @@ export default function PacksPage() {
             {view.pack.owner_questions.length === 0 && <p className="pr-note">No open questions.</p>}
             {view.pack.owner_questions.map(item => {
               const entry = view.pack.entries.find(e => e.transaction_id === item.transaction_id);
-              return <QuestionRow key={item.transaction_id + item.question} item={item} entry={entry} docs={clean} disabled={!open_ || busy} onAnswer={payload => act('answer', { transaction_id: item.transaction_id, ...payload })} />;
+              return <QuestionRow key={item.transaction_id + item.question} item={item} entry={entry} saved={view.record.answers?.[item.transaction_id]} docs={clean} disabled={!open_ || busy} onAnswer={payload => act('answer', { transaction_id: item.transaction_id, ...payload })} />;
             })}
             {!open_ && <p className="pr-note">This version is {view.record.status === 'SIGNED_OFF' ? 'signed off' : 'replaced by a newer one'}, so it can no longer be changed.</p>}
 
@@ -248,7 +254,7 @@ export default function PacksPage() {
                 <caption className="pr-sr">Payments with their category and VAT treatment</caption>
                 <thead><tr><th scope="col">Date</th><th scope="col">Paid to or from</th><th scope="col">Amount</th><th scope="col">Category and VAT</th></tr></thead>
                 <tbody>
-                  {shownEntries.map(e => <CorrectionRow key={e.transaction_id} entry={e} options={view.options} disabled={!open_ || busy} onCorrect={payload => act('correct', { transaction_id: e.transaction_id, ...payload })} />)}
+                  {shownEntries.map(e => <CorrectionRow key={e.transaction_id} entry={e} saved={fixed.has(e.transaction_id)} options={view.options} disabled={!open_ || busy} onCorrect={payload => correct(e.transaction_id, payload)} />)}
                 </tbody>
               </table>
             </div>
@@ -287,7 +293,7 @@ export default function PacksPage() {
   );
 }
 
-function QuestionRow({ item, entry, docs, disabled, onAnswer }: { item: { question: string }; entry?: Entry; docs: Doc[]; disabled: boolean; onAnswer: (p: Record<string, unknown>) => void }) {
+function QuestionRow({ item, entry, saved, docs, disabled, onAnswer }: { item: { question: string }; entry?: Entry; saved?: { note: string; document_ids: string[]; confirm_duplicate: boolean }; docs: Doc[]; disabled: boolean; onAnswer: (p: Record<string, unknown>) => void }) {
   const [note, setNote] = useState('');
   const [doc, setDoc] = useState('');
   const who = entry ? entry.counterparty || entry.description : 'this payment';
@@ -295,6 +301,7 @@ function QuestionRow({ item, entry, docs, disabled, onAnswer }: { item: { questi
     <div className="pr-callout pr-question">
       <p><strong>{entry ? `${entry.date}, ${who}, ${money(entry.amount_cents, entry.currency)}` : ''}</strong></p>
       <p>{item.question}</p>
+      {saved && (saved.note || saved.document_ids.length > 0) && <p className="pr-saved" role="status">Saved: {saved.note ? `“${saved.note}”` : ''}{saved.note && saved.document_ids.length ? ', ' : ''}{saved.document_ids.length ? `${saved.document_ids.length} receipt(s) attached` : ''}. Your accountant will see this. You can change it below.</p>}
       <div className="pr-actions pr-tight">
         <input aria-label={`Your answer about ${who}`} placeholder="Your answer" value={note} onChange={e => setNote(e.target.value)} className="pr-grow" />
         <select aria-label={`Receipt for ${who}`} value={doc} onChange={e => setDoc(e.target.value)}><option value="">No receipt</option>{docs.map(d => <option key={d.document_id} value={d.document_id}>{d.filename}</option>)}</select>
@@ -305,7 +312,7 @@ function QuestionRow({ item, entry, docs, disabled, onAnswer }: { item: { questi
   );
 }
 
-function CorrectionRow({ entry, options, disabled, onCorrect }: { entry: Entry; options: PackView['options']; disabled: boolean; onCorrect: (p: Record<string, unknown>) => void }) {
+function CorrectionRow({ entry, saved, options, disabled, onCorrect }: { entry: Entry; saved: boolean; options: PackView['options']; disabled: boolean; onCorrect: (p: Record<string, unknown>) => void }) {
   const [category, setCategory] = useState(entry.category_code);
   const [vat, setVat] = useState(entry.vat_treatment);
   const [rate, setRate] = useState('');
@@ -315,7 +322,7 @@ function CorrectionRow({ entry, options, disabled, onCorrect }: { entry: Entry; 
   return (
     <tr>
       <td data-label="Date">{entry.date}</td>
-      <td data-label="Paid to or from">{who}<em>{entry.status === 'NEEDS_REVIEW' ? 'Needs a look' : 'Looks fine'}{entry.document_ids.length ? `, ${entry.document_ids.length} receipt(s) attached` : ''}</em></td>
+      <td data-label="Paid to or from">{who}<em>{saved ? 'Saved' : entry.status === 'NEEDS_REVIEW' ? 'Needs a look' : 'Looks fine'}{entry.document_ids.length ? `, ${entry.document_ids.length} receipt(s) attached` : ''}</em></td>
       <td data-label="Amount" className="pr-right-on-wide">{money(entry.amount_cents, entry.currency)}</td>
       <td data-label="Category and VAT">
         <div className="pr-controls">
