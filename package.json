@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "rule-accuracy": "node --experimental-strip-types --import ./tests/register-ts-resolve.mjs scripts/rule-accuracy.ts",
     "test": "node --experimental-strip-types --import ./tests/register-ts-resolve.mjs --test tests/*.test.ts",
     "test:emulator": "firebase emulators:exec --only firestore,database,auth,storage --project demo-finclose \"node --experimental-strip-types --import ./tests/register-ts-resolve.mjs --test tests/emulator/*.emulator.ts\""
   },

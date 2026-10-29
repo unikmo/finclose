@@ -90,6 +90,21 @@ test('export, erase and purge work on Firestore and Storage, for one company onl
   assert.equal((await docs.listByCompany('e2')).length, 0);
 });
 
+test('a company account map is stored per company on Firestore, reset cleanly, and erased with the company', async () => {
+  const map = { CLOUD: { code: '5200', name: 'Server costs' } };
+  assert.equal(await packs.accountOverrides('m1'), null);
+  await packs.setAccountOverrides('m1', map);
+  await packs.setAccountOverrides('m2', { CLOUD: { code: '5300', name: 'Other' } });
+  assert.deepEqual(await packs.accountOverrides('m1'), map);
+  assert.equal((await exportCompanyData(packs, docs, 'm1')).account_overrides?.CLOUD.code, '5200');
+  const receipt = await eraseCompanyData(packs, docs, 'm1', 'm1');
+  assert.equal(receipt.account_map, true);
+  assert.equal(await packs.accountOverrides('m1'), null);
+  assert.equal((await packs.accountOverrides('m2'))?.CLOUD.code, '5300');
+  await packs.setAccountOverrides('m2', null);
+  assert.equal(await packs.accountOverrides('m2'), null);
+});
+
 after(async () => {
   await Promise.all(getApps().map(a => deleteApp(a)));
 });

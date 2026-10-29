@@ -1,4 +1,5 @@
 import type { LearnedRule, VatTreatment } from './categorisation-engine';
+import type { AccountOverrides } from './account-map-custom';
 
 // Storage for saved review packs. The lifecycle logic only talks to this
 // interface, so it is tested against the in-memory store and runs on Firestore
@@ -39,6 +40,8 @@ export interface PackStore {
   learnedRules(companyId: string): Promise<LearnedRule[]>;
   addLearnedRule(companyId: string, rule: LearnedRule): Promise<void>;
   deleteLearnedRules(companyId: string): Promise<number>;
+  accountOverrides(companyId: string): Promise<AccountOverrides | null>;
+  setAccountOverrides(companyId: string, overrides: AccountOverrides | null): Promise<void>; // null resets to the default map
 }
 
 function conflict() {
@@ -67,4 +70,10 @@ export class InMemoryPackStore implements PackStore {
     this.rules.set(companyId, [...list, rule]);
   }
   async deleteLearnedRules(companyId: string) { const n = (this.rules.get(companyId) || []).length; this.rules.delete(companyId); return n; }
+  private accounts = new Map<string, AccountOverrides>();
+  async accountOverrides(companyId: string) { return structuredClone(this.accounts.get(companyId) || null); }
+  async setAccountOverrides(companyId: string, overrides: AccountOverrides | null) {
+    if (overrides && Object.keys(overrides).length) this.accounts.set(companyId, structuredClone(overrides));
+    else this.accounts.delete(companyId);
+  }
 }

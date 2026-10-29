@@ -10,7 +10,7 @@ export type Account = { code: string; name: string; type: 'ASSET' | 'LIABILITY' 
 export type AccountMap = {
   id: string;
   jurisdiction: string;
-  status: 'FINCLOSE_DEFAULT_NOT_STATUTORY';
+  status: 'FINCLOSE_DEFAULT_NOT_STATUTORY' | 'COMPANY_CUSTOMISED_NOT_STATUTORY';
   bank: Account;
   vat_input: Account;
   vat_output: Account;
@@ -126,7 +126,9 @@ export function buildJournal(pack: ReviewPack, map: AccountMap = buildAccountMap
     account_totals: [...totals.values()].sort((a, b) => a.account_code.localeCompare(b.account_code)),
     skipped,
     balanced: debit === credit,
-    notice: 'Proposed lines for accountant review using FinClose default account numbers. Not a statutory chart, not posted anywhere.'
+    notice: map.status === 'COMPANY_CUSTOMISED_NOT_STATUTORY'
+      ? 'Proposed lines for accountant review using this company\'s own account numbers. Not a statutory chart, not posted anywhere.'
+      : 'Proposed lines for accountant review using FinClose default account numbers. Not a statutory chart, not posted anywhere.'
   };
 }
 

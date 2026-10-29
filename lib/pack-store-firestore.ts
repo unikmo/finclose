@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import type { LearnedRule } from './categorisation-engine';
+import type { AccountOverrides } from './account-map-custom';
 import type { PackRecord, PackStore } from './pack-store';
 
 // Firestore implementation of PackStore (PILOT/PRODUCTION). Kept apart from
@@ -15,6 +16,7 @@ function conflict() {
 const PACKS = 'finclose_prod_review_packs';
 const INPUTS = 'finclose_prod_review_pack_inputs';
 const RULES = 'finclose_prod_learned_rules';
+const ACCOUNTS = 'finclose_prod_account_maps';
 
 function safeId(value: string) { return value.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120); }
 
@@ -82,5 +84,14 @@ export class FirestorePackStore implements PackStore {
     snap.docs.forEach(doc => batch.delete(doc.ref));
     await batch.commit();
     return snap.size;
+  }
+  async accountOverrides(companyId: string) {
+    const snap = await (await this.db()).collection(ACCOUNTS).doc(safeId(companyId)).get();
+    return snap.exists ? (snap.data()!.overrides as AccountOverrides) : null;
+  }
+  async setAccountOverrides(companyId: string, overrides: AccountOverrides | null) {
+    const ref = (await this.db()).collection(ACCOUNTS).doc(safeId(companyId));
+    if (overrides && Object.keys(overrides).length) await ref.set({ company_id: companyId, overrides });
+    else await ref.delete();
   }
 }

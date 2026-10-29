@@ -27,6 +27,7 @@ export async function exportCompanyData(packs: PackStore, docs: DocumentStore, c
     exported_at: now,
     packs: packOut,
     learned_rules: await packs.learnedRules(companyId),
+    account_overrides: await packs.accountOverrides(companyId),
     documents: await docs.listByCompany(companyId), // metadata and hashes; file bytes are fetched separately
     notes: ['Includes expired packs not yet purged.', 'Uploaded file bytes are not inlined; use the document ids to fetch them.']
   };
@@ -46,7 +47,9 @@ export async function eraseCompanyData(packs: PackStore, docs: DocumentStore, co
   const documentList = await docs.listByCompany(companyId);
   for (const d of documentList) await docs.delete(d);
   const rules = await packs.deleteLearnedRules(companyId);
-  const receipt = { company_id: companyId, erased_at: now, packs: packCount, documents: documentList.length, learned_rules: rules };
+  const hadAccountMap = (await packs.accountOverrides(companyId)) !== null;
+  await packs.setAccountOverrides(companyId, null);
+  const receipt = { company_id: companyId, erased_at: now, packs: packCount, documents: documentList.length, learned_rules: rules, account_map: hadAccountMap };
   return { ...receipt, receipt_hash: crypto.createHash('sha256').update(JSON.stringify(receipt)).digest('hex') };
 }
 
