@@ -5,6 +5,14 @@ import { isRealDataMode } from './runtime-mode';
 import { InMemoryPackStore, type PackStore } from './pack-store';
 import { checkRateLimit } from './rate-limit';
 
+type Identity = Awaited<ReturnType<typeof authenticateRequest>>;
+export type Limiter = (key: string, limit: number, windowMs: number) => Promise<void>;
+
+async function sharedLimiter(key: string, limit: number, windowMs: number) {
+  const [{ getFirestore }, { firebaseApp }, { checkSharedRateLimit }] = await Promise.all([import('firebase-admin/firestore'), import('./finclose-backend'), import('./rate-limit-shared')]);
+  await checkSharedRateLimit(getFirestore(firebaseApp()), key, limit, windowMs);
+}
+
 // Shared by the saved-pack routes: picks the store, authenticates, enforces
 // tenancy and rate limits. In LAB mode packs live in memory and are lost on
 // restart. In PILOT/PRODUCTION they need the same explicit operator switch as
@@ -30,7 +38,12 @@ export async function packStore(): Promise<PackStore> {
 export type PackCaller = { company_id: string; organization_id: string; user_id: string };
 
 export async function authorisePackCall(req: NextRequest, companyIdInput: unknown, minimum: OrganizationRole, limit = 60): Promise<PackCaller> {
-  const auth = await authenticateRequest(req);
+  return authoriseIdentity(await authenticateRequest(req), companyIdInput, minimum, limit);
+}
+
+// Everything after sign-in. Split out so tests can supply an identity and a limiter.
+// Real-data mode uses the Firestore-backed limit shared by all instances; LAB uses process memory.
+export async function authoriseIdentity(auth: Identity, companyIdInput: unknown, minimum: OrganizationRole, limit = 60, limiter?: Limiter): Promise<PackCaller> {
   const companyId = String(companyIdInput || '').trim();
   if (isRealDataMode()) {
     if (auth.kind !== 'customer') throw httpError('sign in to use review packs', 401);
@@ -38,7 +51,7 @@ export async function authorisePackCall(req: NextRequest, companyIdInput: unknow
     if (!companyId) throw httpError('company_id is required in real-data mode', 400);
     const access = await requireCompanyAccess(companyId, auth.user, minimum);
     const caller = { company_id: companyId, organization_id: access.organization_id, user_id: auth.user.user_id };
-    checkRateLimit(`pack:${caller.user_id}`, limit, 60_000);
+    await (limiter || sharedLimiter)(`pack:${caller.user_id}`, limit, 60_000);
     return caller;
   }
   const caller = { company_id: companyId || 'lab_company', organization_id: 'lab_org', user_id: 'lab' };
