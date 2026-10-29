@@ -1,0 +1,41 @@
+/* "Prepare for review" screen: same ink/brass palette as the home shell and Firm Workspace. */
+.pr-shell{min-height:100vh;color:var(--fc-parchment);background:radial-gradient(circle at 88% -8%,rgba(141,183,227,.18),transparent 32rem),radial-gradient(circle at 12% 18%,rgba(214,173,87,.07),transparent 24rem),var(--fc-ink);padding:0 32px 64px}
+.pr-nav{width:min(1080px,100%);height:86px;margin:0 auto;display:flex;align-items:center;border-bottom:1px solid rgba(141,183,227,.18)}
+.pr-brand{display:flex;align-items:center;gap:13px;color:var(--fc-parchment);font-size:16px;font-weight:700}
+.pr-brand em{font-style:normal;color:var(--fc-brass);font-weight:750}
+.pr-logo{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:var(--fc-brass);color:var(--fc-ink);font-size:15px;font-weight:900}
+.pr-body{width:min(1080px,100%);margin:0 auto;padding-top:32px}
+.pr-body h1{font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif;font-size:32px;font-weight:600;margin:0 0 10px}
+.pr-body h2{font-size:15px;margin:28px 0 10px}
+.pr-lead,.pr-note{color:var(--fc-parchment-dim);font-size:13px;line-height:1.6;max-width:70ch}
+.pr-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:24px 0;padding:20px;border:1px solid var(--fc-line);border-radius:16px;background:rgba(255,255,255,.02)}
+.pr-form label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700}
+.pr-form input,.pr-form select{min-height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(141,183,227,.27);background:rgba(255,255,255,.02);color:var(--fc-parchment);font-size:13px}
+.pr-form input[type=file]{padding:8px 12px}
+.pr-check{flex-direction:row!important;align-items:center;gap:10px!important}
+.pr-check input{min-height:0}
+.pr-wide{grid-column:1/-1}
+.pr-hint{font-weight:400;color:var(--fc-parchment-dim);font-size:11px}
+.pr-button{min-height:40px;padding:0 18px;border:0;border-radius:10px;background:var(--fc-brass);color:var(--fc-ink);font-size:13px;font-weight:800;cursor:pointer;justify-self:start}
+.pr-button:disabled{opacity:.5;cursor:not-allowed}
+.pr-secondary{background:transparent;color:var(--fc-parchment);border:1px solid rgba(141,183,227,.4)}
+.pr-actions{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}
+.pr-error{padding:12px 16px;border-radius:10px;background:rgba(224,103,103,.12);color:#e06767;font-size:13px}
+.pr-callout{padding:12px 16px;border-radius:10px;background:rgba(214,173,87,.1);border:1px solid rgba(214,173,87,.3);font-size:12px;line-height:1.5}
+.pr-callout p{margin:4px 0}
+.pr-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.pr-tile{padding:16px 14px;border-radius:16px;border:1px solid var(--fc-line);background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:4px}
+.pr-tile strong{font-size:26px;font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif}
+.pr-tile span{font-size:11px;color:var(--fc-parchment-dim);font-weight:700}
+.pr-ok strong{color:#3ecf8e}
+.pr-warn strong{color:var(--fc-brass)}
+.pr-list{font-size:13px;line-height:1.7;padding-left:20px;max-width:90ch}
+.pr-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--fc-line);border-radius:16px;overflow:hidden}
+.pr-table thead th{text-align:left;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fc-parchment-dim);padding:12px 16px;background:rgba(7,24,46,.4);border-bottom:1px solid var(--fc-line)}
+.pr-table tbody td{padding:12px 16px;font-size:13px;border-bottom:1px solid rgba(141,183,227,.1);vertical-align:top}
+.pr-table em{display:block;color:var(--fc-parchment-dim);font-style:normal;font-size:12px;margin-top:2px}
+.pr-pill{font-size:10px;font-weight:800;padding:4px 10px;border-radius:999px}
+.pr-high{background:rgba(224,103,103,.15);color:#e06767}
+.pr-medium{background:rgba(214,173,87,.15);color:var(--fc-brass)}
+.pr-low{background:rgba(141,183,227,.15);color:#8db7e3}
+@media (max-width:760px){.pr-form,.pr-summary{grid-template-columns:1fr}.pr-shell{padding:0 16px 48px}}

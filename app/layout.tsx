@@ -5,6 +5,7 @@ import './account-first.css';
 import './payroll-onboarding.css';
 import './payroll-v028-polish.css';
 import './firm-portfolio.css';
+import './prepare.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://antibalcony.com'),
