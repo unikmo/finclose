@@ -44,7 +44,8 @@ export function validateOverrides(input: unknown, jurisdiction: string): Account
     if (seen !== undefined && seen !== account.name) throw bad(`code ${account.code} is used for two different accounts ("${seen}" and "${account.name}"; see ${slot})`);
     names.set(account.code, account.name);
   }
-  return clean;
+  // Only real changes are kept, so a screen can send the whole table and still store just the differences.
+  return Object.fromEntries(Object.entries(clean).filter(([key, o]) => o.code !== base[key].code || o.name !== base[key].name));
 }
 
 function effectiveSlots(base: Record<string, Account>, overrides: AccountOverrides): Record<string, Account> {

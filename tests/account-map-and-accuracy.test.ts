@@ -114,3 +114,11 @@ test('accuracy harness refuses a file with no label column and warns about unkno
   assert.equal(r.correct, 0);
   assert.match(r.warnings.join(' '), /NOT_A_CATEGORY/);
 });
+
+test('sending the whole table stores only the rows that differ from the default', () => {
+  const base = buildAccountMap('EE');
+  const whole = Object.fromEntries(Object.entries(base.by_category).map(([k, a]) => [k, { code: a.code, name: a.name }]));
+  whole.CLOUD = { code: '5200', name: 'Server costs' };
+  assert.deepEqual(validateOverrides(whole, 'EE'), { CLOUD: { code: '5200', name: 'Server costs' } });
+  assert.deepEqual(validateOverrides({ bank: { code: '1000', name: 'Bank' } }, 'EE'), {});
+});
