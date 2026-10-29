@@ -52,14 +52,23 @@ export class FirestorePackStore implements PackStore {
   async update(record: PackRecord, expectedRevision: number) {
     const db = await this.db();
     const ref = db.collection(PACKS).doc(record.pack_id);
+    let expiryChanged = false;
     await db.runTransaction(async tx => {
       const snap = await tx.get(ref);
       if (!snap.exists || (snap.data() as PackRecord).revision !== expectedRevision) throw conflict();
+      expiryChanged = (snap.data() as PackRecord).expires_at !== record.expires_at;
       tx.set(ref, withTtl(record));
     });
+    // The stored statement carries its own expiry. It is updated only when the expiry changed, and outside
+    // the transaction: a blind write to it inside made every concurrent edit collide (the 409 emulator test caught that).
+    if (expiryChanged) await db.collection(INPUTS).doc(record.pack_id).set({ expires_at: record.expires_at, ttl_at: new Date(record.expires_at) }, { merge: true });
   }
   async listByCompany(companyId: string) {
     const snap = await (await this.db()).collection(PACKS).where('company_id', '==', companyId).orderBy('created_at', 'desc').limit(200).get();
+    return snap.docs.map(doc => strip<PackRecord>(doc.data()));
+  }
+  async listExpired(now: number, limit: number) {
+    const snap = await (await this.db()).collection(PACKS).where('expires_at', '<', now).limit(limit).get();
     return snap.docs.map(doc => strip<PackRecord>(doc.data()));
   }
   async delete(packId: string) {

@@ -4,7 +4,8 @@ import { buildRulePack, learnFromCorrection, type VatTreatment } from './categor
 import { parseBankStatementCsv } from './statement-intake';
 import { prepareStatementReview, type PrepExtras, type StatementPrepRequest, type StatementPrepResult } from './statement-prep';
 import type { Correction, OwnerAnswer, PackEvent, PackRecord, PackStore } from './pack-store';
-import { assertLinkable } from './document-intake';
+import { assertLinkable, keepDocumentsUntil } from './document-intake';
+import { expiryFrom, retentionPolicy } from './retention';
 import type { DocumentStore } from './document-store';
 import { allowedVatRates } from './vat-summary';
 
@@ -14,7 +15,6 @@ import { allowedVatRates } from './vat-summary';
 // after the logic has been tested against real statements. A saved pack stays
 // PREPARED_NOT_APPROVED with NO_EXTERNAL_POSTING.
 
-export const RETENTION_DAYS = 90;
 const MAX_EVENTS = 500;
 const MAX_STORED_INPUT_BYTES = 700_000; // compressed; keeps the Firestore document under 1 MB
 const VAT_VALUES: VatTreatment[] = ['NO_VAT', 'INPUT_VAT_DOMESTIC', 'REVERSE_CHARGE_FOREIGN_SERVICE', 'OUT_OF_SCOPE', 'NEEDS_INVOICE_REVIEW', 'NOT_VAT_REGISTERED'];
@@ -104,7 +104,7 @@ export async function createPack(store: PackStore, args: { company_id: string; o
     events: [],
     created_by: args.actor.user_id,
     created_at: now,
-    expires_at: now + RETENTION_DAYS * 86_400_000
+    expires_at: expiryFrom(now, retentionPolicy().open_pack_days)
   };
   pushEvents(record, event('PACK_CREATED', args.actor, { version: record.version, pack_hash: record.pack_hash }));
   await store.insert(record, blob);
@@ -160,6 +160,7 @@ export async function recordOwnerAnswer(
   const next: PackRecord = { ...record, revision: expected + 1, answers: { ...record.answers, [id]: answer } };
   pushEvents(next, event('OWNER_ANSWER', actor, { transaction_id: id, documents: documents.length, confirm_duplicate: confirmDuplicate }));
   await store.update(next, expected);
+  if (docStore && documents.length) await keepDocumentsUntil(docStore, documents, next.expires_at);
   return { record: next, result: await rebuild(store, next, request) };
 }
 
@@ -213,7 +214,8 @@ export async function signOffPack(
   companyId: string,
   actor: Actor,
   input: { pack_hash?: unknown; note?: unknown; accept_open_items?: unknown },
-  enabled = signOffEnabled()
+  enabled = signOffEnabled(),
+  docStore?: DocumentStore // when given, the receipts the pack cites are kept as long as the pack
 ): Promise<LoadedPack> {
   if (!enabled) throw httpError('accountant sign-off is not enabled in this deployment', 403);
   const { record, request } = await load(store, packId, companyId);
@@ -230,9 +232,11 @@ export async function signOffPack(
   }
   const expected = record.revision;
   const at = Date.now();
-  const next: PackRecord = { ...record, status: 'SIGNED_OFF', revision: expected + 1, signoff: { by: actor.user_id, at, pack_hash: result.pack.pack_hash, note, accepted_open_items: acceptOpen && !result.pack.summary.accountant_ready } };
+  const keepUntil = Math.max(record.expires_at, expiryFrom(at, retentionPolicy().signed_off_pack_days)); // sign-off only ever lengthens retention
+  const next: PackRecord = { ...record, status: 'SIGNED_OFF', revision: expected + 1, expires_at: keepUntil, signoff: { by: actor.user_id, at, pack_hash: result.pack.pack_hash, note, accepted_open_items: acceptOpen && !result.pack.summary.accountant_ready } };
   pushEvents(next, event('SIGNED_OFF', actor, { pack_hash: result.pack.pack_hash, accepted_open_items: next.signoff!.accepted_open_items }));
   await store.update(next, expected);
+  if (docStore) await keepDocumentsUntil(docStore, Object.values(next.answers).flatMap(a => a.document_ids), keepUntil);
   return { record: next, result };
 }
 

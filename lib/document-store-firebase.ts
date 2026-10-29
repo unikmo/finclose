@@ -63,4 +63,16 @@ export class FirebaseDocumentStore implements DocumentStore {
     await (await this.bucket()).file(record.storage_path).delete({ ignoreNotFound: true });
     await (await this.db()).collection(DOCS).doc(record.document_id).delete();
   }
+  async extendExpiry(id: string, expiresAt: number) {
+    const db = await this.db();
+    const ref = db.collection(DOCS).doc(id.replace(/[^A-Za-z0-9_-]/g, '_'));
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (snap.exists && expiresAt > (snap.data()!.expires_at as number)) tx.update(ref, { expires_at: expiresAt, ttl_at: new Date(expiresAt) });
+    });
+  }
+  async listExpired(now: number, limit: number) {
+    const snap = await (await this.db()).collection(DOCS).where('expires_at', '<', now).limit(limit).get();
+    return snap.docs.map(d => strip(d.data()));
+  }
 }

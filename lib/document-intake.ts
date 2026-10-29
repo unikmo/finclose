@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { validateFinancialUpload } from './file-security';
 import type { DocumentRecord, DocumentStatus, DocumentStore } from './document-store';
+import { expiryFrom, retentionPolicy } from './retention';
 
 // Receipts and invoices an owner attaches to a transaction. Rules:
 //  - the file is checked by type, signature and size (file-security.ts);
@@ -10,7 +11,6 @@ import type { DocumentRecord, DocumentStatus, DocumentStore } from './document-s
 //  - a decision is one-way, like the existing service-upload review;
 //  - the same file uploaded twice for a company is stored once.
 
-export const DOCUMENT_RETENTION_DAYS = 90;
 
 export type SecurityState = { status: 'RECEIVED' | 'QUARANTINED'; security_review_status: 'NOT_REQUIRED_LAB' | 'AWAITING_MANUAL_REVIEW' | 'AWAITING_SCANNER' };
 
@@ -50,7 +50,7 @@ export async function uploadDocument(
     uploaded_by: args.actor.user_id,
     uploaded_at: now,
     storage_path: `finclose/${security.status === 'RECEIVED' ? 'accepted' : 'quarantine'}/${args.company_id.replace(/[^A-Za-z0-9_-]/g, '_')}/${id}`,
-    expires_at: now + DOCUMENT_RETENTION_DAYS * 86_400_000
+    expires_at: expiryFrom(now, retentionPolicy().document_days)
   };
   await store.insert(record, args.bytes);
   return { record, duplicate: false };
@@ -92,4 +92,9 @@ export async function assertLinkable(store: DocumentStore, companyId: string, id
     const status: DocumentStatus = record.status;
     if (status !== 'CLEAN') throw httpError(`document ${id} is ${status.toLowerCase()} and cannot be linked yet`, 409);
   }
+}
+
+// A receipt a pack depends on must not expire before the pack does. Only ever moves the expiry later.
+export async function keepDocumentsUntil(docs: DocumentStore, documentIds: string[], expiresAt: number): Promise<void> {
+  for (const id of new Set(documentIds)) await docs.extendExpiry(id, expiresAt);
 }

@@ -70,3 +70,20 @@ export async function purgeExpired(packs: PackStore, docs: DocumentStore, compan
   }
   return { packs: packCount, documents: docCount };
 }
+
+// Scheduled purge across every company: removes what has passed retention, including the stored file
+// bytes that a Firestore TTL policy cannot reach. Bounded per run; `more` says another run is needed.
+// One failing record never stops the rest; failures are counted so the run does not look cleaner than it was.
+export async function purgeAllExpired(packs: PackStore, docs: DocumentStore, now = Date.now(), limit = 200) {
+  const out = { packs: 0, documents: 0, failed: 0, more: false };
+  const expiredPacks = await packs.listExpired(now, limit);
+  for (const record of expiredPacks) {
+    try { await packs.delete(record.pack_id); out.packs += 1; } catch { out.failed += 1; }
+  }
+  const expiredDocs = await docs.listExpired(now, limit);
+  for (const d of expiredDocs) {
+    try { await docs.delete(d); out.documents += 1; } catch { out.failed += 1; }
+  }
+  out.more = expiredPacks.length >= limit || expiredDocs.length >= limit;
+  return out;
+}

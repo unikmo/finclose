@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     let loaded: LoadedPack;
     if (action === 'answer') loaded = await recordOwnerAnswer(store, ctx.params.packId, caller.company_id, actor, body, await documentStore());
     else if (action === 'correct') loaded = await recordCorrection(store, ctx.params.packId, caller.company_id, actor, body);
-    else loaded = await signOffPack(store, ctx.params.packId, caller.company_id, actor, body);
+    else loaded = await signOffPack(store, ctx.params.packId, caller.company_id, actor, body, undefined, await documentStore());
     return NextResponse.json(await view(loaded), { headers: NO_STORE });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: statusFor(error) });

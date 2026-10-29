@@ -31,6 +31,8 @@ export interface DocumentStore {
   setReview(record: DocumentRecord): Promise<void>; // metadata only; callers enforce the one-way transition
   readBytes(record: DocumentRecord): Promise<Buffer>;
   delete(record: DocumentRecord): Promise<void>;
+  extendExpiry(documentId: string, expiresAt: number): Promise<void>; // only ever moves the expiry later
+  listExpired(now: number, limit: number): Promise<DocumentRecord[]>; // across all companies, for the scheduled purge
 }
 
 export class InMemoryDocumentStore implements DocumentStore {
@@ -54,4 +56,11 @@ export class InMemoryDocumentStore implements DocumentStore {
     return Buffer.from(hit.bytes);
   }
   async delete(record: DocumentRecord) { this.docs.delete(record.document_id); }
+  async extendExpiry(id: string, expiresAt: number) {
+    const hit = this.docs.get(id);
+    if (hit && expiresAt > hit.record.expires_at) hit.record = { ...hit.record, expires_at: expiresAt };
+  }
+  async listExpired(now: number, limit: number) {
+    return [...this.docs.values()].map(d => ({ ...d.record })).filter(r => r.expires_at < now).slice(0, limit);
+  }
 }

@@ -40,6 +40,7 @@ export interface PackStore {
   learnedRules(companyId: string): Promise<LearnedRule[]>;
   addLearnedRule(companyId: string, rule: LearnedRule): Promise<void>;
   deleteLearnedRules(companyId: string): Promise<number>;
+  listExpired(now: number, limit: number): Promise<PackRecord[]>; // across all companies, for the scheduled purge
   accountOverrides(companyId: string): Promise<AccountOverrides | null>;
   setAccountOverrides(companyId: string, overrides: AccountOverrides | null): Promise<void>; // null resets to the default map
 }
@@ -64,6 +65,9 @@ export class InMemoryPackStore implements PackStore {
     return [...this.packs.values()].map(item => structuredClone(item.record)).filter(r => r.company_id === companyId).sort((a, b) => b.created_at - a.created_at);
   }
   async delete(packId: string) { this.packs.delete(packId); }
+  async listExpired(now: number, limit: number) {
+    return [...this.packs.values()].map(item => structuredClone(item.record)).filter(r => r.expires_at < now).slice(0, limit);
+  }
   async learnedRules(companyId: string) { return structuredClone(this.rules.get(companyId) || []); }
   async addLearnedRule(companyId: string, rule: LearnedRule) {
     const list = (this.rules.get(companyId) || []).filter(r => !(r.merchant_key === rule.merchant_key && r.direction === rule.direction));

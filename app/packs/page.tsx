@@ -133,7 +133,7 @@ export default function PacksPage() {
       </header>
       <section className="pr-body" id="content">
         <h1>Saved review packs</h1>
-        <p className="pr-lead">A review pack is your bank statement, sorted and checked, ready for your accountant. Answer the open questions, attach receipts and fix any category that is wrong. Nothing is posted to your accounts. Packs are kept for 90 days.</p>
+        <p className="pr-lead">A review pack is your bank statement, sorted and checked, ready for your accountant. Answer the open questions, attach receipts and fix any category that is wrong. Nothing is posted to your accounts. Packs are deleted automatically after a set time; the date is shown on each pack.</p>
 
         <div className="pr-form pr-oneperrow">
           <label htmlFor="company-id">Company ID <span className="pr-hint">(needed when using real data)</span></label>
@@ -207,6 +207,7 @@ export default function PacksPage() {
         {view && overall && (
           <section className="pr-result" aria-labelledby="result-h" aria-live="polite">
             <h2 id="result-h">Version {view.record.version}: {PACK_STATUS[view.record.status] || humanise(view.record.status)}{view.record.signoff ? ` (by ${view.record.signoff.by})` : ''}</h2>
+            <p className="pr-note">Kept until {new Date(view.record.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}, then deleted automatically{view.record.status === 'SIGNED_OFF' ? ' (a signed-off pack is kept longer)' : ''}.</p>
             <div className="pr-summary" role="list">
               <div role="listitem" className={`pr-tile ${view.pack.summary.accountant_ready ? 'pr-ok' : 'pr-warn'}`}><strong>{view.pack.summary.readiness_percent}%</strong><span>{view.pack.summary.accountant_ready ? 'Ready for your accountant' : 'Not ready yet'}</span></div>
               <div role="listitem" className="pr-tile"><strong>{view.pack.summary.transaction_count}</strong><span>Payments in the statement</span></div>

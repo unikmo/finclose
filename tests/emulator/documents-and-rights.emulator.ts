@@ -17,8 +17,8 @@ const bucket = getStorage(app).bucket();
 const { FirebaseDocumentStore } = await import('../../lib/document-store-firebase.ts');
 const { FirestorePackStore } = await import('../../lib/pack-store-firestore.ts');
 const { uploadDocument, reviewDocument } = await import('../../lib/document-intake.ts');
-const { createPack, getPack, recordCorrection } = await import('../../lib/pack-lifecycle.ts');
-const { eraseCompanyData, exportCompanyData, purgeExpired } = await import('../../lib/data-rights.ts');
+const { createPack, getPack, recordCorrection, recordOwnerAnswer, signOffPack } = await import('../../lib/pack-lifecycle.ts');
+const { eraseCompanyData, exportCompanyData, purgeExpired, purgeAllExpired } = await import('../../lib/data-rights.ts');
 const { checkSharedRateLimit } = await import('../../lib/rate-limit-shared.ts');
 
 const docs = new FirebaseDocumentStore(db, bucket as never);
@@ -103,6 +103,40 @@ test('a company account map is stored per company on Firestore, reset cleanly, a
   assert.equal((await packs.accountOverrides('m2'))?.CLOUD.code, '5300');
   await packs.setAccountOverrides('m2', null);
   assert.equal(await packs.accountOverrides('m2'), null);
+});
+
+test('sign-off extends the pack, its stored statement and its receipts on Firestore; the scheduled purge then spares them', async () => {
+  const created = await createPack(packs, { company_id: 'r1', organization_id: 'o', actor, request });
+  const plain = await createPack(packs, { company_id: 'r2', organization_id: 'o', actor, request });
+  const up = await uploadDocument(docs, { company_id: 'r1', organization_id: 'o', actor, filename: 'r.pdf', bytes: Buffer.from('%PDF-1.4 r1') }, { status: 'RECEIVED' as const, security_review_status: 'NOT_REQUIRED_LAB' as const });
+  const orphan = await uploadDocument(docs, { company_id: 'r2', organization_id: 'o', actor, filename: 'o.pdf', bytes: Buffer.from('%PDF-1.4 r2') }, { status: 'RECEIVED' as const, security_review_status: 'NOT_REQUIRED_LAB' as const });
+  const tx = created.result.pack.entries[0].transaction_id;
+  const answered = await recordOwnerAnswer(packs, created.record.pack_id, 'r1', actor, { transaction_id: tx, document_ids: [up.record.document_id] }, docs);
+  const signed = await signOffPack(packs, created.record.pack_id, 'r1', actor, { pack_hash: answered.result.pack.pack_hash, note: 'accepting open items for the test', accept_open_items: true }, true, docs);
+
+  const inputRaw = (await db.collection('finclose_prod_review_pack_inputs').doc(created.record.pack_id).get()).data()!;
+  assert.equal(inputRaw.expires_at, signed.record.expires_at);
+  assert.equal(inputRaw.ttl_at.toMillis(), signed.record.expires_at, 'the stored statement carries the longer expiry too');
+  assert.equal((await docs.get(up.record.document_id))!.expires_at, signed.record.expires_at);
+  const docRaw = (await db.collection('finclose_prod_documents').doc(up.record.document_id).get()).data()!;
+  assert.equal(docRaw.ttl_at.toMillis(), signed.record.expires_at);
+
+  const expiredPacks = await packs.listExpired(Date.now() + 100 * 86_400_000, 50);
+  assert.ok(expiredPacks.some(p => p.pack_id === plain.record.pack_id));
+  assert.ok(!expiredPacks.some(p => p.pack_id === created.record.pack_id), 'the signed-off pack is not due');
+
+  // Scoped to this test's own companies: the emulator is shared with test files running in parallel, and an unscoped
+  // purge 100 days ahead would delete their packs mid-test.
+  const mine = new Set(['r1', 'r2']);
+  const scopedPacks = Object.assign(Object.create(packs), { listExpired: async (n: number, l: number) => (await packs.listExpired(n, l)).filter(r => mine.has(r.company_id)) });
+  const scopedDocs = Object.assign(Object.create(docs), { listExpired: async (n: number, l: number) => (await docs.listExpired(n, l)).filter(r => mine.has(r.company_id)) });
+  const result = await purgeAllExpired(scopedPacks, scopedDocs, Date.now() + 100 * 86_400_000, 500);
+  assert.equal(result.failed, 0);
+  assert.ok(result.packs >= 1 && result.documents >= 1);
+  assert.equal(await packs.get(plain.record.pack_id), null);
+  assert.equal((await bucket.file(orphan.record.storage_path).exists())[0], false, 'file bytes are deleted, not just the metadata');
+  assert.ok(await packs.get(created.record.pack_id));
+  assert.equal((await bucket.file(up.record.storage_path).exists())[0], true);
 });
 
 after(async () => {
