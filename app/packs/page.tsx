@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
+import { decodeStatementBytes } from '../../lib/statement-decode';
 
 type Entry = { transaction_id: string; date: string; amount_cents: number; currency: string; counterparty: string; description: string; category_code: string; category_name: string; vat_treatment: string; vat_rate: number | null; status: string; document_ids: string[] };
 type Exception = { code: string; severity: 'HIGH' | 'MEDIUM' | 'LOW'; transaction_id: string | null; message: string; suggested_action: string };
@@ -123,7 +124,7 @@ export default function PacksPage() {
           <label>Opening balance <span className="pr-hint">(optional, with closing)</span><input value={form.opening_balance} onChange={e => setForm({ ...form, opening_balance: e.target.value })} /></label>
           <label>Closing balance<input value={form.closing_balance} onChange={e => setForm({ ...form, closing_balance: e.target.value })} /></label>
           <label className="pr-check"><input type="checkbox" checked={form.vat_registered} onChange={e => setForm({ ...form, vat_registered: e.target.checked })} />The company is VAT-registered</label>
-          <label className="pr-wide">Bank statement (CSV)<input type="file" accept=".csv,text/csv,text/plain" onChange={async e => { const f = e.target.files?.[0]; if (f) { const text = await f.text(); setForm(prev => ({ ...prev, csv_text: text })); } }} /></label>
+          <label className="pr-wide">Bank statement (CSV)<input type="file" accept=".csv,text/csv,text/plain" onChange={async e => { const f = e.target.files?.[0]; if (f) { const { text } = decodeStatementBytes(new Uint8Array(await f.arrayBuffer())); setForm(prev => ({ ...prev, csv_text: text })); } }} /></label>
           <button className="pr-button" type="submit" disabled={busy || !form.csv_text}>{busy ? 'Working…' : 'Create and save pack'}</button>
         </form>
 

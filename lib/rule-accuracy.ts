@@ -33,7 +33,9 @@ const ratio = (a: number, b: number) => (b === 0 ? null : Math.round((a / b) * 1
 
 export function parseLabelledCsv(text: string): { rows: AccuracyRow[]; unlabelled: number; warnings: string[] } {
   const intake = parseBankStatementCsv(text);
-  const grid = parseCsv(text, intake.detected.delimiter);
+  const all = parseCsv(text, intake.detected.delimiter);
+  const headerIndex = Math.max(0, all.line_numbers.indexOf(intake.detected.header_line));
+  const grid = { rows: all.rows.slice(headerIndex), line_numbers: all.line_numbers.slice(headerIndex) };
   const header = (grid.rows[0] || []).map(h => h.trim().toLowerCase());
   const labelColumn = header.indexOf('expected_category');
   if (labelColumn < 0) throw new Error('the file needs an expected_category column');

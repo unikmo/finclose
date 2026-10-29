@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { decodeStatementBytes } from '../../lib/statement-decode';
 
 type Exception = {
   code: string;
@@ -67,7 +68,7 @@ export default function PreparePage() {
   async function onFile(file: File | undefined) {
     if (!file) return;
     setFileName(file.name);
-    setCsvText(await file.text());
+    setCsvText(decodeStatementBytes(new Uint8Array(await file.arrayBuffer())).text);
   }
 
   async function submit(event: React.FormEvent) {

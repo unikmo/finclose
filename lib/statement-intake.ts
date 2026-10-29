@@ -28,20 +28,34 @@ export type IntakeResult = {
   rejected: { row: number; reason: string; raw: string }[];
   warnings: string[];
   skipped_already_imported: number;
-  detected: { delimiter: string; columns: Record<string, string> };
+  detected: { delimiter: string; columns: Record<string, string>; header_line: number };
 };
 
+// Order matters: for each field the first alias found in the header wins, so a plain "date" beats
+// "started date". How well each bank's headers are sourced is recorded in docs/bank-formats.md.
 const HEADER_ALIASES: Record<string, string[]> = {
-  date: ['date', 'bookingdate', 'transactiondate', 'valuedate', 'postingdate', 'kuupaev', 'buchungstag', 'datum', 'booked'],
+  date: ['date', 'bookingdate', 'transactiondate', 'valuedate', 'postingdate', 'kuupaev', 'buchungstag', 'datum', 'booked', 'completeddate', 'createdutc', 'created'],
+  date_alt: ['starteddate'], // used when the main date cell is empty, e.g. a Revolut row that is still pending,
   description: ['description', 'details', 'memo', 'narrative', 'text', 'selgitus', 'verwendungszweck', 'buchungstext', 'paymentdetails'],
-  counterparty: ['counterparty', 'payee', 'beneficiary', 'name', 'receiver', 'payer', 'receiverpayer', 'saajamaksja', 'saaja', 'auftraggeber', 'merchant'],
-  reference: ['reference', 'referencenumber', 'ref', 'viitenumber', 'paymentreference', 'transactionid', 'archiveid'],
-  amount: ['amount', 'summa', 'betrag', 'value', 'transactionamount'],
+  counterparty: ['counterparty', 'payee', 'beneficiary', 'name', 'receiver', 'payer', 'receiverpayer', 'saajamaksja', 'saaja', 'auftraggeber', 'merchant', 'beneficiarysremittersname', 'saajamaksjanimi'],
+  payee: ['payeename'],
+  payer: ['payername'],
+  reference: ['referencenumber', 'reference', 'ref', 'viitenumber', 'paymentreference', 'transactionid', 'archiveid'],
+  reference_alt: ['archivalid', 'arhiveerimistunnus', 'balancetransactionid'], // used when the main reference cell is empty,
+  amount: ['amount', 'summa', 'betrag', 'value', 'transactionamount', 'gross'],
   debit: ['debit', 'withdrawal', 'withdrawals', 'paidout', 'moneyout', 'outflow', 'deebet'],
   credit: ['credit', 'deposit', 'deposits', 'paidin', 'moneyin', 'inflow', 'kreedit'],
-  indicator: ['dk', 'debitcredit', 'deebetkreedit', 'creditdebitindicator', 'type', 'dc'],
-  currency: ['currency', 'valuuta', 'whrung', 'ccy']
+  indicator: ['dk', 'debitcredit', 'deebetkreedit', 'creditdebitindicator', 'type', 'dc', 'debitcreditdc', 'deebetkreeditdk'],
+  currency: ['currency', 'valuuta', 'whrung', 'ccy'],
+  fee: ['fee', 'fees'], // a separate fee column is booked as its own outgoing row
+  status: ['state', 'status'],
+  rowtype: ['reatuup']
 };
+
+// Statuses that never moved money; such rows are rejected with a reason, never imported.
+const NOT_SETTLED = new Set(['pending', 'declined', 'reverted', 'failed', 'cancelled', 'canceled', 'rejected']);
+// Row-type codes some Estonian exports use for balance and turnover lines. UNVERIFIED, see docs/bank-formats.md.
+const SUMMARY_ROW_TYPES = new Set(['10', '82', '86']);
 
 function normaliseHeader(header: string): string {
   return header
@@ -188,26 +202,45 @@ function mapColumns(header: string[]): Record<string, number> {
   const normalised = header.map(normaliseHeader);
   const mapping: Record<string, number> = {};
   for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-    const index = normalised.findIndex(name => aliases.includes(name));
-    if (index >= 0) mapping[field] = index;
+    for (const alias of aliases) {
+      const index = normalised.indexOf(alias);
+      if (index >= 0) { mapping[field] = index; break; }
+    }
   }
   return mapping;
+}
+
+// Exports often start with account details before the column names. Looks at the first lines for one
+// with a date column and an amount (or debit/credit) column. Returns its 0-based line, or 0.
+function findHeaderLine(lines: string[]): number {
+  for (let k = 0; k < Math.min(lines.length, 25); k += 1) {
+    if (!lines[k].trim()) continue;
+    const cells = parseCsv(lines[k], detectDelimiter(lines[k])).rows[0];
+    if (!cells) continue;
+    const m = mapColumns(cells);
+    if (m.date !== undefined && (m.amount !== undefined || m.debit !== undefined || m.credit !== undefined)) return k;
+  }
+  return 0;
 }
 
 export function parseBankStatementCsv(input: string, options: IntakeOptions = {}): IntakeResult {
   const text = input.replace(/^﻿/, '');
   const order = options.date_order || 'DMY';
   const defaultCurrency = (options.currency || 'EUR').toUpperCase();
-  const firstLine = text.split('\n', 1)[0] || '';
-  const delimiter = detectDelimiter(firstLine);
-  const { rows, line_numbers: lineNumbers } = parseCsv(text, delimiter);
+  const allLines = text.split('\n');
+  const headerAt = findHeaderLine(allLines);
+  const delimiter = detectDelimiter(allLines[headerAt] || '');
+  const parsed = parseCsv(allLines.slice(headerAt).join('\n'), delimiter);
+  const rows = parsed.rows;
+  const lineNumbers = parsed.line_numbers.map(n => n + headerAt); // source_row stays the line number in the uploaded file
   const result: IntakeResult = {
     transactions: [],
     rejected: [],
     warnings: [],
     skipped_already_imported: 0,
-    detected: { delimiter, columns: {} }
+    detected: { delimiter, columns: {}, header_line: headerAt + 1 }
   };
+  if (headerAt > 0) result.warnings.push(`${headerAt} line(s) above the column names were ignored (account details or similar).`);
   if (rows.length < 2) {
     result.warnings.push('file has no data rows');
     return result;
@@ -236,7 +269,12 @@ export function parseBankStatementCsv(input: string, options: IntakeOptions = {}
     const raw = cells.join(delimiter);
     const cell = (field: string) => (columns[field] === undefined ? '' : (cells[columns[field]] || ''));
 
-    const dateResult = parseStatementDate(cell('date'), order);
+    // Checked before the date: a pending row has no completed date, and its real reason should be the one reported.
+    const state = normaliseText(cell('status')).toLowerCase();
+    if (NOT_SETTLED.has(state)) { result.rejected.push({ row: rowNumber, reason: `status ${state}: no money moved`, raw }); continue; }
+    const rowType = normaliseText(cell('rowtype'));
+    if (rowType && SUMMARY_ROW_TYPES.has(rowType)) { result.rejected.push({ row: rowNumber, reason: `row type ${rowType}: balance or turnover line, not a payment`, raw }); continue; }
+    const dateResult = parseStatementDate(cell('date') || cell('date_alt'), order);
     if (!dateResult.iso) { result.rejected.push({ row: rowNumber, reason: 'unreadable date', raw }); continue; }
     if (dateResult.ambiguous) ambiguousDates += 1;
 
@@ -262,38 +300,50 @@ export function parseBankStatementCsv(input: string, options: IntakeOptions = {}
       else if (debit === 0 || credit === 0) cents = 0;
     }
     if (cents === null) { result.rejected.push({ row: rowNumber, reason: 'unreadable amount', raw }); continue; }
-    if (cents === 0) { result.rejected.push({ row: rowNumber, reason: 'zero amount', raw }); continue; }
+    // A fee column (Revolut, Stripe) is money leaving separately from the amount, so it becomes its own outgoing row.
+    const feeRaw = columns.fee === undefined ? null : parseAmountToCents(cell('fee'));
+    const feeCents = feeRaw ? -Math.abs(feeRaw) : 0;
+    if (cents === 0 && feeCents === 0) { result.rejected.push({ row: rowNumber, reason: 'zero amount', raw }); continue; }
 
     const description = normaliseText(cell('description'));
-    const counterparty = normaliseText(cell('counterparty'));
-    const reference = normaliseText(cell('reference'));
+    // Wise gives separate payer and payee names: the other party is the payee for money out, the payer for money in.
+    const sideName = normaliseText(cell(cents < 0 ? 'payee' : 'payer')) || normaliseText(cell(cents < 0 ? 'payer' : 'payee'));
+    const counterparty = normaliseText(cell('counterparty')) || sideName;
+    const reference = normaliseText(cell('reference')) || normaliseText(cell('reference_alt'));
     const currency = (normaliseText(cell('currency')) || defaultCurrency).toUpperCase();
 
-    // Two genuinely identical payments on one day get distinct ids via the occurrence index.
-    const identity = [dateResult.iso, cents, currency, counterparty.toLowerCase(), description.toLowerCase(), reference.toLowerCase()].join('|');
-    const occurrence = (identicalCounts.get(identity) || 0) + 1;
-    identicalCounts.set(identity, occurrence);
-    const transactionId = `tx_${crypto.createHash('sha256').update(`${identity}|${occurrence}`).digest('hex').slice(0, 20)}`;
-    if (options.known_transaction_ids?.has(transactionId)) { result.skipped_already_imported += 1; continue; }
+    const pieces = [
+      ...(cents !== 0 ? [{ cents, description, suffix: '' }] : []),
+      ...(feeCents !== 0 ? [{ cents: feeCents, description: normaliseText(`Bank fee: ${description}`), suffix: '|fee' }] : [])
+    ];
+    for (const piece of pieces) {
+      // Two genuinely identical payments on one day get distinct ids via the occurrence index.
+      const identity = [dateResult.iso, piece.cents, currency, counterparty.toLowerCase(), piece.description.toLowerCase(), reference.toLowerCase()].join('|') + piece.suffix;
+      const occurrence = (identicalCounts.get(identity) || 0) + 1;
+      identicalCounts.set(identity, occurrence);
+      const transactionId = `tx_${crypto.createHash('sha256').update(`${identity}|${occurrence}`).digest('hex').slice(0, 20)}`;
+      if (options.known_transaction_ids?.has(transactionId)) { result.skipped_already_imported += 1; continue; }
 
-    // Same day, amount and text twice is flagged for a human, never silently dropped.
-    const duplicateKey = [dateResult.iso, cents, currency, (counterparty + description).toLowerCase().replace(/[^a-z0-9]/g, '')].join('|');
-    const seen = (seenCounts.get(duplicateKey) || 0) + 1;
-    seenCounts.set(duplicateKey, seen);
-    if (seen === 1) firstSeen.set(duplicateKey, transactionId);
+      // Same day, amount and text twice is flagged for a human, never silently dropped.
+      const duplicateKey = [dateResult.iso, piece.cents, currency, (counterparty + piece.description).toLowerCase().replace(/[^a-z0-9]/g, '')].join('|');
+      const seen = (seenCounts.get(duplicateKey) || 0) + 1;
+      seenCounts.set(duplicateKey, seen);
+      if (seen === 1) firstSeen.set(duplicateKey, transactionId);
 
-    result.transactions.push({
-      transaction_id: transactionId,
-      date: dateResult.iso,
-      amount_cents: cents,
-      currency,
-      description,
-      counterparty,
-      reference,
-      source_row: rowNumber,
-      possible_duplicate_of: seen > 1 ? firstSeen.get(duplicateKey) || null : null
-    });
+      result.transactions.push({
+        transaction_id: transactionId,
+        date: dateResult.iso,
+        amount_cents: piece.cents,
+        currency,
+        description: piece.description,
+        counterparty,
+        reference,
+        source_row: rowNumber,
+        possible_duplicate_of: seen > 1 ? firstSeen.get(duplicateKey) || null : null
+      });
+    }
   }
+  if (columns.fee !== undefined) result.warnings.push('A fee column was found: each non-zero fee is listed as its own outgoing row. Check that the amount column is before fees.');
 
   if (ambiguousDates > 0) {
     result.warnings.push(`${ambiguousDates} date(s) could be day-first or month-first; read as ${order === 'MDY' ? 'month-first' : 'day-first'}. Check the date format option if this is wrong.`);
