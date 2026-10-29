@@ -128,11 +128,14 @@ const BASE_RULES: Rule[] = [
   { id: 'revenue-invoice', match: ['invoice', 'arve', 'rechnung', 'inv-', 'inv '], direction: 'IN', category: 'REVENUE', vat: 'NEEDS_INVOICE_REVIEW', confidence: 0.72, evidence_required: true, note: 'Sales VAT (domestic, EU reverse charge, export) depends on the customer and cannot be set from the bank line.' }
 ];
 
-// Estonia: ASSUMED rates, not verified against the Tax and Customs Board in this build.
-// Standard rate 22% to 2025-06-30, 24% from 2025-07-01. Confirm before any customer relies on it.
+// Estonia standard rate: 24% from 2025-07-01 (Tax and Customs Board, emta.ee, checked 2026-10-29).
+// 22% for 2024-01-01 to 2025-06-30 is taken from the same source's wording for that period.
+// Earlier dates return null (no rate) so the accountant sets it. Reduced rates are not coded.
 function estoniaVatRate(isoDate: string, treatment: VatTreatment): number | null {
   if (treatment === 'INPUT_VAT_DOMESTIC' || treatment === 'REVERSE_CHARGE_FOREIGN_SERVICE') {
-    return isoDate >= '2025-07-01' ? 24 : 22;
+    if (isoDate >= '2025-07-01') return 24;
+    if (isoDate >= '2024-01-01') return 22;
+    return null;
   }
   return null;
 }
