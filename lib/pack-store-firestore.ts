@@ -1,5 +1,4 @@
-import { getFirestore } from 'firebase-admin/firestore';
-import { firebaseApp } from './finclose-backend';
+import type { Firestore } from 'firebase-admin/firestore';
 import type { LearnedRule } from './categorisation-engine';
 import type { PackRecord, PackStore } from './pack-store';
 
@@ -20,22 +19,29 @@ const RULES = 'finclose_prod_learned_rules';
 function safeId(value: string) { return value.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120); }
 
 export class FirestorePackStore implements PackStore {
-  private db() { return getFirestore(firebaseApp()); }
+  // A Firestore can be injected (the emulator tests do); otherwise the app's Firebase is loaded on first use.
+  private readonly injected?: Firestore;
+  constructor(injected?: Firestore) { this.injected = injected; }
+  private async db(): Promise<Firestore> {
+    if (this.injected) return this.injected;
+    const [{ getFirestore }, { firebaseApp }] = await Promise.all([import('firebase-admin/firestore'), import('./finclose-backend')]);
+    return getFirestore(firebaseApp());
+  }
   async insert(record: PackRecord, input: string) {
-    const db = this.db();
+    const db = await this.db();
     const batch = db.batch();
     batch.create(db.collection(PACKS).doc(record.pack_id), record);
     batch.create(db.collection(INPUTS).doc(record.pack_id), { pack_id: record.pack_id, company_id: record.company_id, input, expires_at: record.expires_at });
     await batch.commit();
   }
   async get(packId: string) {
-    const db = this.db();
+    const db = await this.db();
     const [meta, input] = await Promise.all([db.collection(PACKS).doc(safeId(packId)).get(), db.collection(INPUTS).doc(safeId(packId)).get()]);
     if (!meta.exists || !input.exists) return null;
     return { record: meta.data() as PackRecord, input: String(input.data()!.input) };
   }
   async update(record: PackRecord, expectedRevision: number) {
-    const db = this.db();
+    const db = await this.db();
     const ref = db.collection(PACKS).doc(record.pack_id);
     await db.runTransaction(async tx => {
       const snap = await tx.get(ref);
@@ -44,22 +50,22 @@ export class FirestorePackStore implements PackStore {
     });
   }
   async listByCompany(companyId: string) {
-    const snap = await this.db().collection(PACKS).where('company_id', '==', companyId).orderBy('created_at', 'desc').limit(200).get();
+    const snap = await (await this.db()).collection(PACKS).where('company_id', '==', companyId).orderBy('created_at', 'desc').limit(200).get();
     return snap.docs.map(doc => doc.data() as PackRecord);
   }
   async delete(packId: string) {
-    const db = this.db();
+    const db = await this.db();
     const batch = db.batch();
     batch.delete(db.collection(PACKS).doc(safeId(packId)));
     batch.delete(db.collection(INPUTS).doc(safeId(packId)));
     await batch.commit();
   }
   async learnedRules(companyId: string) {
-    const snap = await this.db().collection(RULES).where('company_id', '==', companyId).limit(2000).get();
+    const snap = await (await this.db()).collection(RULES).where('company_id', '==', companyId).limit(2000).get();
     return snap.docs.map(doc => doc.data().rule as LearnedRule);
   }
   async addLearnedRule(companyId: string, rule: LearnedRule) {
     const id = safeId(`${companyId}__${rule.direction}__${rule.merchant_key}`);
-    await this.db().collection(RULES).doc(id).set({ company_id: companyId, rule });
+    await (await this.db()).collection(RULES).doc(id).set({ company_id: companyId, rule });
   }
 }
