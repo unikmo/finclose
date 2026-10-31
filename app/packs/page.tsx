@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
 import { decodeStatementBytes } from '../../lib/statement-decode';
+import { listJurisdictions } from '../../lib/jurisdictions';
 import AccountNumbers from './AccountNumbers';
 
 type Entry = { transaction_id: string; date: string; amount_cents: number; currency: string; counterparty: string; description: string; category_code: string; category_name: string; vat_treatment: string; vat_rate: number | null; status: string; document_ids: string[] };
@@ -18,18 +19,28 @@ type PackView = {
     exceptions: Exception[];
     owner_questions: { transaction_id: string; question: string }[];
   };
-  vat_summary: { vat_registered: boolean; domestic_input_by_rate: { rate: number; gross_cents: number; net_cents: number; vat_cents: number; count: number }[]; domestic_input_unsupported: unknown[]; reverse_charge: { vat_cents: number; count: number }; notes: string[] };
+  vat_summary: { vat_registered: boolean; domestic_input_by_rate: { rate: number; gross_cents: number; net_cents: number; vat_cents: number; count: number }[]; domestic_input_unsupported: unknown[]; domestic_output_by_rate: { rate: number; gross_cents: number; net_cents: number; vat_cents: number; count: number }[]; domestic_output_unsupported: unknown[]; reverse_charge: { vat_cents: number; count: number }; notes: string[] };
+  vat_return: { totals: { output_vat_cents: number; input_vat_cents: number; net_payable_cents: number; direction: string }; not_counted: { what: string; count: number }[]; assumptions: string[] } | null;
   journal: { balanced: boolean; lines: unknown[]; account_totals: { account_code: string; account_name: string; debit_cents: number; credit_cents: number }[]; notice: string };
   portfolio_status: { status: string; reasons: string[] };
   options: { categories: { code: string; name: string }[]; vat_rates: number[]; signoff_enabled: boolean };
 };
 type PackMeta = { pack_id: string; status: string; version: number; period: { start: string; end: string }; readiness_percent: number; created_at: number };
-type Doc = { document_id: string; filename: string; status: string };
+type Doc = { document_id: string; filename: string; status: string; extracted?: { vendor: string | null; date: string | null; total_cents: number | null; total_is_guess: boolean; currency: string | null; source: string } | null; read_note?: string | null };
+
+// One line of what was read from a receipt; empty when nothing was read.
+const readSummary = (d: Doc) => {
+  const e = d.extracted;
+  if (!e) return d.read_note || '';
+  const parts = [e.vendor, e.date, e.total_cents === null ? null : `${(e.total_cents / 100).toFixed(2)} ${e.currency || ''}${e.total_is_guess ? ' (a guess)' : ''}`.trim()].filter(Boolean);
+  return parts.length ? `Read from the ${e.source === 'OCR' ? 'photo' : 'file'}: ${parts.join(', ')}. Check it.` : '';
+};
 
 // Plain words for the codes the engine uses. Anything not listed falls back to humanise().
 const VAT_LABELS: Record<string, string> = {
   NO_VAT: 'No VAT (exempt)',
   INPUT_VAT_DOMESTIC: 'VAT on a local purchase',
+  OUTPUT_VAT_DOMESTIC: 'VAT charged on a local sale',
   REVERSE_CHARGE_FOREIGN_SERVICE: 'Foreign service (you account for the VAT)',
   OUT_OF_SCOPE: 'Outside VAT (taxes, transfers)',
   NEEDS_INVOICE_REVIEW: 'Check the invoice',
@@ -69,6 +80,32 @@ export default function PacksPage() {
   const [confirmErase, setConfirmErase] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
   const [form, setForm] = useState({ company_name: '', jurisdiction: 'EE', vat_registered: false, period_start: '', period_end: '', date_order: 'DMY', csv_text: '', opening_balance: '', closing_balance: '' });
+
+  const [pdfNotes, setPdfNotes] = useState<string[]>([]);
+
+  // A CSV is read in the browser. A PDF goes to the server once, comes back as CSV text, and is not stored.
+  const readStatementFile = (file: File) => run(async () => {
+    setPdfNotes([]);
+    if (/\.pdf$/i.test(file.name)) {
+      const data = new FormData();
+      data.set('company_id', companyId);
+      data.set('file', file);
+      const response = await fetch('/api/statement-text', { method: 'POST', body: data });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'The PDF could not be read. Download the CSV from internet banking instead.');
+      setForm(prev => ({
+        ...prev,
+        csv_text: body.csv_text,
+        opening_balance: prev.opening_balance || (body.hints?.opening_balance ? String(body.hints.opening_balance) : ''),
+        closing_balance: prev.closing_balance || (body.hints?.closing_balance ? String(body.hints.closing_balance) : '')
+      }));
+      setPdfNotes([...(body.warnings || []), ...(body.hints?.opening_balance || body.hints?.closing_balance ? ['The start and end balances were taken from the PDF. Check them against the statement.'] : [])]);
+    } else {
+      const { text } = decodeStatementBytes(new Uint8Array(await file.arrayBuffer()));
+      setForm(prev => ({ ...prev, csv_text: text }));
+    }
+    setFileName(file.name);
+  });
 
   const q = (extra = '') => `company_id=${encodeURIComponent(companyId)}${extra}`;
 
@@ -168,16 +205,17 @@ export default function PacksPage() {
         <h2>New pack</h2>
         <form className="pr-form" onSubmit={create}>
           <label>Company name<input value={form.company_name} onChange={e => setForm({ ...form, company_name: e.target.value })} required /></label>
-          <label>Country rules<select value={form.jurisdiction} onChange={e => setForm({ ...form, jurisdiction: e.target.value })}><option value="EE">Estonia (draft rules, not yet checked by an accountant)</option><option value="GENERIC">Other country (no tax rates applied)</option></select></label>
+          <label>Country rules<select value={form.jurisdiction} onChange={e => setForm({ ...form, jurisdiction: e.target.value })}>{listJurisdictions().map(j => <option key={j.code} value={j.code}>{j.name}{j.code === 'EE' ? ' (draft rules, not yet checked by an accountant)' : j.code === 'GENERIC' ? ' (no tax rates applied)' : j.code === 'US' ? ' (no VAT; sales tax not handled)' : ' (VAT rates unverified)'}</option>)}</select></label>
           <label>First day of the period<input type="date" value={form.period_start} onChange={e => setForm({ ...form, period_start: e.target.value })} required /></label>
           <label>Last day of the period<input type="date" value={form.period_end} onChange={e => setForm({ ...form, period_end: e.target.value })} required /></label>
           <label>Balance at the start <span className="pr-hint">(optional, fill in both balances or neither)</span><input inputMode="decimal" value={form.opening_balance} onChange={e => setForm({ ...form, opening_balance: e.target.value })} /></label>
           <label>Balance at the end<input inputMode="decimal" value={form.closing_balance} onChange={e => setForm({ ...form, closing_balance: e.target.value })} /></label>
           <label className="pr-check"><input type="checkbox" checked={form.vat_registered} onChange={e => setForm({ ...form, vat_registered: e.target.checked })} />The company is registered for VAT</label>
-          <label className="pr-wide">Bank statement (CSV file from your bank)
-            <input type="file" accept=".csv,text/csv,text/plain" onChange={async e => { const f = e.target.files?.[0]; if (f) { const { text } = decodeStatementBytes(new Uint8Array(await f.arrayBuffer())); setForm(prev => ({ ...prev, csv_text: text })); setFileName(f.name); } }} />
-            <span className="pr-hint">{fileName ? `Chosen: ${fileName}` : 'Choose the file you downloaded from internet banking. Excel files and PDFs cannot be read yet.'}</span>
+          <label className="pr-wide">Bank statement (CSV file from your bank, or a PDF statement)
+            <input type="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf" onChange={e => { const f = e.target.files?.[0]; if (f) readStatementFile(f); }} />
+            <span className="pr-hint">{fileName ? `Chosen: ${fileName}` : 'A CSV from internet banking is the most reliable. A PDF works only if it is a text PDF, not a scan. Excel files cannot be read yet.'}</span>
           </label>
+          {pdfNotes.length > 0 && <div className="pr-callout pr-wide" role="status"><p><strong>Read from a PDF.</strong> Check this before you rely on the pack:</p><ul>{pdfNotes.map(n => <li key={n}>{n}</li>)}</ul></div>}
           <button className="pr-button" type="submit" disabled={busy || !form.csv_text}>{busy ? 'Working…' : 'Create and save pack'}</button>
         </form>
 
@@ -208,7 +246,7 @@ export default function PacksPage() {
         <label className="pr-hint" htmlFor="receipt-file">PDF, PNG or JPG, up to 25 MB. With real data, a file waits until a different person clears it.</label>
         <div className="pr-fileline"><input id="receipt-file" type="file" accept=".pdf,.png,.jpg,.jpeg" disabled={!companyId || busy} onChange={e => { upload(e.target.files?.[0]); e.target.value = ''; }} /></div>
         {loaded && docs.length === 0 && <p className="pr-note">No receipts uploaded yet.</p>}
-        {docs.length > 0 && <ul className="pr-list">{docs.map(d => <li key={d.document_id}>{d.filename} <span className="pr-pill pr-low">{DOC_STATUS[d.status] || humanise(d.status)}</span></li>)}</ul>}
+        {docs.length > 0 && <ul className="pr-list">{docs.map(d => <li key={d.document_id}>{d.filename} <span className="pr-pill pr-low">{DOC_STATUS[d.status] || humanise(d.status)}</span>{readSummary(d) && <span className="pr-hint"> {readSummary(d)}</span>}</li>)}</ul>}
 
         {view && overall && (
           <section className="pr-result" aria-labelledby="result-h" aria-live="polite">
@@ -264,9 +302,12 @@ export default function PacksPage() {
               <ul className="pr-list">
                 {view.vat_summary.domestic_input_by_rate.map(r => <li key={r.rate}>VAT on local purchases at {r.rate}%: {money(r.vat_cents)} on {money(r.gross_cents)} paid ({r.count} with an invoice)</li>)}
                 <li>{plural(view.vat_summary.domestic_input_unsupported.length, 'local purchase has', 'local purchases have')} no invoice or rate yet and {view.vat_summary.domestic_input_unsupported.length === 1 ? 'is' : 'are'} not counted</li>
+                {view.vat_summary.domestic_output_by_rate.map(r => <li key={`o${r.rate}`}>VAT charged on sales at {r.rate}%: {money(r.vat_cents)} on {money(r.gross_cents)} received ({r.count} with an invoice)</li>)}
+                {view.vat_summary.domestic_output_unsupported.length > 0 && <li>{plural(view.vat_summary.domestic_output_unsupported.length, 'sale is', 'sales are')} marked as charging VAT but {view.vat_summary.domestic_output_unsupported.length === 1 ? 'has' : 'have'} no invoice or rate, so {view.vat_summary.domestic_output_unsupported.length === 1 ? 'is' : 'are'} not counted</li>}
                 <li>Foreign services where you account for the VAT yourself: {plural(view.vat_summary.reverse_charge.count, 'payment', 'payments')}, VAT {money(view.vat_summary.reverse_charge.vat_cents)}</li>
                 {view.vat_summary.notes.length > 0 && <li className="pr-hint">Notes for your accountant:</li>}
                 {view.vat_summary.notes.map(n => <li key={n} className="pr-hint">{n}</li>)}
+                {view.vat_return && <li><strong>Worksheet for the VAT return:</strong> VAT on sales {money(view.vat_return.totals.output_vat_cents)}, VAT you can reclaim {money(view.vat_return.totals.input_vat_cents)}, so {money(Math.abs(view.vat_return.totals.net_payable_cents))} {view.vat_return.totals.direction === 'PAYABLE' ? 'to pay' : view.vat_return.totals.direction === 'REFUNDABLE' ? 'to get back' : 'nothing to pay'}. This is a worksheet for your accountant, not a filing. <a href={`/api/review-packs/${view.record.pack_id}?${q('&format=vat_csv')}`}>Download the VAT worksheet</a></li>}
               </ul>
             )}
 
@@ -304,7 +345,7 @@ function QuestionRow({ item, entry, saved, docs, disabled, onAnswer }: { item: {
       {saved && (saved.note || saved.document_ids.length > 0) && <p className="pr-saved" role="status">Saved: {saved.note ? `“${saved.note}”` : ''}{saved.note && saved.document_ids.length ? ', ' : ''}{saved.document_ids.length ? `${saved.document_ids.length} receipt(s) attached` : ''}. Your accountant will see this. You can change it below.</p>}
       <div className="pr-actions pr-tight">
         <input aria-label={`Your answer about ${who}`} placeholder="Your answer" value={note} onChange={e => setNote(e.target.value)} className="pr-grow" />
-        <select aria-label={`Receipt for ${who}`} value={doc} onChange={e => setDoc(e.target.value)}><option value="">No receipt</option>{docs.map(d => <option key={d.document_id} value={d.document_id}>{d.filename}</option>)}</select>
+        <select aria-label={`Receipt for ${who}`} value={doc} onChange={e => setDoc(e.target.value)}><option value="">No receipt</option>{docs.map(d => <option key={d.document_id} value={d.document_id}>{d.filename}{d.extracted?.total_cents != null ? ` (${(d.extracted.total_cents / 100).toFixed(2)})` : ''}</option>)}</select>
         <button className="pr-button" disabled={disabled || (!note && !doc)} onClick={() => onAnswer({ note, document_ids: doc ? [doc] : [] })}>Send answer</button>
         <button className="pr-button pr-secondary" disabled={disabled} onClick={() => onAnswer({ confirm_duplicate: true })}>This is not a duplicate</button>
       </div>

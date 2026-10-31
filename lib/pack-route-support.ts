@@ -5,6 +5,7 @@ import { isRealDataMode } from './runtime-mode';
 import { InMemoryPackStore, type PackStore } from './pack-store';
 import { checkRateLimit } from './rate-limit';
 import { InMemoryDocumentStore, type DocumentStore } from './document-store';
+import { InMemoryConnectionStore, type ConnectionStore } from './connectors';
 
 type Identity = Awaited<ReturnType<typeof authenticateRequest>>;
 export type Limiter = (key: string, limit: number, windowMs: number) => Promise<void>;
@@ -45,6 +46,17 @@ export async function documentStore(): Promise<DocumentStore> {
   }
   if (!globalForDocs.__finclosePackDocs) globalForDocs.__finclosePackDocs = new InMemoryDocumentStore();
   return globalForDocs.__finclosePackDocs;
+}
+
+const globalForConnections = globalThis as unknown as { __finCloseConnections?: ConnectionStore };
+
+export async function connectionStore(): Promise<ConnectionStore> {
+  if (isRealDataMode()) {
+    const { FirestoreConnectionStore } = await import('./connection-store-firestore');
+    return new FirestoreConnectionStore();
+  }
+  if (!globalForConnections.__finCloseConnections) globalForConnections.__finCloseConnections = new InMemoryConnectionStore();
+  return globalForConnections.__finCloseConnections;
 }
 
 export type PackCaller = { company_id: string; organization_id: string; user_id: string };

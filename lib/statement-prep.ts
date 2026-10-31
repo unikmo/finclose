@@ -2,6 +2,7 @@ import { parseAmountToCents, parseBankStatementCsv, type IntakeResult } from './
 import { applyAccountingAdjustments } from './statement-accounting';
 import { buildRulePack, categoriseAll, type CategorySuggestion, type LearnedRule, type VatTreatment } from './categorisation-engine';
 import { unreconciledIds, type LedgerLine } from './reconciliation';
+import { isKnownJurisdiction, JURISDICTIONS, normaliseJurisdiction } from './jurisdictions';
 import { buildReviewPack, renderEntriesCsv, renderReviewPackMarkdown, type ReviewPack } from './review-pack';
 
 // Orchestrates statement CSV -> categorisation -> accountant review pack.
@@ -67,8 +68,9 @@ function isoDay(value: unknown, field: string): string {
 export function prepareStatementReview(request: StatementPrepRequest, generatedAt?: number, extras: PrepExtras = {}): StatementPrepResult {
   const companyName = String(request.company_name ?? '').trim().slice(0, 200);
   if (!companyName) throw httpError('company_name is required', 400);
-  const jurisdictionInput = String(request.jurisdiction ?? 'GENERIC').toUpperCase();
-  if (jurisdictionInput !== 'EE' && jurisdictionInput !== 'GENERIC') throw httpError('jurisdiction must be EE or GENERIC', 400);
+  if (request.jurisdiction !== undefined && !isKnownJurisdiction(request.jurisdiction)) throw httpError(`jurisdiction must be one of ${Object.keys(JURISDICTIONS).join(', ')}`, 400);
+  const jurisdictionInput = normaliseJurisdiction(request.jurisdiction);
+  const country = JURISDICTIONS[jurisdictionInput];
   const periodStart = isoDay(request.period_start, 'period_start');
   const periodEnd = isoDay(request.period_end, 'period_end');
   if (periodStart > periodEnd) throw httpError('period_start must not be after period_end', 400);
@@ -78,7 +80,10 @@ export function prepareStatementReview(request: StatementPrepRequest, generatedA
   const dateOrder = request.date_order === 'MDY' || request.date_order === 'auto' ? request.date_order : 'DMY';
   const currencyInput = String(request.currency ?? 'EUR').trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currencyInput)) throw httpError('currency must be a 3-letter code', 400);
-  const vatRegistered = request.vat_registered === true;
+  const countryNotes: string[] = [];
+  if (request.vat_registered === true && !country.has_vat) countryNotes.push(`${country.name}: ${country.note} VAT was therefore not coded.`);
+  else if (country.vat_status === 'UNVERIFIED' && jurisdictionInput !== 'GENERIC') countryNotes.push(`${country.name} VAT rates are unverified (not checked against ${country.authority}). Confirm them before relying on any VAT figure.`);
+  const vatRegistered = request.vat_registered === true && country.has_vat;
 
   const intake = parseBankStatementCsv(csv, { currency: currencyInput, date_order: dateOrder });
   if (intake.transactions.length > MAX_STATEMENT_ROWS) throw httpError(`statement has more than ${MAX_STATEMENT_ROWS} rows`, 413);
@@ -134,7 +139,7 @@ export function prepareStatementReview(request: StatementPrepRequest, generatedA
       imported: intake.transactions.length,
       rejected_count: intake.rejected.length,
       rejected_sample: intake.rejected.slice(0, 25).map(row => ({ ...row, raw: row.raw.slice(0, 200) })),
-      warnings: intake.warnings,
+      warnings: [...countryNotes, ...intake.warnings],
       detected: intake.detected
     }
   };

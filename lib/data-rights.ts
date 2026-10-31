@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { PackStore } from './pack-store';
 import type { DocumentStore } from './document-store';
 import { readPackInput } from './pack-lifecycle';
+import type { ConnectionStore } from './connectors';
 
 // Data-subject style rights for one company: export everything held, erase
 // everything held, and purge what has passed retention. The Firestore TTL
@@ -33,7 +34,7 @@ export async function exportCompanyData(packs: PackStore, docs: DocumentStore, c
   };
 }
 
-export async function eraseCompanyData(packs: PackStore, docs: DocumentStore, companyId: string, confirm: unknown, now = Date.now()) {
+export async function eraseCompanyData(packs: PackStore, docs: DocumentStore, companyId: string, confirm: unknown, now = Date.now(), connections?: ConnectionStore) {
   if (String(confirm || '') !== companyId) throw httpError('confirm must equal the company_id to erase', 400);
   let packCount = 0;
   for (;;) {
@@ -49,7 +50,12 @@ export async function eraseCompanyData(packs: PackStore, docs: DocumentStore, co
   const rules = await packs.deleteLearnedRules(companyId);
   const hadAccountMap = (await packs.accountOverrides(companyId)) !== null;
   await packs.setAccountOverrides(companyId, null);
-  const receipt = { company_id: companyId, erased_at: now, packs: packCount, documents: documentList.length, learned_rules: rules, account_map: hadAccountMap };
+  let connectionsRemoved = 0;
+  if (connections && (await connections.get(companyId, 'xero'))) {
+    await connections.delete(companyId, 'xero'); // the sealed tokens go; the user can also revoke FinClose inside Xero
+    connectionsRemoved += 1;
+  }
+  const receipt = { company_id: companyId, erased_at: now, packs: packCount, documents: documentList.length, learned_rules: rules, account_map: hadAccountMap, connections: connectionsRemoved };
   return { ...receipt, receipt_hash: crypto.createHash('sha256').update(JSON.stringify(receipt)).digest('hex') };
 }
 

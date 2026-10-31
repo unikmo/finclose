@@ -13,12 +13,17 @@ export type DocumentRecord = {
   bytes: number;
   sha256: string;
   status: DocumentStatus;
-  security_review_status: 'NOT_REQUIRED_LAB' | 'AWAITING_MANUAL_REVIEW' | 'AWAITING_SCANNER' | 'MANUAL_REVIEW_CLEAN' | 'MANUAL_REVIEW_REJECTED';
+  security_review_status: 'NOT_REQUIRED_LAB' | 'AWAITING_MANUAL_REVIEW' | 'AWAITING_SCANNER' | 'MANUAL_REVIEW_CLEAN' | 'MANUAL_REVIEW_REJECTED' | 'SCANNER_CLEAN' | 'SCANNER_REJECTED';
   uploaded_by: string;
   uploaded_at: number;
   reviewed_by?: string;
   reviewed_at?: number;
   review_note?: string;
+  scan_engine?: string;
+  scan_detail?: string; // signature on a rejection, or why the last attempt could not decide
+  scan_attempts?: number;
+  extracted?: import('./receipt-extract').ReceiptFields; // what was read from the receipt; a suggestion, never booked
+  read_note?: string; // why the receipt could not be read, when it could not
   storage_path: string;
   expires_at: number;
 };

@@ -1,4 +1,5 @@
 import type { ProposedEntry, ReviewPack } from './review-pack';
+import { normaliseJurisdiction } from './jurisdictions';
 
 // Maps each category to an account and turns a review pack into PROPOSED journal
 // lines for the accountant. The numbering below is FinClose's own default, NOT a
@@ -45,10 +46,10 @@ const SHARED: Record<string, Account> = {
 };
 
 export function buildAccountMap(jurisdiction: string): AccountMap {
-  const ee = String(jurisdiction).toUpperCase() === 'EE';
+  const code = normaliseJurisdiction(jurisdiction);
   return {
-    id: ee ? 'accounts-ee-default-v0' : 'accounts-generic-default-v0',
-    jurisdiction: ee ? 'EE' : 'GENERIC',
+    id: `accounts-${code.toLowerCase()}-default-v0`,
+    jurisdiction: code,
     status: 'FINCLOSE_DEFAULT_NOT_STATUTORY',
     bank: A('1000', 'Bank', 'ASSET'),
     vat_input: A('1300', 'Input VAT receivable', 'ASSET'),
@@ -106,8 +107,12 @@ export function buildJournal(pack: ReviewPack, map: AccountMap = buildAccountMap
       if (vat) lines.push(line(e, map.vat_input, vat, 0, `${memo} (input VAT ${e.vat_rate}%)`));
       lines.push(line(e, map.bank, 0, gross, memo));
     } else {
+      // Output VAT is split out only for a VAT-registered company, a rate the reviewer set, and a supporting invoice.
+      const splitVat = pack.company.vat_registered && e.vat_treatment === 'OUTPUT_VAT_DOMESTIC' && e.vat_rate && e.document_ids.length > 0;
+      const vat = splitVat ? Math.round((gross * e.vat_rate!) / (100 + e.vat_rate!)) : 0;
       lines.push(line(e, map.bank, gross, 0, memo));
-      lines.push(line(e, account, 0, gross, memo));
+      lines.push(line(e, account, 0, gross - vat, memo));
+      if (vat) lines.push(line(e, map.vat_output, 0, vat, `${memo} (output VAT ${e.vat_rate}%)`));
     }
   }
   const totals = new Map<string, { account_code: string; account_name: string; debit_cents: number; credit_cents: number }>();

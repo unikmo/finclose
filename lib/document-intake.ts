@@ -2,12 +2,14 @@ import crypto from 'node:crypto';
 import { validateFinancialUpload } from './file-security';
 import type { DocumentRecord, DocumentStatus, DocumentStore } from './document-store';
 import { expiryFrom, retentionPolicy } from './retention';
+import { scanBytes, type MalwareScanner } from './malware-scan';
+import { readReceipt, type OcrEngine } from './receipt-extract';
 
 // Receipts and invoices an owner attaches to a transaction. Rules:
 //  - the file is checked by type, signature and size (file-security.ts);
 //  - in real-data mode it is QUARANTINED and cannot back any answer until a
-//    reviewer marks it CLEAN (manual review) or a scanner does (not built: in
-//    SCANNER mode a file simply stays quarantined);
+//    reviewer marks it CLEAN (manual review) or a scanner does (SCANNER mode,
+//    see malware-scan.ts: a scanner that is down or unconfigured leaves the file quarantined);
 //  - a decision is one-way, like the existing service-upload review;
 //  - the same file uploaded twice for a company is stored once.
 
@@ -97,4 +99,53 @@ export async function assertLinkable(store: DocumentStore, companyId: string, id
 // A receipt a pack depends on must not expire before the pack does. Only ever moves the expiry later.
 export async function keepDocumentsUntil(docs: DocumentStore, documentIds: string[], expiresAt: number): Promise<void> {
   for (const id of new Set(documentIds)) await docs.extendExpiry(id, expiresAt);
+}
+
+// SCANNER mode: scans a quarantined document and records the outcome. CLEAN and INFECTED are
+// one-way like a manual decision. An ERROR (scanner down, timed out, not configured) changes
+// nothing except the attempt count, so the file stays quarantined and can be scanned again.
+export async function scanDocument(
+  store: DocumentStore,
+  documentId: string,
+  companyId: string,
+  scanner: MalwareScanner | null,
+  mode: 'MANUAL_REVIEW' | 'SCANNER' | 'BLOCK',
+  now = Date.now()
+): Promise<DocumentRecord> {
+  if (mode !== 'SCANNER') throw httpError('scanning is only available in SCANNER quarantine mode', 409);
+  const record = await store.get(documentId);
+  if (!record || record.company_id !== companyId) throw httpError('document not found', 404);
+  if (record.status !== 'QUARANTINED') return record;
+  const verdict = await scanBytes(await store.readBytes(record), scanner);
+  const { scan_detail: _previous, ...base } = record;
+  const attempts = (record.scan_attempts || 0) + 1;
+  let next: DocumentRecord;
+  if (verdict.verdict === 'CLEAN') {
+    next = { ...base, status: 'CLEAN', security_review_status: 'SCANNER_CLEAN', reviewed_by: 'scanner', reviewed_at: now, scan_engine: verdict.engine, scan_attempts: attempts };
+  } else if (verdict.verdict === 'INFECTED') {
+    next = { ...base, status: 'REJECTED', security_review_status: 'SCANNER_REJECTED', reviewed_by: 'scanner', reviewed_at: now, scan_engine: verdict.engine, scan_detail: verdict.signature, scan_attempts: attempts };
+  } else {
+    next = { ...base, scan_engine: verdict.engine, scan_detail: verdict.detail, scan_attempts: attempts };
+  }
+  await store.setReview(next);
+  return next;
+}
+
+// Reads a CLEAN receipt or invoice and keeps what was found on the record. Only a clean file is
+// ever opened. Reading again replaces the earlier result; the file and its status do not change.
+export async function readDocument(
+  store: DocumentStore,
+  documentId: string,
+  companyId: string,
+  ocr: OcrEngine | null,
+  pdfText: (bytes: Buffer) => Promise<string>
+): Promise<DocumentRecord> {
+  const record = await store.get(documentId);
+  if (!record || record.company_id !== companyId) throw httpError('document not found', 404);
+  if (record.status !== 'CLEAN') throw httpError(`document is ${record.status.toLowerCase()} and cannot be read yet`, 409);
+  const outcome = await readReceipt(await store.readBytes(record), record.content_type, ocr, pdfText);
+  const { extracted: _e, read_note: _n, ...base } = record;
+  const next: DocumentRecord = 'fields' in outcome ? { ...base, extracted: outcome.fields } : { ...base, read_note: outcome.unreadable };
+  await store.setReview(next);
+  return next;
 }

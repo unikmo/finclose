@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { statusFor } from '../../../lib/finclose-backend';
-import { authorisePackCall, documentStore, packStore, readJsonBody } from '../../../lib/pack-route-support';
+import { authorisePackCall, connectionStore, documentStore, packStore, readJsonBody } from '../../../lib/pack-route-support';
 import { eraseCompanyData, exportCompanyData } from '../../../lib/data-rights';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +23,7 @@ export async function DELETE(req: NextRequest) {
   try {
     const body = await readJsonBody(req, 2_000);
     const caller = await authorisePackCall(req, body.company_id, 'OWNER', 5);
-    const receipt = await eraseCompanyData(await packStore(), await documentStore(), caller.company_id, body.confirm);
+    const receipt = await eraseCompanyData(await packStore(), await documentStore(), caller.company_id, body.confirm, Date.now(), await connectionStore());
     return NextResponse.json({ erased: true, receipt }, { headers: NO_STORE });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: statusFor(error) });

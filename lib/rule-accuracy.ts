@@ -116,7 +116,7 @@ export function scoreRules(rows: AccuracyRow[], pack: RulePack, options: { thres
   };
 }
 
-export function scoreLabelledCsv(text: string, jurisdiction: 'EE' | 'GENERIC' = 'EE'): AccuracyReport {
+export function scoreLabelledCsv(text: string, jurisdiction = 'EE'): AccuracyReport {
   const parsed = parseLabelledCsv(text);
   return scoreRules(parsed.rows, buildRulePack(jurisdiction), { unlabelled: parsed.unlabelled, warnings: parsed.warnings });
 }

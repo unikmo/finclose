@@ -8,6 +8,7 @@ import { assertLinkable, keepDocumentsUntil } from './document-intake';
 import { expiryFrom, retentionPolicy } from './retention';
 import type { DocumentStore } from './document-store';
 import { allowedVatRates } from './vat-summary';
+import { normaliseJurisdiction } from './jurisdictions';
 
 // Saved review packs: create, reload, record the owner's answers, record a
 // reviewer's corrections (optionally remembered for the company), delete.
@@ -17,7 +18,7 @@ import { allowedVatRates } from './vat-summary';
 
 const MAX_EVENTS = 500;
 const MAX_STORED_INPUT_BYTES = 700_000; // compressed; keeps the Firestore document under 1 MB
-const VAT_VALUES: VatTreatment[] = ['NO_VAT', 'INPUT_VAT_DOMESTIC', 'REVERSE_CHARGE_FOREIGN_SERVICE', 'OUT_OF_SCOPE', 'NEEDS_INVOICE_REVIEW', 'NOT_VAT_REGISTERED'];
+const VAT_VALUES: VatTreatment[] = ['NO_VAT', 'INPUT_VAT_DOMESTIC', 'OUTPUT_VAT_DOMESTIC', 'REVERSE_CHARGE_FOREIGN_SERVICE', 'OUT_OF_SCOPE', 'NEEDS_INVOICE_REVIEW', 'NOT_VAT_REGISTERED'];
 
 export type Actor = { user_id: string };
 
@@ -176,7 +177,7 @@ export async function recordCorrection(
   const id = String(input.transaction_id || '');
   const category = String(input.category_code || '');
   const vat = String(input.vat_treatment || '') as VatTreatment;
-  const jurisdiction = String(request.jurisdiction ?? 'GENERIC').toUpperCase() === 'EE' ? 'EE' : 'GENERIC';
+  const jurisdiction = normaliseJurisdiction(request.jurisdiction);
   if (!buildRulePack(jurisdiction).categories.some(c => c.code === category)) throw httpError('category_code is not in this rule pack', 400);
   if (!VAT_VALUES.includes(vat)) throw httpError('vat_treatment is not valid', 400);
   let vatRate: number | undefined;

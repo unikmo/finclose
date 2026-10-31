@@ -4,6 +4,7 @@ import { authorisePackCall, httpError, packStore, readJsonBody } from '../../../
 import { accountMapCsv, applyOverrides, FIXED_KEYS, parseAccountMapCsv, validateOverrides } from '../../../lib/account-map-custom';
 import { buildRulePack } from '../../../lib/categorisation-engine';
 import type { AccountMap } from '../../../lib/chart-of-accounts';
+import { normaliseJurisdiction } from '../../../lib/jurisdictions';
 
 export const dynamic = 'force-dynamic';
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -16,13 +17,13 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 const FIXED_LABELS: Record<string, string> = { bank: 'Bank account', vat_input: 'VAT you can reclaim', vat_output: 'VAT you owe', suspense: 'Unsorted payments' };
 // What a screen needs to show each row: the slot key, a plain label, and the account now in force.
 function slotsFor(map: AccountMap, jurisdiction: string) {
-  const names = new Map(buildRulePack(jurisdiction === 'EE' ? 'EE' : 'GENERIC').categories.map(c => [c.code, c.name]));
+  const names = new Map(buildRulePack(jurisdiction).categories.map(c => [c.code, c.name]));
   return [
     ...FIXED_KEYS.map(key => ({ key, label: FIXED_LABELS[key], code: map[key].code, name: map[key].name })),
     ...Object.entries(map.by_category).map(([key, a]) => ({ key, label: names.get(key) || key, code: a.code, name: a.name }))
   ];
 }
-const jurisdictionOf =(value: unknown) => (String(value || 'EE').toUpperCase() === 'EE' ? 'EE' : 'GENERIC');
+const jurisdictionOf = (value: unknown) => normaliseJurisdiction(value || 'EE');
 
 export async function GET(req: NextRequest) {
   try {

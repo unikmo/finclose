@@ -1,4 +1,5 @@
 import type { NormalisedBankTransaction } from './statement-intake';
+import { JURISDICTIONS, normaliseJurisdiction, standardVatRate } from './jurisdictions';
 
 // Rule-based transaction categorisation and VAT-treatment suggestions.
 // Deterministic and explainable: every suggestion names the rule that produced
@@ -15,6 +16,7 @@ export type VatTreatment =
   | 'NO_VAT' // exempt or outside the VAT charge (e.g. bank fees)
   | 'OUT_OF_SCOPE' // taxes, transfers, equity movements
   | 'INPUT_VAT_DOMESTIC' // domestic purchase; input VAT only with a valid invoice
+  | 'OUTPUT_VAT_DOMESTIC' // domestic sale charging VAT; set by a reviewer who has seen the invoice, never by a rule
   | 'REVERSE_CHARGE_FOREIGN_SERVICE' // service bought from abroad; buyer accounts for VAT
   | 'NEEDS_INVOICE_REVIEW'; // cannot be decided from a bank line
 
@@ -112,7 +114,7 @@ const BASE_RULES: Rule[] = [
   { id: 'transfer-own', match: ['own account', 'internal transfer', 'transfer to savings', 'transfer between', 'oma konto', 'ülekanne oma', 'eigenes konto', 'wise transfer', 'top up'], category: 'TRANSFER', vat: 'OUT_OF_SCOPE', confidence: 0.8, evidence_required: false },
 
   // Taxes and payroll
-  { id: 'tax-authority', match: ['emta', 'maksu- ja tolliamet', 'tax and customs board', 'hmrc', 'irs ', 'internal revenue', 'finanzamt', 'bundeszentralamt', 'revenue commissioners'], direction: 'OUT', category: 'TAXES_AND_DUTIES', vat: 'OUT_OF_SCOPE', confidence: 0.9, evidence_required: false },
+  { id: 'tax-authority', match: ['emta', 'maksu- ja tolliamet', 'tax and customs board', 'hmrc', 'irs ', 'internal revenue', 'finanzamt', 'bundeszentralamt', 'revenue commissioners', 'valsts ienemumu', 'vid.gov', 'valstybine mokesciu', 'vmi ', 'verohallinto', 'skatteforvaltningen'], direction: 'OUT', category: 'TAXES_AND_DUTIES', vat: 'OUT_OF_SCOPE', confidence: 0.9, evidence_required: false },
   { id: 'dividend', match: ['dividend', 'dividend payout'], direction: 'OUT', category: 'DIVIDENDS', vat: 'OUT_OF_SCOPE', confidence: 0.82, evidence_required: true, note: 'Distribution: the accountant must check retained earnings and the tax due on the payout.' },
   { id: 'owner-funding', match: ['share capital', 'osakapital', 'capital contribution', 'shareholder loan', 'owner contribution'], direction: 'IN', category: 'OWNER_FUNDING', vat: 'OUT_OF_SCOPE', confidence: 0.82, evidence_required: true },
   { id: 'payroll', match: ['salary', 'palk', 'wages', 'payroll', 'gehalt', 'lohn '], direction: 'OUT', category: 'PAYROLL', vat: 'OUT_OF_SCOPE', confidence: 0.82, evidence_required: true, note: 'Needs a payslip or payroll report.' },
@@ -132,19 +134,20 @@ const BASE_RULES: Rule[] = [
 // 22% for 2024-01-01 to 2025-06-30 is taken from the same source's wording for that period.
 // Earlier dates return null (no rate) so the accountant sets it. Reduced rates are not coded.
 function estoniaVatRate(isoDate: string, treatment: VatTreatment): number | null {
-  if (treatment === 'INPUT_VAT_DOMESTIC' || treatment === 'REVERSE_CHARGE_FOREIGN_SERVICE') {
-    if (isoDate >= '2025-07-01') return 24;
-    if (isoDate >= '2024-01-01') return 22;
-    return null;
-  }
+  if (treatment === 'INPUT_VAT_DOMESTIC' || treatment === 'OUTPUT_VAT_DOMESTIC' || treatment === 'REVERSE_CHARGE_FOREIGN_SERVICE') return standardVatRate('EE', isoDate);
   return null;
 }
 
-export function buildRulePack(jurisdiction: 'EE' | 'GENERIC'): RulePack {
-  if (jurisdiction === 'EE') {
-    return { id: 'rulepack-ee-v0', jurisdiction: 'EE', version: '0.1.0', status: 'DRAFT_NEEDS_TAX_REVIEW', categories: CATEGORIES, rules: BASE_RULES, vatRateFor: estoniaVatRate };
-  }
-  return { id: 'rulepack-generic-v0', jurisdiction: 'GENERIC', version: '0.1.0', status: 'DRAFT_NEEDS_TAX_REVIEW', categories: CATEGORIES, rules: BASE_RULES, vatRateFor: () => null };
+// Every country shares the same categories and rules; what differs is the standard VAT rate by date
+// (jurisdictions.ts). Only Estonia's rate is confirmed; the rest are marked UNVERIFIED there.
+export function buildRulePack(input: string): RulePack {
+  const code = normaliseJurisdiction(input);
+  const id = `rulepack-${code.toLowerCase()}-v0`;
+  if (code === 'EE') return { id, jurisdiction: 'EE', version: '0.1.0', status: 'DRAFT_NEEDS_TAX_REVIEW', categories: CATEGORIES, rules: BASE_RULES, vatRateFor: estoniaVatRate };
+  const country = JURISDICTIONS[code];
+  const vatRateFor = (isoDate: string, treatment: VatTreatment) =>
+    country.has_vat && (treatment === 'INPUT_VAT_DOMESTIC' || treatment === 'OUTPUT_VAT_DOMESTIC' || treatment === 'REVERSE_CHARGE_FOREIGN_SERVICE') ? standardVatRate(code, isoDate) : null;
+  return { id, jurisdiction: code, version: '0.1.0', status: 'DRAFT_NEEDS_TAX_REVIEW', categories: CATEGORIES, rules: BASE_RULES, vatRateFor };
 }
 
 export function merchantKey(tx: Pick<NormalisedBankTransaction, 'counterparty' | 'description'>): string {

@@ -107,6 +107,7 @@ export default function FirmPortfolioPage() {
           <span className="fp-logo">F</span>
           <span>FinClose <em>Firm Workspace</em></span>
         </Link>
+        <Link href="/firm/partner">Calendar, team, plan and branding</Link>
         {firms && firms.length > 1 && (
           <select
             className="fp-firm-select"
