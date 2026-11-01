@@ -194,9 +194,9 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       setUser(result.user);
       setPassword('');
       if (result.verification_required) {
-        setNote('Almost there — click the link in the verification email we just sent, then sign back in to continue.');
+        setNote('Click the link in the email we sent, then sign in again.');
       } else {
-        setNote(authMode === 'register' ? 'Account created. Continue with the company setup this service requires.' : 'Signed in. Continue where you left off.');
+        setNote(authMode === 'register' ? 'Account created.' : 'Signed in.');
       }
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
@@ -264,7 +264,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         const existing = await loadCompanies(result.country_code || selectedCountry || country);
         setNote(existing.length ? 'Choose a previously initialized company or initialize another one.' : 'No initialized company was found for this country. Use the initialization form.');
       } else {
-        setNote('Account confirmed. Add prior accounting information so FinClose can understand the books before current-system access.');
+        setNote('');
       }
       return result;
     } catch (error: any) {
@@ -360,8 +360,8 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       setDeployment(await api(`/service-deployments/${deployment.deployment_id}`));
       const quarantined = received.some(item => item.status === 'QUARANTINED');
       setNote(quarantined
-        ? `${received.length} prior file${received.length === 1 ? '' : 's'} stored in security quarantine. Current-system connection remains locked until an authorized review clears the history.`
-        : `${received.length} prior file${received.length === 1 ? '' : 's'} received. Current-system connection is now available.`);
+        ? `${received.length} file${received.length === 1 ? '' : 's'} held for review. The next step unlocks once they are cleared.`
+        : `${received.length} file${received.length === 1 ? '' : 's'} received.`);
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
     } finally { setBusy(false); }
@@ -407,7 +407,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         body: JSON.stringify({ filename: sourceFile.name, content_base64: await base64(sourceFile) })
       });
       setNote(result.status === 'QUARANTINED'
-        ? `File uploaded and held for review — a FinClose administrator checks it before it's processed. SHA ${String(result.sha256).slice(0, 12)}…`
+        ? `File held for review before processing. SHA ${String(result.sha256).slice(0, 12)}…`
         : `${result.status}: current source received. SHA ${String(result.sha256).slice(0, 12)}…`);
     } catch (error: any) {
       setNote(`Error: ${error.message}`);
@@ -423,14 +423,14 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   if (!profile || !authReady) return <main className="service-start-shell"><div className="service-loading">Loading FinClose…</div></main>;
 
   const heroText = !user
-    ? 'Start with your FinClose account. After that, we ask only for the company information this service actually needs.'
+    ? 'Create an account to start.'
     : !accountComplete
-      ? 'Confirm the verification link in your email, then sign back in to continue setup.'
+      ? 'Confirm your email, then sign in again.'
     : companyInitializationRequired && !companyComplete
-      ? 'You are signed in. Next, connect an already initialized company or initialize a new one.'
+      ? 'Choose your company.'
       : !historyComplete
-        ? 'Setup is complete. Now give FinClose the prior information needed to understand the starting position.'
-        : 'Prior context is in place. You can now connect the current accounting or payroll system.';
+        ? 'Upload your prior records.'
+        : 'Connect your current system.';
 
   return (
     <main className="service-start-shell">
@@ -460,7 +460,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       {!user && <section className="focus-panel auth-panel">
         <div className="focus-kicker">STEP 1</div>
         <h2>{authMode === 'register' ? 'Create your account' : 'Sign in'}</h2>
-        <p className="focus-lead">Your service choice is already known. Sign in if you have a FinClose account, or register once. No technical access token is required.</p>
+        <p className="focus-lead">Sign in, or register once.</p>
 
         <div className="auth-switch" role="tablist" aria-label="Account access">
           <button className={authMode === 'register' ? 'active' : ''} onClick={() => setAuthMode('register')}>Create account</button>
@@ -480,7 +480,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       {user && managedRealDataAccount && !user.email_verified && <section className="focus-panel auth-panel">
         <div className="focus-kicker">STEP 1</div>
         <h2>Verify your email</h2>
-        <p className="focus-lead">Your account is created. Click the link in the verification email we sent you, then sign back in to continue.</p>
+        <p className="focus-lead">Click the link in the email we sent, then sign in again.</p>
         <div className="setup-block account-form">
           <div className="completed-line"><span>✓</span> Account created · {user.email}</div>
           <label><span>Password</span><input type="password" value={verificationPassword} onChange={e => setVerificationPassword(e.target.value)} autoComplete="current-password" /></label>
@@ -494,18 +494,17 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         <div className="completed-line"><span>✓</span> Account · {user.email}</div>
         <div className="focus-kicker">STEP 2</div>
         <h2>Company</h2>
-        <p className="focus-lead">Now identify the company. If it has already been initialized in FinClose, reuse it. Otherwise complete the existing country initialization form once.</p>
+        <p className="focus-lead">Use an existing company or set up a new one.</p>
 
         {!deployment ? <div className="setup-block company-country">
           <h3>Where is the company registered?</h3>
-          <p>This selects the correct registration and accounting context before we look for an existing FinClose company.</p>
           <label><span>Company country</span><select value={country} onChange={e => setCountry(e.target.value)}>{countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}</select></label>
           <button className="service-primary" onClick={() => createDeployment(country)} disabled={busy}>Continue to company</button>
         </div> : <div className="initialization-choice-grid">
           <div className="setup-block">
             <span className="choice-label">Already initialized</span>
             <h3>Use an existing company</h3>
-            <p>Previously initialized FinClose companies for {effectiveCountry} appear here. An existing company such as MDA is reused rather than initialized again.</p>
+            <p>Companies already set up for {effectiveCountry}.</p>
             <button className="service-secondary" onClick={() => loadCompanies(deployment.country_code || country)} disabled={busy}>Refresh companies</button>
             {companies.length ? <>
               <label><span>Initialized company</span><select value={selectedCompanyId} onChange={e => setSelectedCompanyId(e.target.value)}>{companies.map(c => <option key={c.company_id} value={c.company_id}>{c.legal_name} · {c.country_name || c.country_code}</option>)}</select></label>
@@ -516,7 +515,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
           <div className="setup-block">
             <span className="choice-label">New to FinClose</span>
             <h3>Initialize this company</h3>
-            <p>Use the initialization workbook already created for this country. Initialization is company setup; it does not add unrelated services.</p>
+            <p>Fill in the workbook for this country.</p>
             <div className="inline-actions">
               <button className="service-secondary" onClick={requestTemplate} disabled={busy}>Prepare initialization form</button>
               {downloadUrl && <a className="service-download" href={downloadUrl}>Download XLSX</a>}
@@ -533,13 +532,12 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         {companyInitializationRequired && <div className="completed-line"><span>✓</span> Company · {deployment.company_name || 'initialized company'}</div>}
         <div className="focus-kicker">STEP {companyInitializationRequired ? '3' : '2'}</div>
         <h2>Upload prior information</h2>
-        <p className="focus-lead">This is not another registration step. It gives FinClose the historical context needed to understand balances, open items and previous accounting or payroll decisions before current-system access.</p>
+        <p className="focus-lead">Past records show FinClose your balances and open items.</p>
 
         <div className="history-layout">
           <div className="history-guidance">
-            <h3>Useful history for this service</h3>
+            <h3>Useful files</h3>
             <ul>{(HISTORY_GUIDANCE[serviceKey] || []).map(item => <li key={item}>{item}</li>)}</ul>
-            <p>Upload what you have. Multiple files are allowed.</p>
           </div>
           <div className="setup-block history-upload">
             <label><span>Prior files</span><input className="service-file" type="file" multiple accept=".xlsx,.xls,.csv,.pdf" onChange={e => setHistoryFiles(Array.from(e.target.files || []))} /></label>
@@ -556,7 +554,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         <div className="completed-line"><span>✓</span> Prior information {deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY' ? 'not applicable for new company' : 'received'}</div>
         <div className="focus-kicker">STEP {companyInitializationRequired ? '4' : '3'}</div>
         <h2>Connect the current system</h2>
-        <p className="focus-lead">Only now does FinClose ask for ongoing/current source access. The connector is restricted to the service selected on the homepage.</p>
+        <p className="focus-lead">Choose where FinClose reads your current records.</p>
 
         <div className="connector-grid refined">
           {visibleConnectors.map(connector => (
@@ -571,7 +569,6 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
 
         {selectedConnector?.id === 'manual-upload' && <div className="setup-block current-source">
           <h3>Current operating source</h3>
-          <p>This is separate from the historical files above.</p>
           <input className="service-file" type="file" onChange={e => setSourceFile(e.target.files?.[0] || null)} />
           <button className="service-primary" onClick={uploadCurrentSource} disabled={busy || !sourceFile}>Send current source</button>
         </div>}

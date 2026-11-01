@@ -116,8 +116,7 @@ export default function PreparePage() {
       <section className="pr-body">
         <h1>Prepare your books for the accountant</h1>
         <p className="pr-lead">
-          Upload a bank statement (CSV). FinClose suggests categories, flags what is missing and lists the questions you still need to answer.
-          Nothing is posted or approved, and the statement is not stored.
+          Upload a bank statement (CSV). Nothing is posted, approved or stored.
         </p>
 
         <form className="pr-form" onSubmit={submit}>

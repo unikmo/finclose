@@ -93,7 +93,7 @@ export default function FirmPortfolioPage() {
       <main className="fp-shell">
         <div className="fp-empty">
           <h1>Sign in to view your Firm Workspace</h1>
-          <p>The portfolio dashboard is only visible to signed-in firm members.</p>
+          <p>For signed-in firm members only.</p>
           <Link href="/" className="fp-link">← Back to FinClose</Link>
         </div>
       </main>
@@ -123,7 +123,7 @@ export default function FirmPortfolioPage() {
       {(!firms || firms.length === 0) && (
         <div className="fp-empty">
           <h1>No firm yet</h1>
-          <p>You're not an active member of any accounting firm. Ask a firm partner to add you, or create one.</p>
+          <p>No firm yet. Ask a partner to add you, or create one.</p>
           <Link href="/" className="fp-link">← Back to FinClose</Link>
         </div>
       )}
@@ -151,7 +151,7 @@ export default function FirmPortfolioPage() {
 
           {!loadingPortfolio && portfolio && portfolio.rows.length === 0 && !portfolio.note && (
             <div className="fp-empty fp-empty-inline">
-              <p>No clients yet. Delegated client organizations will appear here once they accept your firm's invitation.</p>
+              <p>No clients yet.</p>
             </div>
           )}
 

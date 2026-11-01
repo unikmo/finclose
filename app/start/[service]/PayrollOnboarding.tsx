@@ -401,7 +401,7 @@ export default function PayrollOnboarding() {
         <div>
           <span className="payroll-eyebrow">PAYROLL ONLY</span>
           <h1>Help me do payroll</h1>
-          <p>Set up only what payroll needs. FinClose keeps company setup, payroll history and current payroll data in the right order.</p>
+          <p>Account, company, history, current data.</p>
         </div>
         <div className="payroll-steps" aria-label="Payroll setup progress">
           {STEPS.map((step, index) => (
@@ -420,7 +420,7 @@ export default function PayrollOnboarding() {
           <div className="payroll-stage-copy">
             <span className="payroll-stage-number">01</span>
             <h2>Start with your account</h2>
-            <p>Sign in if you already use FinClose, or create an account once. Your payroll choice is already saved for this setup.</p>
+            <p>Sign in, or register once.</p>
             <div className="payroll-reassurance">
               <span>One account</span>
               <span>One payroll setup</span>
@@ -452,7 +452,7 @@ export default function PayrollOnboarding() {
             <div>
               <span className="payroll-stage-number">02</span>
               <h2>Add the company</h2>
-              <p>Payroll needs a company context. Reuse a company that is already in FinClose, or initialize it once.</p>
+              <p>Use an existing company or set up a new one.</p>
             </div>
             <div className="payroll-account-chip"><span>✓</span>{user.email}</div>
           </div>
@@ -461,7 +461,6 @@ export default function PayrollOnboarding() {
             <div className="payroll-card payroll-country-card">
               <span className="payroll-card-label">PAYROLL BASICS</span>
               <h3>Where is the company registered?</h3>
-              <p>Country and pay schedule determine the payroll context before FinClose loads the company.</p>
               <div className="payroll-two-fields">
                 <label><span>Company country</span><select value={country} onChange={event => setCountry(event.target.value)}>{countries.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
                 <label><span>Pay schedule</span><select value={payFrequency} onChange={event => setPayFrequency(event.target.value)}><option value="monthly">Monthly</option><option value="semimonthly">Twice a month</option><option value="biweekly">Every two weeks</option><option value="weekly">Weekly</option></select></label>
@@ -473,7 +472,7 @@ export default function PayrollOnboarding() {
               <div className="payroll-card">
                 <span className="payroll-card-label">ALREADY IN FINCLOSE</span>
                 <h3>Use an existing company</h3>
-                <p>Use a company that was already initialized for {countryName}. You do not need to set it up again.</p>
+                <p>Companies already set up for {countryName}.</p>
                 {companies.length > 0 ? (
                   <>
                     <label><span>Company</span><select value={selectedCompanyId} onChange={event => setSelectedCompanyId(event.target.value)}>{companies.map(company => <option key={company.company_id} value={company.company_id}>{company.legal_name}</option>)}</select></label>
@@ -487,7 +486,7 @@ export default function PayrollOnboarding() {
               <div className="payroll-card">
                 <span className="payroll-card-label">NEW TO FINCLOSE</span>
                 <h3>Initialize the company</h3>
-                <p>Download the {countryName} company form, complete it once, then upload it here.</p>
+                <p>Download the {countryName} form, fill it in, upload it.</p>
                 <div className="payroll-inline-actions">
                   <button className="payroll-secondary" onClick={requestTemplate} disabled={busy}>Prepare company form</button>
                   {downloadUrl && <a className="payroll-download" href={downloadUrl}>Download XLSX</a>}
@@ -507,7 +506,7 @@ export default function PayrollOnboarding() {
             <div>
               <span className="payroll-stage-number">03</span>
               <h2>Bring your payroll history</h2>
-              <p>Give FinClose enough history to understand year-to-date payroll, employee setup and anything still open before it receives current payroll data.</p>
+              <p>Upload year-to-date payroll and employee records.</p>
             </div>
             <div className="payroll-account-chip company"><span>✓</span>{deployment.company_name || 'Company added'}</div>
           </div>
@@ -524,7 +523,7 @@ export default function PayrollOnboarding() {
             <div className="payroll-card payroll-upload-card">
               <span className="payroll-card-label">UPLOAD WHAT YOU HAVE</span>
               <h3>Previous payroll files</h3>
-              <p>You can send several files together. XLSX, XLS, CSV and PDF are accepted.</p>
+              <p>XLSX, XLS, CSV or PDF. Several files allowed.</p>
               <label className="payroll-dropzone">
                 <input type="file" multiple accept=".xlsx,.xls,.csv,.pdf" onChange={event => setHistoryFiles(Array.from(event.target.files || []))} />
                 <strong>{historyFiles.length ? `${historyFiles.length} file${historyFiles.length === 1 ? '' : 's'} selected` : 'Choose payroll files'}</strong>
@@ -543,7 +542,7 @@ export default function PayrollOnboarding() {
             <div>
               <span className="payroll-stage-number">04</span>
               <h2>{sourceComplete ? 'Payroll setup received' : 'Connect current payroll data'}</h2>
-              <p>{sourceComplete ? 'FinClose has the account, company, payroll history and current payroll source for this setup.' : 'Now provide the current payroll source. This is kept separate from the historical files you already supplied.'}</p>
+              <p>{sourceComplete ? 'Everything FinClose needs is in.' : 'Send your latest payroll export.'}</p>
             </div>
             <div className="payroll-account-chip company"><span>✓</span>{deployment.company_name || 'Company added'}</div>
           </div>
@@ -554,7 +553,7 @@ export default function PayrollOnboarding() {
               <div>
                 <span className="payroll-card-label">SETUP COMPLETE</span>
                 <h3>Everything needed for the payroll handoff has been received.</h3>
-                <p>FinClose can now move into payroll validation and preparation. No bookkeeping service has been added to this payroll-only setup.</p>
+                <p>Payroll validation comes next.</p>
                 <div className="payroll-summary-row">
                   <span>Account <strong>confirmed</strong></span>
                   <span>Company <strong>{deployment.company_name || 'added'}</strong></span>
@@ -568,7 +567,7 @@ export default function PayrollOnboarding() {
               <div className="payroll-card payroll-current-card featured">
                 <span className="payroll-card-label">AVAILABLE NOW</span>
                 <h3>Secure payroll upload</h3>
-                <p>Send the latest export from your payroll system. FinClose stores this separately from historical payroll information.</p>
+                <p>Latest export from your payroll system.</p>
                 <label className="payroll-dropzone compact">
                   <input type="file" accept=".xlsx,.xls,.csv,.pdf" onChange={event => setSourceFile(event.target.files?.[0] || null)} />
                   <strong>{sourceFile ? sourceFile.name : 'Choose current payroll file'}</strong>
@@ -585,7 +584,7 @@ export default function PayrollOnboarding() {
                     {availablePayrollConnectors.map(connector => <div key={connector.id}><strong>{connector.name}</strong><span>Connection setup available for {countryName}</span></div>)}
                   </div>
                 ) : (
-                  <p>Secure upload is the available connection method for {countryName} right now. Direct payroll integrations only appear once they are live for the selected country.</p>
+                  <p>Only secure upload is available for {countryName} now.</p>
                 )}
               </div>
             </div>
