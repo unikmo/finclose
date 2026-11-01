@@ -117,7 +117,7 @@ export default function PayrollVariancePanel({ deploymentId }: { deploymentId: s
           <div>
             <span className="payroll-stage-number">REVIEW</span>
             <h2>Payroll variance</h2>
-            <p>Nothing to review yet — variance appears here as soon as the first payroll run is prepared for this company.</p>
+            <p>Nothing to review yet.</p>
           </div>
         </div>
       </section>
@@ -130,7 +130,7 @@ export default function PayrollVariancePanel({ deploymentId }: { deploymentId: s
         <div>
           <span className="payroll-stage-number">REVIEW</span>
           <h2>Payroll variance</h2>
-          <p>Every prepared run compared against the one before it, so nothing gets approved on numbers alone.</p>
+          <p>Each run compared with the one before.</p>
         </div>
         {runs.length > 1 && (
           <label className="payroll-variance-picker">

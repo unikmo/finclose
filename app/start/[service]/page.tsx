@@ -8,19 +8,19 @@ const SERVICES = new Set(['balance-books', 'payroll', 'do-bookkeeping', 'bookkee
 const SERVICE_METADATA: Record<string, { title: string; description: string }> = {
   'balance-books': {
     title: 'Monthly & Year-End Book Close',
-    description: 'FinClose collects, classifies, and reconciles every account, then flags what needs a decision. Your accountant reviews, judges, and signs off before the close is released.'
+    description: 'FinClose prepares the close. Your accountant signs off.'
   },
   payroll: {
     title: 'Payroll Preparation & Processing',
-    description: 'FinClose calculates pay, tax, and deductions across every jurisdiction you operate in, prepares payslips and the journal, and flags exceptions for your approver to review.'
+    description: 'FinClose prepares every pay run. Your approver signs off.'
   },
   'do-bookkeeping': {
     title: 'Ongoing Bookkeeping Without Payroll',
-    description: 'FinClose handles day-to-day bookkeeping — collecting, classifying, and reconciling transactions — so your books stay current between closes.'
+    description: 'FinClose keeps your books current between closes.'
   },
   'bookkeeping-payroll': {
     title: 'Bookkeeping & Payroll Together',
-    description: 'FinClose runs bookkeeping and payroll side by side, so your close and your pay runs stay reconciled with each other, not just correct on their own.'
+    description: 'FinClose runs bookkeeping and payroll together.'
   }
 };
 

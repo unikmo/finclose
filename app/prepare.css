@@ -107,3 +107,5 @@
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 
 .pr-saved{color:#3ecf8e;font-size:14px}
+
+.pr-note a{color:var(--fc-brass);text-decoration:underline;text-underline-offset:3px}

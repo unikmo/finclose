@@ -88,11 +88,11 @@ export default function PartnerPage() {
     <main className="pt-shell" id="main">
       <header className="pt-nav"><Link href="/firm/portfolio">← Client portfolio</Link></header>
       <h1>Firm workspace</h1>
-      <p className="pt-lead">Deadlines, the open problems across your clients, your team, your plan and your branding.</p>
+      <p className="pt-lead">Deadlines, open problems, team, plan, branding.</p>
       {firms && firms.length > 1 && (
         <label className="pt-field">Firm<select value={firmId} onChange={e => setFirmId(e.target.value)}><option value="">Choose a firm</option>{firms.map(f => <option key={f.firm_id} value={f.firm_id}>{f.name} ({humanise(f.role)})</option>)}</select></label>
       )}
-      {firms && firms.length === 0 && !error && <p className="pt-note">You are not a member of a firm yet. Ask your firm for an invitation link, or create a firm from the portfolio page.</p>}
+      {firms && firms.length === 0 && !error && <p className="pt-note">No firm yet. Ask for an invitation link, or create one on the portfolio page.</p>}
       <div aria-live="polite" className="pt-status">{busy ? 'Working…' : ''}</div>
       {error && <p className="pt-error" role="alert">{error}</p>}
       {notice && <p className="pt-ok" role="status">{notice}</p>}
@@ -109,7 +109,7 @@ export default function PartnerPage() {
             <section aria-label="Calendar and queue">
               <p className="pt-note">{cal.scope === 'ALL_CLIENTS' ? 'Showing every client.' : 'Showing only the clients assigned to you.'}</p>
               <h2>Deadlines</h2>
-              {cal.calendar.length === 0 ? <p className="pt-note">No deadlines yet. Clients appear here once they have accepted your invitation.</p> : (
+              {cal.calendar.length === 0 ? <p className="pt-note">No deadlines yet.</p> : (
                 <table className="pt-table"><thead><tr><th>Due</th><th>Client</th><th>What</th><th>Status</th></tr></thead><tbody>
                   {cal.calendar.map(i => (
                     <tr key={i.key}>
@@ -151,7 +151,7 @@ export default function PartnerPage() {
               <h2>Members</h2>
               <ul className="pt-list">{members.map(m => <li key={m.user_id}>{m.email} <span className="pt-pill">{humanise(m.role)}</span></li>)}</ul>
               <h2>Invite someone</h2>
-              <p className="pt-note">FinClose does not send email. You get a one-time link to pass on. The person must sign in with the same email address.</p>
+              <p className="pt-note">No email is sent. Pass on the one-time link. They sign in with the same email.</p>
               <form className="pt-form" onSubmit={e => { e.preventDefault(); run(async () => { const b = await send('/api/firm-invitations', 'POST', invite); setNewLink(`${window.location.origin}${b.accept_path}`); setInvite({ email: '', role: 'ACCOUNTANT' }); await loadTeam(); }); }}>
                 <label>Email<input type="email" value={invite.email} onChange={e => setInvite({ ...invite, email: e.target.value })} required /></label>
                 <label>Role<select value={invite.role} onChange={e => setInvite({ ...invite, role: e.target.value })}>{ROLES.map(r => <option key={r} value={r}>{humanise(r)}</option>)}</select></label>
@@ -195,7 +195,7 @@ export default function PartnerPage() {
 
           {tab === 'brand' && (
             <section aria-label="Branding">
-              <p className="pt-note">Your clients see your name and colour on their packs. Nothing else about your firm is shown to them.</p>
+              <p className="pt-note">Clients see only your name and colour on their packs.</p>
               {role !== 'PARTNER' ? <p className="pt-note">Only partners change the branding.</p> : (
                 <form className="pt-form" onSubmit={e => { e.preventDefault(); run(async () => { await send('/api/firm-settings', 'PUT', { resource: 'branding', ...brand }); setNotice('Saved.'); }); }}>
                   <label>Name shown to clients<input value={brand.display_name} onChange={e => setBrand({ ...brand, display_name: e.target.value })} required maxLength={80} /></label>

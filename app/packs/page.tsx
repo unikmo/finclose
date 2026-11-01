@@ -176,7 +176,7 @@ export default function PacksPage() {
       </header>
       <section className="pr-body" id="content">
         <h1>Saved review packs</h1>
-        <p className="pr-lead">A review pack is your bank statement, sorted and checked, ready for your accountant. Answer the open questions, attach receipts and fix any category that is wrong. Nothing is posted to your accounts. Packs are deleted automatically after a set time; the date is shown on each pack.</p>
+        <p className="pr-lead">Your bank statement, sorted and checked for your accountant. Nothing is posted to your accounts.</p>
 
         <div className="pr-form pr-oneperrow">
           <label htmlFor="company-id">Company ID <span className="pr-hint">(needed when using real data)</span></label>
@@ -205,7 +205,7 @@ export default function PacksPage() {
         <h2>New pack</h2>
         <form className="pr-form" onSubmit={create}>
           <label>Company name<input value={form.company_name} onChange={e => setForm({ ...form, company_name: e.target.value })} required /></label>
-          <label>Country rules<select value={form.jurisdiction} onChange={e => setForm({ ...form, jurisdiction: e.target.value })}>{listJurisdictions().map(j => <option key={j.code} value={j.code}>{j.name}{j.code === 'EE' ? ' (draft rules, not yet checked by an accountant)' : j.code === 'GENERIC' ? ' (no tax rates applied)' : j.code === 'US' ? ' (no VAT; sales tax not handled)' : ' (VAT rates unverified)'}</option>)}</select></label>
+          <label>Country rules<select value={form.jurisdiction} onChange={e => setForm({ ...form, jurisdiction: e.target.value })}>{listJurisdictions().map(j => <option key={j.code} value={j.code}>{j.name}{j.code === 'EE' ? ' (draft, unchecked)' : j.code === 'GENERIC' ? ' (no tax rates applied)' : j.code === 'US' ? ' (no VAT; sales tax not handled)' : ' (VAT rates unverified)'}</option>)}</select></label>
           <label>First day of the period<input type="date" value={form.period_start} onChange={e => setForm({ ...form, period_start: e.target.value })} required /></label>
           <label>Last day of the period<input type="date" value={form.period_end} onChange={e => setForm({ ...form, period_end: e.target.value })} required /></label>
           <label>Balance at the start <span className="pr-hint">(optional, fill in both balances or neither)</span><input inputMode="decimal" value={form.opening_balance} onChange={e => setForm({ ...form, opening_balance: e.target.value })} /></label>
@@ -213,7 +213,7 @@ export default function PacksPage() {
           <label className="pr-check"><input type="checkbox" checked={form.vat_registered} onChange={e => setForm({ ...form, vat_registered: e.target.checked })} />The company is registered for VAT</label>
           <label className="pr-wide">Bank statement (CSV file from your bank, or a PDF statement)
             <input type="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf" onChange={e => { const f = e.target.files?.[0]; if (f) readStatementFile(f); }} />
-            <span className="pr-hint">{fileName ? `Chosen: ${fileName}` : 'A CSV from internet banking is the most reliable. A PDF works only if it is a text PDF, not a scan. Excel files cannot be read yet.'}</span>
+            <span className="pr-hint">{fileName ? `Chosen: ${fileName}` : 'CSV works best. PDF must be text, not a scan. No Excel.'}</span>
           </label>
           {pdfNotes.length > 0 && <div className="pr-callout pr-wide" role="status"><p><strong>Read from a PDF.</strong> Check this before you rely on the pack:</p><ul>{pdfNotes.map(n => <li key={n}>{n}</li>)}</ul></div>}
           <button className="pr-button" type="submit" disabled={busy || !form.csv_text}>{busy ? 'Working…' : 'Create and save pack'}</button>
@@ -283,7 +283,7 @@ export default function PacksPage() {
             {!open_ && <p className="pr-note">This version is {view.record.status === 'SIGNED_OFF' ? 'signed off' : 'replaced by a newer one'}, so it can no longer be changed.</p>}
 
             <h2>Check the categories</h2>
-            <p className="pr-note">Each payment is given a category and a VAT treatment. Change any that are wrong. Tick “remember” and the same payee is sorted that way next time.</p>
+            <p className="pr-note">Change any wrong category. “Remember” applies it to the same payee next time.</p>
             {needsLook.length > 0 && (
               <label className="pr-check pr-inlinecheck"><input type="checkbox" checked={onlyReview} onChange={e => setOnlyReview(e.target.checked)} />Show only the {needsLook.length} that need a look</label>
             )}

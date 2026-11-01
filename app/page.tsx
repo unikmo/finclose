@@ -3,11 +3,11 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'FinClose — Bookkeeping, Payroll & Close Support',
-  description: 'FinClose prepares the close and prepares payroll — every calculation, match, and reconciliation done for you. Your accountant reviews, judges, and approves before anything is released.',
+  description: 'FinClose prepares the close and payroll. Your accountant reviews and signs off.',
   alternates: { canonical: '/' },
   openGraph: {
     title: 'FinClose — Bookkeeping, Payroll & Close Support',
-    description: 'FinClose prepares the close and prepares payroll. Your accountant reviews, judges, and approves before anything is released.',
+    description: 'FinClose prepares the close and payroll. Your accountant reviews and signs off.',
     url: '/'
   }
 };
@@ -16,7 +16,7 @@ const products = [
   {
     number: '01',
     title: 'Closing your books',
-    description: 'FinClose collects, classifies, and reconciles every account, then flags what needs a decision. Your accountant reviews, judges, and signs off — the close is never released without them.',
+    description: 'FinClose prepares the close. Your accountant signs off.',
     href: '/start/balance-books',
     tag: 'Book close',
     steps: ['Collect & classify', 'Match & reconcile', 'Flag exceptions', 'Accountant reviews & signs off']
@@ -24,7 +24,7 @@ const products = [
   {
     number: '02',
     title: 'Payroll',
-    description: 'FinClose calculates and prepares every pay run across the jurisdictions you operate in. Your accountant or approver reviews it before anything is paid.',
+    description: 'FinClose prepares every pay run. Your approver signs off.',
     href: '/start/payroll',
     tag: 'Payroll',
     steps: ['Calculate pay, tax & deductions', 'Prepare payslips & journal', 'Flag exceptions', 'Approver reviews & signs off']
@@ -90,7 +90,7 @@ export default function Home() {
             FinClose Does The
             <span>Work.</span>
           </h1>
-          <p>FinClose prepares the close and prepares payroll — every calculation, match, and reconciliation done for you. Your accountant reviews, judges, and approves. Nothing is released without a sign-off.</p>
+          <p>FinClose prepares the close and payroll. Your accountant signs off.</p>
           <div className="help-trust-row" aria-label="FinClose capabilities">
             <span>Prepared by FinClose</span>
             <span>Reviewed by your accountant</span>
@@ -147,9 +147,8 @@ export default function Home() {
       </section>
 
       <footer className="home-footer">
-        <span>Pay for the service you choose</span>
-        <span>Least-privilege connector access</span>
-        <span>No unnecessary setup</span>
+        <Link href="/how-it-works">How it works</Link>
+        <Link href="/faq">FAQ</Link>
       </footer>
     </main>
   );

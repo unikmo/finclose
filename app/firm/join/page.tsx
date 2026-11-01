@@ -33,10 +33,10 @@ export default function JoinPage() {
   return (
     <main className="pt-shell" id="main">
       <h1>Join a firm</h1>
-      {!token && state === 'ready' && <p className="pt-note">This page needs the invitation link your manager gave you.</p>}
+      {!token && state === 'ready' && <p className="pt-note">Open the invitation link you were sent.</p>}
       {token && state !== 'done' && (
         <>
-          <p className="pt-lead">You have been invited to join an accounting firm on FinClose. Sign in with the email address the invitation was sent to, then accept.</p>
+          <p className="pt-lead">Sign in with the invited email, then accept.</p>
           <button className="pt-button" onClick={accept} disabled={state === 'working'}>{state === 'working' ? 'Working…' : 'Accept the invitation'}</button>
         </>
       )}
