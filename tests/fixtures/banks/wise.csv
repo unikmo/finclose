@@ -1,0 +1,4 @@
+"TransferWise ID","Date","Amount","Currency","Description","Payment Reference","Running Balance","Exchange From","Exchange To","Exchange Rate","Payer Name","Payee Name","Payee Account Number","Merchant","Card Last Four Digits","Card Holder Full Name","Attachment","Note","Total fees"
+"CARD-1001","03-03-2026","-12.99","EUR","Card transaction of 12.99 EUR issued by Notion Labs","","987.01","","","","","","","Notion Labs","1234","Test Owner","","","0.00"
+"TRANSFER-1002","05-03-2026","-250.00","EUR","Sent money to Freelancer Ltd","Invoice 7","737.01","","","","","Freelancer Ltd","GB00TEST00000000","","","","","","0.80"
+"TRANSFER-1003","09-03-2026","1500.00","EUR","Received money from Customer GmbH","INV-22","2237.01","","","","Customer GmbH","","","","","","","","0.00"

@@ -5,15 +5,13 @@
 // delegation/authorization model, cross-client tenant-isolation
 // enforcement, firm roles + client-scoped permissions).
 //
-// NOT built in this pass (deliberately, not silently): the portfolio
-// status/control aggregation engine (item 5, requires reading bookkeeping/
-// reconciliation/close state per company — a separate, larger piece), the
-// portfolio dashboard UI (item 6), the cross-client exception queue (item
-// 7), the close calendar (item 8), API route wiring beyond what a caller
-// needs to exercise this layer, billing hooks (item 11), and branding
-// (item 12). Each of those is real, substantial, separate work — building
-// them without the foundation below correctly isolating tenants first
-// would risk shipping a dashboard on top of a leaky permission model.
+// UPDATE: the items first left out here now exist outside this file. The portfolio
+// status engine and dashboard are in portfolio-status.ts and app/firm/portfolio;
+// the cross-client exception queue, close calendar, plan/usage (billing hooks),
+// branding and staff invitations are in partner-layer.ts with routes under
+// app/api/firm-*. This file is still the only place that decides firm access to a
+// client. The functions at the bottom (joinFirmByInvitation and the list helpers)
+// were added for that layer and never write to a client organisation's own records.
 //
 // CRITICAL DESIGN INVARIANT (Mandatory QA in the brief): a client
 // organization's own tenant boundary is NEVER touched by this file. A
@@ -484,4 +482,53 @@ export async function recordFirmAuditEvent(input: {
     metadata: input.metadata || null,
     created_at: now
   });
+}
+
+// ---------------------------------------------------------------------
+// Partner layer support (lib/partner-layer.ts): joining by invitation and
+// the read-only listings the calendar, usage and workload views need.
+// ---------------------------------------------------------------------
+
+// Writes the membership for someone who accepted a staff invitation. There is no acting manager here:
+// the authority is the invitation (partner-layer.ts checks the token and the verified email first),
+// and the audit event names the person who sent it.
+export async function joinFirmByInvitation(firmId: string, user: { user_id: string; email: string; name?: string }, role: FirmRole, invitedBy?: string) {
+  cleanFirmRole(role);
+  const db = realtimeDatabase();
+  const now = Date.now();
+  const existing = await firmMembershipFor(firmId, user.user_id);
+  if (existing) throw httpError('you are already a member of this firm', 409);
+  const membership = { firm_id: firmId, user_id: user.user_id, email: user.email, name: user.name || '', role, status: 'ACTIVE', created_at: now, updated_at: now };
+  const auditKey = db.ref('finclose_audit_events').push().key!;
+  await db.ref().update({
+    [`finclose_firm_memberships/${firmId}/${user.user_id}`]: membership,
+    [`finclose_user_firms/${user.user_id}/${firmId}`]: { firm_id: firmId, role, status: 'ACTIVE', created_at: now, updated_at: now },
+    [`finclose_audit_events/${auditKey}`]: { event: 'FIRM_MEMBER_JOINED_BY_INVITATION', firm_id: firmId, target_user_id: user.user_id, role, invited_by: invitedBy || null, created_at: now }
+  });
+  return membership;
+}
+
+export async function listFirmMembers(firmId: string) {
+  const snap = await realtimeDatabase().ref(`finclose_firm_memberships/${firmId}`).once('value');
+  const all = (snap.val() || {}) as Record<string, { user_id: string; email: string; name?: string; role: FirmRole; status: string }>;
+  return Object.values(all).filter(m => m.status === 'ACTIVE').map(m => ({ user_id: m.user_id, email: m.email, name: m.name || '', role: m.role }));
+}
+
+// Every delegation record for the firm, including revoked ones, because the usage statement needs the history.
+export async function listFirmDelegations(firmId: string) {
+  const snap = await realtimeDatabase().ref(`finclose_firm_client_delegations/${firmId}`).once('value');
+  return Object.values((snap.val() || {}) as Record<string, FirmClientDelegation>);
+}
+
+export async function listFirmAssignments(firmId: string) {
+  const snap = await realtimeDatabase().ref(`finclose_firm_client_assignments/${firmId}`).once('value');
+  const byOrg = (snap.val() || {}) as Record<string, Record<string, { user_id: string }>>;
+  return Object.entries(byOrg).flatMap(([organization_id, users]) => Object.values(users).map(u => ({ organization_id, user_id: u.user_id })));
+}
+
+// The ACTIVE firms that hold a delegation for a client organisation, for showing the firm's branding to that client.
+export async function activeFirmsForOrganization(organizationId: string) {
+  const snap = await realtimeDatabase().ref(`finclose_organization_firm_delegations/${organizationId}`).once('value');
+  const all = (snap.val() || {}) as Record<string, FirmClientDelegation>;
+  return Object.values(all).filter(d => d.status === 'ACTIVE').map(d => d.firm_id);
 }

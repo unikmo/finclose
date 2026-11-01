@@ -1,0 +1,4 @@
+Client account,Document number,Date,Beneficiary’s/remitter’s account,Beneficiary’s/remitter’s name,Debit/Credit (D/C),Amount,Reference number,Archival ID,Details,Currency,Personal identification code or registry code,Beneficiary’s/remitter’s bank’s BIC,Payment initiator’s name,Entry reference,Account service provider’s reference
+EE000000000000000001,1001,2026-03-02,EE000000000000000002,Telia Eesti AS,D,-124.00,,2026030200001,Mobile plan March,EUR,10234957,LHVBEE22,,E1,S1
+EE000000000000000001,1002,2026-03-04,,LHV Pank,D,-2.50,,2026030400002,Monthly account fee,EUR,,,,E2,S2
+EE000000000000000001,1003,2026-03-10,EE000000000000000003,Client OU,C,500.00,12,2026031000003,Invoice 12,EUR,12345678,LHVBEE22,,E3,S3

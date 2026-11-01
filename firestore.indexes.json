@@ -1,0 +1,58 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "finclose_prod_review_packs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "company_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "finclose_prod_documents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "company_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploaded_at",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "finclose_prod_rate_limits",
+      "fieldPath": "ttl_at",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "finclose_prod_review_packs",
+      "fieldPath": "ttl_at",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "finclose_prod_review_pack_inputs",
+      "fieldPath": "ttl_at",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "finclose_prod_documents",
+      "fieldPath": "ttl_at",
+      "ttl": true,
+      "indexes": []
+    }
+  ]
+}

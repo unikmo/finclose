@@ -4,6 +4,10 @@
     {
       "path": "/api/policy-monitor",
       "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/api/maintenance/purge",
+      "schedule": "30 3 * * *"
     }
   ]
 }

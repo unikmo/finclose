@@ -1,0 +1,5 @@
+balance_transaction_id,created_utc,available_on_utc,currency,gross,fee,net,reporting_category,description
+txn_1,2026-03-03 10:00:00,2026-03-05 00:00:00,eur,100.00,3.20,96.80,charge,Subscription Pro
+txn_2,2026-03-04 11:00:00,2026-03-06 00:00:00,eur,50.00,1.75,48.25,charge,Subscription Basic
+txn_3,2026-03-07 12:00:00,2026-03-07 00:00:00,eur,-20.00,0.00,-20.00,refund,Refund Subscription Basic
+txn_4,2026-03-10 00:00:00,2026-03-10 00:00:00,eur,-125.05,0.00,-125.05,payout,STRIPE PAYOUT

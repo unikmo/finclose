@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '../../../lib/managed-auth';
-import { requireFirmRole } from '../../../lib/firm-tenancy';
+import { listFirmAssignments, requireFirmRole } from '../../../lib/firm-tenancy';
 import { combineFirmPortfolio, portfolioSummaryCounts, resolveCompanyCloseStatusLive } from '../../../lib/portfolio-status';
 import { statusFor } from '../../../lib/finclose-backend';
 import { isRealDataMode } from '../../../lib/runtime-mode';
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     // runs -- combineFirmPortfolio only ever returns clients THIS firm
     // has an active delegation for, but this check additionally ensures
     // the requesting user actually belongs to that firm at all.
-    await requireFirmRole(firmId, auth.user, 'REVIEWER');
+    const membership = await requireFirmRole(firmId, auth.user, 'REVIEWER');
 
     if (!isRealDataMode()) {
       return NextResponse.json({
@@ -44,7 +44,13 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const rows = await combineFirmPortfolio(firmId, resolveCompanyCloseStatusLive);
+    // Below PARTNER, a person sees only the clients they are assigned to, the same rule
+    // requireFirmClientAccess applies to every other firm action. Before this, any member saw every row.
+    let rows = await combineFirmPortfolio(firmId, resolveCompanyCloseStatusLive);
+    if (membership.role !== 'PARTNER') {
+      const mine = new Set((await listFirmAssignments(firmId)).filter(a => a.user_id === auth.user.user_id).map(a => a.organization_id));
+      rows = rows.filter(r => mine.has(r.organization_id));
+    }
     return NextResponse.json({ firm_id: firmId, rows, summary: portfolioSummaryCounts(rows) });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: statusFor(error) });

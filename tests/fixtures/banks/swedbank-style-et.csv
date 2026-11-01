@@ -1,0 +1,8 @@
+"Konto väljavõte";"EE000000000000000004";"01.03.2026 - 31.03.2026"
+""
+"Kliendi konto";"Reatüüp";"Kuupäev";"Saaja/Maksja nimi";"Selgitus";"Summa";"Valuuta";"Deebet/Kreedit (D/K)";"Arhiveerimistunnus";"Viitenumber"
+"EE000000000000000004";"10";"01.03.2026";"";"Algsaldo";"1000,00";"EUR";"K";"";""
+"EE000000000000000004";"20";"03.03.2026";"Vercel Inc";"Hosting";"20,00";"EUR";"D";"A1";""
+"EE000000000000000004";"20";"05.03.2026";"Klient OÜ";"Arve 14";"1 200,50";"EUR";"K";"A2";"14"
+"EE000000000000000004";"82";"31.03.2026";"";"Käive";"1 220,50";"EUR";"D";"";""
+"EE000000000000000004";"86";"31.03.2026";"";"Lõppsaldo";"2180,50";"EUR";"K";"";""
