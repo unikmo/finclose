@@ -205,7 +205,7 @@ export default function PacksPage() {
         <h2>New pack</h2>
         <form className="pr-form" onSubmit={create}>
           <label>Company name<input value={form.company_name} onChange={e => setForm({ ...form, company_name: e.target.value })} required /></label>
-          <label>Country rules<select value={form.jurisdiction} onChange={e => setForm({ ...form, jurisdiction: e.target.value })}>{listJurisdictions().map(j => <option key={j.code} value={j.code}>{j.name}{j.code === 'EE' ? ' (draft rules, not yet checked by an accountant)' : j.code === 'GENERIC' ? ' (no tax rates applied)' : j.code === 'US' ? ' (no VAT; sales tax not handled)' : ' (VAT rates unverified)'}</option>)}</select></label>
+          <label>Country rules<select value={form.jurisdiction} onChange={e => setForm({ ...form, jurisdiction: e.target.value })}>{listJurisdictions().map(j => <option key={j.code} value={j.code}>{j.name}{j.code === 'EE' ? ' (draft, unchecked)' : j.code === 'GENERIC' ? ' (no tax rates applied)' : j.code === 'US' ? ' (no VAT; sales tax not handled)' : ' (VAT rates unverified)'}</option>)}</select></label>
           <label>First day of the period<input type="date" value={form.period_start} onChange={e => setForm({ ...form, period_start: e.target.value })} required /></label>
           <label>Last day of the period<input type="date" value={form.period_end} onChange={e => setForm({ ...form, period_end: e.target.value })} required /></label>
           <label>Balance at the start <span className="pr-hint">(optional, fill in both balances or neither)</span><input inputMode="decimal" value={form.opening_balance} onChange={e => setForm({ ...form, opening_balance: e.target.value })} /></label>

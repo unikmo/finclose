@@ -423,7 +423,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   if (!profile || !authReady) return <main className="service-start-shell"><div className="service-loading">Loading FinClose…</div></main>;
 
   const heroText = !user
-    ? 'Create an account to start.'
+    ? ''
     : !accountComplete
       ? 'Confirm your email, then sign in again.'
     : companyInitializationRequired && !companyComplete
@@ -450,7 +450,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         <div className="service-start-copy">
           <span className="service-route-label">{profile.billingScope.replaceAll('_', ' ')}</span>
           <h1>{profile.title}</h1>
-          <p>{heroText}</p>
+          {heroText && <p>{heroText}</p>}
         </div>
         <div className="phase-strip" aria-label="FinClose onboarding phases">
           {phases.map((phase, index) => <span className={phaseClass(index)} key={phase}>{index + 1} · {phase}</span>)}
