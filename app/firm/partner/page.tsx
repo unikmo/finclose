@@ -20,7 +20,7 @@ type Usage = { month: string; plan: { plan_name: string; price_cents_per_client_
 const STATE: Record<Item['state'], string> = { DONE: 'Done', OVERDUE: 'Overdue', DUE_SOON: 'Due soon', UPCOMING: 'Coming up' };
 const KIND: Record<string, string> = { MONTH_CLOSE: 'Month close', VAT_RETURN: 'VAT return', CUSTOM: 'Other' };
 const SOURCE: Record<string, string> = { FIRM_SETTING: 'from your close-day setting', RULE_UNVERIFIED: 'rule not yet checked with the tax authority', ENTERED_BY_FIRM: 'added by your firm' };
-const ROLES = ['REVIEWER', 'ACCOUNTANT', 'PAYROLL_SPECIALIST', 'MANAGER', 'PARTNER'];
+const ROLES = ['REVIEWER', 'ACCOUNTANT', 'MANAGER', 'PARTNER'];
 const money = (cents: number, cur = 'EUR') => `${(cents / 100).toFixed(2)} ${cur}`;
 const humanise = (code: string) => code.toLowerCase().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 

@@ -8,9 +8,9 @@ export const metadata: Metadata = {
 };
 
 const steps = [
-  ['Choose a service', 'Book close, payroll, bookkeeping, or bookkeeping with payroll.'],
+  ['Choose a service', 'Book close, or ongoing bookkeeping.'],
   ['Add your company', 'Pick a company already in FinClose, or set it up once with the form for your country.'],
-  ['Upload prior records', 'Ledger, trial balance, bank statements, open items. For payroll: past registers and year-to-date totals. This shows FinClose your starting position.'],
+  ['Upload prior records', 'Ledger, trial balance, bank statements, open items. This shows FinClose your starting position.'],
   ['Connect your current system', 'Secure file upload, or a read-only connection to your accounting system where available.'],
   ['Review and sign off', 'FinClose prepares and flags what needs a decision. Your accountant reviews and signs off. FinClose posts nothing to your books.']
 ];
