@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next';
 
 const BASE_URL = 'https://antibalcony.com';
 
-const SERVICES = ['balance-books', 'payroll', 'do-bookkeeping', 'bookkeeping-payroll'];
+const SERVICES = ['balance-books', 'do-bookkeeping'];
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();

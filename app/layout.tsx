@@ -10,10 +10,10 @@ import './prepare.css';
 export const metadata: Metadata = {
   metadataBase: new URL('https://antibalcony.com'),
   title: {
-    default: 'FinClose — Bookkeeping, Payroll & Close Support',
+    default: 'FinClose — Book Close Support',
     template: '%s | FinClose'
   },
-  description: 'Choose the financial operations help you need: bookkeeping, payroll, account reconciliation, monthly close or year-end close.',
+  description: 'Choose the financial operations help you need: bookkeeping, account reconciliation, monthly close or year-end close.',
   openGraph: {
     siteName: 'FinClose',
     type: 'website',

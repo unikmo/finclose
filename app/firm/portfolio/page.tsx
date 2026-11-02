@@ -161,7 +161,6 @@ export default function FirmPortfolioPage() {
                 <tr>
                   <th>Client</th>
                   <th>Books</th>
-                  <th>Payroll</th>
                   <th>Bank</th>
                   <th>Close</th>
                   <th>Exceptions</th>
@@ -171,9 +170,7 @@ export default function FirmPortfolioPage() {
                 {portfolio.rows.map(row => {
                   const scope = String(row.service_scope || '');
                   const hasBooks = scope.includes('BOOKKEEPING');
-                  const hasPayroll = scope.includes('PAYROLL');
                   const books = areaIndicator(row, 'BOOKS', hasBooks);
-                  const payroll = areaIndicator(row, 'PAYROLL', hasPayroll);
                   const bank = areaIndicator(row, 'BANK', hasBooks); // bank reconciliation lives under bookkeeping in this codebase
                   const expanded = expandedCompanyId === row.company_id;
                   return (
@@ -184,14 +181,13 @@ export default function FirmPortfolioPage() {
                       >
                         <td className="fp-client-cell">{row.legal_name || row.company_id}<span className="fp-country">{row.country_code}</span></td>
                         <td title={books.title}><span className={'fp-dot ' + books.className}>{books.symbol}</span></td>
-                        <td title={payroll.title}><span className={'fp-dot ' + payroll.className}>{payroll.symbol}</span></td>
                         <td title={bank.title}><span className={'fp-dot ' + bank.className}>{bank.symbol}</span></td>
                         <td><span className={'fp-status-pill fp-status-' + row.status.toLowerCase()}>{statusLabel(row.status)}</span></td>
                         <td>{row.reasons.length || 0}</td>
                       </tr>
                       {expanded && (
                         <tr className="fp-drill-row">
-                          <td colSpan={6}>
+                          <td colSpan={5}>
                             {row.reasons.length === 0 ? (
                               <p className="fp-drill-empty">No open exceptions.</p>
                             ) : (

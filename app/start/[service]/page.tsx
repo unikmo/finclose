@@ -1,26 +1,17 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import PayrollOnboarding from './PayrollOnboarding';
 import ServiceOnboarding from './ServiceOnboarding';
 
-const SERVICES = new Set(['balance-books', 'payroll', 'do-bookkeeping', 'bookkeeping-payroll']);
+const SERVICES = new Set(['balance-books', 'do-bookkeeping']);
 
 const SERVICE_METADATA: Record<string, { title: string; description: string }> = {
   'balance-books': {
     title: 'Monthly & Year-End Book Close',
     description: 'FinClose prepares the close. Your accountant signs off.'
   },
-  payroll: {
-    title: 'Payroll Preparation & Processing',
-    description: 'FinClose prepares every pay run. Your approver signs off.'
-  },
   'do-bookkeeping': {
-    title: 'Ongoing Bookkeeping Without Payroll',
+    title: 'Ongoing Bookkeeping',
     description: 'FinClose keeps your books current between closes.'
-  },
-  'bookkeeping-payroll': {
-    title: 'Bookkeeping & Payroll Together',
-    description: 'FinClose runs bookkeeping and payroll together.'
   }
 };
 
@@ -49,6 +40,5 @@ export default function ServiceStartPage({ params }: { params: { service: string
     );
   }
 
-  if (params.service === 'payroll') return <PayrollOnboarding />;
   return <ServiceOnboarding serviceKey={params.service} />;
 }
