@@ -67,10 +67,13 @@ export default function Home() {
       <section className="help-hero">
         <div className="help-intro">
           <h1>
-            FinClose Does The
-            <span>Work.</span>
+            <span>FinClose does</span>
+            <span>the work.</span>
           </h1>
           <p>FinClose prepares the close. Your accountant signs off.</p>
+          <Link href="/start/balance-books" className="home-cta">
+            Start closing your books →
+          </Link>
           <div className="help-trust-row" aria-label="FinClose capabilities">
             <span>Prepared by FinClose</span>
             <span>Reviewed by your accountant</span>
