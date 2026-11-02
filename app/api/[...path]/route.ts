@@ -9,6 +9,7 @@ import { isRealDataMode, publicRuntimeProfile, runtimeReadiness } from '../../..
 import { assertProductionLedgerReady, ledgerHealth, persistBookkeepingBatch, persistFinanceCycle, persistPayrollRun } from '../../../lib/production-ledger';
 import { FINANCIAL_UPLOAD_SECURITY } from '../../../lib/file-security';
 import { getPayrollRun, PAYROLL_RULE_PACKS, payrollEngineSelfTest, preparePayrollRun } from '../../../lib/payroll-engine';
+import { assertPayrollAllowed } from '../../../lib/payroll-release-store';
 import { computePayrollVariance, listPayrollRunsForDeployment } from '../../../lib/payroll-variance';
 import { BOOKKEEPING_CORE_CAPABILITIES, bookkeepingEngineSelfTest, getBookkeepingBatch, prepareBookkeepingBatch } from '../../../lib/bookkeeping-engine';
 import { FINANCE_CYCLE_CAPABILITIES, financeCycleSelfTest, getFinanceCycle, getMonthlyClose, prepareFinanceCycle } from '../../../lib/finance-cycle-engine';
@@ -259,6 +260,7 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
     if (p.join('/') === 'service-deployments/start') {
       const body = await req.json();
       const user = auth.kind === 'customer' ? auth.user : null;
+      if (['payroll', 'bookkeeping-payroll'].includes(String(body.service || ''))) await assertPayrollAllowed(organization?.organization_id, String(body.country_code || ''));
       return NextResponse.json(await startServiceDeployment({
         service: String(body.service || ''),
         name: user?.name || String(body.name || ''),
@@ -273,6 +275,7 @@ export async function POST(req: NextRequest, { params }: { params: { path?: stri
 
     if (p.length === 4 && p[0] === 'service-deployments' && p[2] === 'payroll' && p[3] === 'runs') {
       const scoped = await authorizedDeployment(req, p[1], 'ACCOUNTANT');
+      await assertPayrollAllowed(scoped.deployment.organization_id, String(scoped.deployment.country_code || scoped.deployment.configuration?.country_code || ''));
       const run = await preparePayrollRun(p[1], await req.json()) as Record<string, any>;
       if (isRealDataMode() && scoped.auth.kind === 'customer') {
         await persistPayrollRun({
