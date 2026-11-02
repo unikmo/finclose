@@ -1,6 +1,6 @@
 // Cameroon (CM) payroll rule pack — v1, 2026 General Tax Code.
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current Cameroonian payroll/tax expertise has checked this against the
 // DGI's current operative statutes (NOT the DGI's own stale indicative
@@ -176,7 +176,7 @@ export const PAYROLL_RULE_PACK_CM = {
   // decimals; all four golden fixtures (CM-REG-100K, CM-CAP-800K,
   // CM-LOW-61999, CM-HIGH-1500K) now match exactly, including net pay.
   id: 'CM-2026-IRPP-CNPS-CFC-FNE-TDL-CRTV-BIK-DRAFT-V3',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'XAF',
   irpp: {
     brackets: [[0, 0, 0.10], [2000000, 200000, 0.15], [3000000, 350000, 0.25], [5000000, 850000, 0.35]] as Array<[number, number, number]>,

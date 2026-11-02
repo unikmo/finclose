@@ -1,6 +1,6 @@
 // United Kingdom (GB) payroll rule pack — v1.
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current UK payroll expertise has checked this against HMRC's own
 // Specification for PAYE Tax Table Routines, the NI software-developer
@@ -213,7 +213,7 @@ export const PAYROLL_RULE_PACK_UK = {
   //     existing calculation methods, verified against
   //     UK-ENG-001/UK-NI-M-001/UK-SCOT-001 in the golden pack.
   id: 'GB-2026-27-PAYE-CAT-A-M-STANDARD-AND-0T-CODES-SSP-DRAFT-V3',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'GBP',
   income_tax: {
     personal_allowance_annual: 12570,

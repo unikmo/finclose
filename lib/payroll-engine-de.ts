@@ -13,7 +13,7 @@
 // and what is still NOT modeled (one-time-payment bAV; whether the
 // employer's own subsidy counts toward the employee's ceilings).
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current German payroll/tax expertise has checked:
 //   1. the income-tax bracket coefficients (§32a EStG) against the
@@ -222,7 +222,7 @@ export const PAYROLL_RULE_PACK_DE = {
   // normal indexation, but the exact final euro figure isn't officially
   // published yet).
   id: 'DE-2026-GRUNDTARIF-KLASSE-I-DRAFT-V5',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'EUR',
   income_tax: {
     grundfreibetrag: 12348,

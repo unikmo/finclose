@@ -1,6 +1,6 @@
 // Tanzania — Zanzibar (TZ/Zanzibar) payroll rule pack — v1.
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current Zanzibar payroll expertise has checked this against TRA's own
 // PAYE guidance, ZSSF's own current contribution notice, and the Zanzibar
@@ -116,7 +116,7 @@ export type TzPayrollRunResult = {
 
 export const PAYROLL_RULE_PACK_TZ = {
   id: 'TZ-ZANZIBAR-2026-PAYE-ZSSF-VOCATIONAL-LEVY-DRAFT-V1',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'TZS',
   // PAYE is a Union matter (the Constitution reserves tax on income to the
   // Union; TRA administers it island-wide on the same bracket table) — see

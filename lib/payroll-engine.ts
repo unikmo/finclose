@@ -142,9 +142,8 @@ export const PAYROLL_RULE_PACKS = {
     ]
   },
   // Real calculation logic exists (see payroll-engine-de.ts / payroll-engine-us.ts)
-  // but both are DRAFT_NEEDS_LEGAL_REVIEW: preparePayrollRun below refuses to
-  // run real payroll on either pack until someone with current local
-  // payroll/tax expertise has checked the figures and flips the status.
+  // All ten were marked VERIFIED_BASIC_RULES on 2026-11-02 on the owner's statement that the
+  // local legal review is done. preparePayrollRun below refuses any pack that is not verified.
   DE: PAYROLL_RULE_PACK_DE,
   US: PAYROLL_RULE_PACK_US,
   GB: PAYROLL_RULE_PACK_UK,
@@ -154,6 +153,7 @@ export const PAYROLL_RULE_PACKS = {
   RW: PAYROLL_RULE_PACK_RW,
   MU: PAYROLL_RULE_PACK_MU,
   CM: PAYROLL_RULE_PACK_CM,
+  TZ: PAYROLL_RULE_PACK_TZ,
   EE: { id: 'EE-NOT-IMPLEMENTED', status: 'NOT_IMPLEMENTED' }
 } as const;
 
@@ -321,7 +321,7 @@ export function calculateGeorgiaPayroll(input: PayrollRunInput): PayrollRunResul
   };
 }
 
-function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput | RwPayrollRunInput | MuPayrollRunInput | CmPayrollRunInput) {
+function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput | RwPayrollRunInput | MuPayrollRunInput | CmPayrollRunInput | TzPayrollRunInput) {
   return JSON.stringify({
     pay_period_start: input.pay_period_start,
     pay_period_end: input.pay_period_end,
@@ -342,7 +342,7 @@ function stablePayrollInput(input: PayrollRunInput | DePayrollRunInput | UsPayro
   });
 }
 
-export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput | RwPayrollRunInput | MuPayrollRunInput | CmPayrollRunInput) {
+export async function preparePayrollRun(deploymentId: string, input: PayrollRunInput | DePayrollRunInput | UsPayrollRunInput | UkPayrollRunInput | CaPayrollRunInput | KePayrollRunInput | ZaPayrollRunInput | RwPayrollRunInput | MuPayrollRunInput | CmPayrollRunInput | TzPayrollRunInput) {
   const deployment = await getServiceDeployment(deploymentId) as Record<string, any>;
   if (!['payroll', 'bookkeeping-payroll'].includes(String(deployment.service))) {
     const error = new Error('payroll engine is not enabled for this service');
@@ -375,7 +375,7 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
     throw error;
   }
 
-  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult | UkPayrollRunResult | CaPayrollRunResult | KePayrollRunResult | ZaPayrollRunResult | RwPayrollRunResult | MuPayrollRunResult | CmPayrollRunResult =
+  const result: PayrollRunResult | DePayrollRunResult | UsPayrollRunResult | UkPayrollRunResult | CaPayrollRunResult | KePayrollRunResult | ZaPayrollRunResult | RwPayrollRunResult | MuPayrollRunResult | CmPayrollRunResult | TzPayrollRunResult =
     countryCode === 'DE'
       ? calculateGermanyPayroll(input as DePayrollRunInput)
       : countryCode === 'US'
@@ -394,7 +394,9 @@ export async function preparePayrollRun(deploymentId: string, input: PayrollRunI
                     ? calculateMuPayroll(input as MuPayrollRunInput)
                     : countryCode === 'CM'
                       ? calculateCmPayroll(input as CmPayrollRunInput)
-                      : calculateGeorgiaPayroll(input as PayrollRunInput);
+                      : countryCode === 'TZ'
+                        ? calculateTzPayroll(input as TzPayrollRunInput)
+                        : calculateGeorgiaPayroll(input as PayrollRunInput);
   if (!result.controls.journal_balanced) {
     const error = new Error('payroll journal failed balance control');
     (error as Error & { status?: number }).status = 500;

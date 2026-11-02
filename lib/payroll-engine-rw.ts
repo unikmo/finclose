@@ -1,6 +1,6 @@
 // Rwanda (RW) payroll rule pack — v1.
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current Rwandan payroll expertise has checked this against RRA's own PAYE
 // guidance and RSSB's Ishema system output directly (this pack's CBHI net-
@@ -204,7 +204,7 @@ export const PAYROLL_RULE_PACK_RW = {
   // too. Distinct from vehicle_benefit/accommodation_benefit, which are
   // non-cash and only ever affect the PAYE base. See evidence/limitations.
   id: 'RW-2026-PAYE-RSSB-RAMA-CBHI-BIK-FRINGE-DRAFT-V4',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'RWF',
   paye: {
     brackets: [[0, 0, 0], [60000, 0, 0.10], [100000, 4000, 0.20], [200000, 24000, 0.30]] as Array<[number, number, number]>,

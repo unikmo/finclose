@@ -3,7 +3,7 @@
 // UT, MN, MT, ND, OK, RI, VA, MA, MO, NE, SC, VT, WV, KS, ID, NM, AR, HI,
 // OH, LA, IA, AL, MD, CT, DE, FL, NV, NH, SD, TN, TX, WY).
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current US payroll/tax expertise has checked:
 //   1. the federal percentage-method withholding table (IRS Pub 15-T) against
@@ -1082,7 +1082,7 @@ export const PAYROLL_RULE_PACK_US = {
   // model) but deliberately NOT force-fixed — see the mississippi
   // limitations entry, unchanged in substance from v21.
   id: 'US-50-STATES-PLUS-DC-PLUS-ME-2026-FEDERAL-PERCENTAGE-METHOD-DRAFT-V22',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'USD',
   fica: {
     social_security_rate: 0.062,

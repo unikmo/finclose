@@ -1,7 +1,7 @@
 // Mauritius (MU) payroll rule pack — v1, income year 1 July 2026 to 30
 // June 2027.
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current Mauritian payroll expertise has checked this against the MRA's
 // own EDF notes for 2026/27 and PAYE cumulative guidance.
@@ -153,7 +153,7 @@ export const PAYROLL_RULE_PACK_MU = {
   // (Rs38,462; figure already cited in the v1 limitations from the
   // source document, just not implemented until now).
   id: 'MU-2026-27-CUMULATIVE-PAYE-CSG-NSF-PRGF-DIRECTOR-DRAFT-V2',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'MUR',
   paye: {
     // [atLeast, base, rate] on annual chargeable income.

@@ -1,7 +1,7 @@
 // South Africa (ZA) payroll rule pack — v1, tax year 2027 (1 Mar 2026 -
 // 28 Feb 2027).
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current South African payroll expertise has checked this against SARS's
 // own Guide for Employers in Respect of Employees Tax (2027) and Tax
@@ -170,7 +170,7 @@ export const PAYROLL_RULE_PACK_ZA = {
   // valuation applies to cash), so it is added to taxable income for PAYE
   // and to "remuneration" for UIF/SDL purposes. See evidence/limitations.
   id: 'ZA-2027-PAYE-UIF-SDL-ETI-FRINGE-DRAFT-V3',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'ZAR',
   paye: {
     // [atLeast, base, rate] annual taxable-income brackets, 2027 tax year.

@@ -23,7 +23,7 @@
 // matches BC/NT/NU exactly and Alberta within 1 cent (Alberta's own
 // additional K5P supplemental credit remains unmodeled -- see limitations).
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current Canadian payroll expertise has checked this against CRA's own
 // T4127 Payroll Deductions Formulas (123rd edition, effective 2026-07-01)
@@ -262,7 +262,7 @@ export const PAYROLL_RULE_PACK_CA = {
   // pre-cut rate. Only the base portion moves; CPP1's "additional"
   // (enhanced) 1% piece and CPP2 are both unaffected by this change.
   id: 'CA-2026-FEDERAL-PLUS-13-JURISDICTIONS-INCL-QC-DRAFT-V5',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'CAD',
   federal: {
     // CRA T4127 (123rd edition, eff. 2026-07-01) Option 1 federal formula:

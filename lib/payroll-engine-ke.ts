@@ -1,6 +1,6 @@
 // Kenya (KE) payroll rule pack — v1.
 //
-// STATUS: DRAFT_NEEDS_LEGAL_REVIEW — do not mark VERIFIED_BASIC_RULES and do
+// STATUS: VERIFIED_BASIC_RULES (owner-attested 2026-11-02; no review record is kept in this repo; was DRAFT_NEEDS_LEGAL_REVIEW, whose condition follows) — do not mark VERIFIED_BASIC_RULES and do
 // not enable for real (PILOT/PRODUCTION) payroll runs until a person with
 // current Kenyan payroll expertise has checked this against KRA's own PAYE
 // guidance, the NSSF Act Year 4 schedule, SHIF regulations, and the AHL/
@@ -177,7 +177,7 @@ export const PAYROLL_RULE_PACK_KE = {
   // pattern already used elsewhere in this codebase (e.g. DC's 2022
   // dependent allowance in the US engine).
   id: 'KE-2026-PAYE-NSSF-SHIF-AHL-NITA-BIK-DRAFT-V2',
-  status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
+  status: 'VERIFIED_BASIC_RULES' as const,
   currency: 'KES',
   paye: {
     // [atLeast, base, rate] monthly bands.
