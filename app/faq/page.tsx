@@ -9,6 +9,8 @@ export const metadata: Metadata = {
 
 const questions = [
   ['Who decides?', 'Your accountant. FinClose prepares proposals and flags items. It decides nothing and posts nothing to your books.'],
+  ['Where does the review run, and whose AI is it?', 'For SmartAccounts, Xero and Zoho Books, FinClose is a small program you install in the Claude desktop app on your own computer. It runs under your own Claude account. Your accounting keys and your books stay on your computer. FinClose only receives your partner id, partner code, country and company registry number, to count the accounts your partner serves. ChatGPT cannot run it yet, because it cannot start programs on your computer.'],
+  ['What about QuickBooks and FreshBooks?', 'Their sign-in needs a secret that cannot safely be placed on your computer. For these two, the connection runs through FinClose’s server instead. It is read-only and nothing is written to your books.'],
   ['Why upload prior records?', 'They show FinClose your balances, open items and earlier decisions before it sees current data. This is not another sign-up step.'],
   ['What can I upload?', 'XLSX, XLS, CSV and PDF for prior records. Receipts: PDF, PNG or JPG, up to 25 MB. PDF statements must be text, not scans.'],
   ['Why are my files held for review?', 'During the pilot, uploads are quarantined until an administrator clears them. Nothing is processed before that.'],

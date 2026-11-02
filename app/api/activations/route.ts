@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { statusFor } from '../../../lib/finclose-backend';
-import { httpError } from '../../../lib/pack-route-support';
-import { checkPartnerCode, monthOf, partnerCode, usageForMonth, validPartnerId } from '../../../lib/activation';
+import { httpError, readJsonBody } from '../../../lib/pack-route-support';
+import { activateCompany, checkPartnerCode, monthOf, partnerCode, usageForMonth, validPartnerId } from '../../../lib/activation';
 import { activationStore, clientIp } from '../../../lib/ledger-route-support';
 import { checkCronAuth } from '../../../lib/cron-auth';
 import { checkRateLimit } from '../../../lib/rate-limit';
@@ -27,6 +27,22 @@ export async function GET(req: NextRequest) {
     if (!checkPartnerCode(partnerId, url.searchParams.get('partner_code'))) throw httpError('the partner code is not valid', 403);
     const month = url.searchParams.get('month') || monthOf(Date.now());
     return NextResponse.json(await usageForMonth(await activationStore(), partnerId, month), { headers: NO_STORE });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: statusFor(error) });
+  }
+}
+
+// POST { partner_id, partner_code, country, reg_code }  -> count one client company for the partner.
+//   Used by the program that runs on the client's own computer (local/finclose-local.ts). It sends
+//   only these four values. No ledger data, keys or review results ever reach this server.
+export async function POST(req: NextRequest) {
+  try {
+    const body = await readJsonBody(req, 2_000);
+    const partnerId = validPartnerId(body.partner_id);
+    checkRateLimit(`activations:post:${partnerId}`, 60, 60_000);
+    checkRateLimit(`activations:post:ip:${clientIp(req.headers)}`, 20, 60_000);
+    const activation = await activateCompany(await activationStore(), { partner_id: partnerId, partner_code: body.partner_code, country: body.country, reg_code: body.reg_code });
+    return NextResponse.json({ activation: { token: activation.token, month: activation.month, counted_as_new_account_this_month: activation.first_run_this_month } }, { headers: NO_STORE });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: statusFor(error) });
   }

@@ -1,0 +1,40 @@
+{
+  "manifest_version": "0.3",
+  "name": "finclose",
+  "display_name": "FinClose",
+  "version": "0.1.0",
+  "description": "Prepares your books for your accountant, on your own computer. Read-only: it proposes and decides nothing.",
+  "author": { "name": "FinClose" },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.mjs"],
+      "env": {
+        "FINCLOSE_PARTNER_ID": "${user_config.partner_id}",
+        "FINCLOSE_PARTNER_CODE": "${user_config.partner_code}",
+        "FINCLOSE_COMPANY_COUNTRY": "${user_config.company_country}",
+        "FINCLOSE_COMPANY_REG": "${user_config.company_reg}",
+        "FINCLOSE_SA_APIKEY": "${user_config.smartaccounts_apikey}",
+        "FINCLOSE_SA_SECRET": "${user_config.smartaccounts_secret}",
+        "FINCLOSE_XERO_CLIENT_ID": "${user_config.xero_client_id}",
+        "FINCLOSE_ZOHO_CLIENT_ID": "${user_config.zoho_client_id}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "finclose_connect", "description": "Sign in to Xero or Zoho Books on this computer (read access)." },
+    { "name": "finclose_review_books", "description": "Read the books for a period and return proposals for the accountant. Read-only." }
+  ],
+  "user_config": {
+    "partner_id": { "type": "string", "title": "Partner id", "description": "Given to you by your accountant or FinClose partner.", "required": true },
+    "partner_code": { "type": "string", "title": "Partner code", "description": "The code your partner received from FinClose.", "required": true, "sensitive": true },
+    "company_country": { "type": "string", "title": "Company country", "description": "Two-letter code, like EE, GB or US.", "required": true },
+    "company_reg": { "type": "string", "title": "Company registry number", "description": "Your company's public registry number.", "required": true },
+    "smartaccounts_apikey": { "type": "string", "title": "SmartAccounts API key", "description": "Only if you use SmartAccounts. Create a read-only key there. Stays on this computer.", "sensitive": true },
+    "smartaccounts_secret": { "type": "string", "title": "SmartAccounts secret key", "description": "Only if you use SmartAccounts. Stays on this computer.", "sensitive": true },
+    "xero_client_id": { "type": "string", "title": "Xero app client id", "description": "Only if you use Xero. Provided by your partner (a public id, not a secret)." },
+    "zoho_client_id": { "type": "string", "title": "Zoho app client id", "description": "Only if you use Zoho Books. Provided by your partner (a public id, not a secret)." }
+  }
+}
