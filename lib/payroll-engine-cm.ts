@@ -161,7 +161,21 @@ export const PAYROLL_RULE_PACK_CM = {
   // benefit-in-kind additions to the IRPP taxable base, per the source
   // document's own stated percentages (already cited in the v1
   // limitations, just not implemented until now).
-  id: 'CM-2026-IRPP-CNPS-CFC-FNE-TDL-CRTV-BIK-DRAFT-V2',
+  //
+  // v3 (2026-09-16, golden-fixture QA pass): fixed a real rounding bug —
+  // the shared money() helper rounded every amount to 2 decimal places
+  // (a minor-currency-unit convention), but XAF (Central African CFA
+  // franc) has NO minor unit; all payroll outputs must be whole FCFA. Any
+  // computation whose percentage didn't divide evenly (4.2% CNPS pension,
+  // 7% family allowance, 1.75%/2.5%/5% occupational risk, and especially
+  // the IRPP annual-to-monthly /12 division) produced fractional-FCFA
+  // results, e.g. gross 100,000 -> IRPP 2,413.33 instead of 2,413. The
+  // "Cameroon 2026 Payroll Golden Fixtures" QA pack (smallest_unit_decimals:
+  // 0, zero tolerance) failed this way on every one of its four fixtures.
+  // Fixed by rounding to the nearest whole FCFA everywhere instead of 2
+  // decimals; all four golden fixtures (CM-REG-100K, CM-CAP-800K,
+  // CM-LOW-61999, CM-HIGH-1500K) now match exactly, including net pay.
+  id: 'CM-2026-IRPP-CNPS-CFC-FNE-TDL-CRTV-BIK-DRAFT-V3',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'XAF',
   irpp: {
@@ -196,6 +210,7 @@ export const PAYROLL_RULE_PACK_CM = {
     { authority: 'User-supplied reference', instrument: '"Cameroon 2026 Payroll Implementation Reference" (verified to 14 Sep 2026) — the source document this pack was built from, including its own explicit warning that the DGI\'s indicative IRPP table is stale (2.8%/300,000 CNPS parameters) versus the current 4.2%/750,000 operative law this pack uses. Not independently re-fetched from impots.cm/cnps.cm directly this pass.', url: 'file: Cameroon_2026_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' }
   ],
   limitations: [
+    'v3 (2026-09-16): fixed a rounding bug where all amounts were rounded to 2 decimal places (a minor-currency-unit convention) instead of the nearest whole FCFA. XAF has no minor unit, so every fractional-FCFA line item (IRPP, CAC, CNPS pension/family/occupational-risk on any base not evenly divisible by the rate, and especially the IRPP /12 annualization) was wrong. Confirmed and fixed against the "Cameroon 2026 Payroll Golden Fixtures" QA pack, which failed on this exact issue across all four of its fixtures before the fix.',
     'v1 initial build, monthly payroll only. IRPP uses the source\'s own recommended "annualised statutory method" (annualize current gross pay, apply annual deductions/allowance/bands, divide by 12) rather than the obsolete DGI lookup table — but this is still NOT a true cumulative YTD-aware routine. The professional-expense annual cap (4,800,000 FCFA) and the 500,000 annual salary allowance are recomputed fresh each period from the annualized figure, not tracked as real running YTD totals — a genuinely irregular-pay employee will not have the true annual caps correctly enforced.',
     'Article 65 bis (exceptional/delayed income smoothing) is NOT implemented at all. Any bonus, retroactive payment, or other non-ordinary-salary amount run through this engine as ordinary gross pay will be taxed WRONG — this engine has no exceptional-income path and must not be used for such payments.',
     'Taxable benefits in kind, v2: computed ONLY when the caller sets housing_benefit / vehicle_benefit / food_benefit / telephone_benefit to true, adding 15% / 10% / 10% / 5% of gross_pay respectively to the IRPP taxable base only, per the source\'s own stated percentages. CNPS/CFC/FNE/TDL/CRTV stay on their existing cash bases — the source did not specify a BIK treatment for those, and this engine does not guess. All four flags default to false/omitted, exactly matching v1 behavior for every existing caller. Other benefit types the source did not enumerate a percentage for are still not modeled.',
@@ -207,7 +222,22 @@ export const PAYROLL_RULE_PACK_CM = {
 };
 
 function money(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  // XAF (Central African CFA franc) has NO minor currency unit — every
+  // payroll output must be a whole FCFA amount. Fixed 2026-09-16 during a
+  // golden-fixture QA pass: this helper previously rounded to 2 decimal
+  // places (copied from the RW/MU engines, whose currencies also round to
+  // whole units but whose particular rates/gross figures happened to
+  // divide evenly), which is wrong for XAF and produced fractional-FCFA
+  // IRPP/CAC/CNPS/CFC/family-allowance/occupational-risk line items (e.g.
+  // gross 100,000 -> IRPP 2,413.33 instead of the correct 2,413) on any
+  // input whose 4.2%/7%/1.75%/etc. percentage or /12 annualization doesn't
+  // divide evenly. The "Cameroon 2026 Payroll Golden Fixtures" QA pack
+  // (smallest_unit_decimals: 0, zero-tolerance) failed on every one of its
+  // four fixtures under the old rounding; rounding to the nearest whole
+  // FCFA here (round-half-up, matching this pack's existing convention)
+  // reproduces all four exactly. See CM-REG-100K, CM-CAP-800K,
+  // CM-LOW-61999, CM-HIGH-1500K in test-golden-cm.ts.
+  return Math.round(value + Number.EPSILON);
 }
 
 function requireIsoDate(value: string, field: string) {
@@ -446,8 +476,9 @@ export function payrollEngineSelfTestCM() {
   // 31,500*12 = 378,000. netSalaryCategoryAnnual = 12,000,000-3,600,000-
   // 378,000 = 8,022,000. annualTaxableSalary = 8,022,000-500,000=7,522,000.
   // IRPP annual = 850,000+(7,522,000-5,000,000)*0.35 = 850,000+882,700
-  // = 1,732,700. IRPP monthly = 1,732,700/12 = 144,391.67.
-  // CAC = 10% * 144,391.67 = 14,439.17.
+  // = 1,732,700. IRPP monthly = 1,732,700/12 = 144,391.67 -> rounded to the
+  // nearest whole FCFA (XAF has no minor unit) = 144,392.
+  // CAC = 10% * 144,392 = 14,439.2 -> rounded = 14,439.
   // CFC/FNE base (basic=gross=1,000,000, already a multiple of 1,000).
   // employeeCfc=1%*1,000,000=10,000. employerCfc=1.5%*1,000,000=15,000.
   // employerFne=1%*1,000,000=10,000.
@@ -494,7 +525,8 @@ export function payrollEngineSelfTestCM() {
   // annualGrossTaxable=828,000; professionalDeduction=min(248,400,4.8M)=
   // 248,400; CNPS annual=30,240; netSalaryCategoryAnnual=549,360;
   // annualTaxableSalary=49,360 (10% bracket) -> annual IRPP=4,936 ->
-  // monthly=411.33. CAC=41.13.
+  // monthly=4,936/12=411.33 -> rounded to nearest whole FCFA = 411.
+  // CAC=10%*411=41.1 -> rounded = 41.
   const housingBik = calculateCmPayroll({
     pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
     employees: [{ employee_id: 'H1', gross_pay: 60000, sector_regime: 'GENERAL_OR_DOMESTIC', cnps_risk_group: 'A', employer_cfc_fne_exempt: false, crtv_exempt: false, housing_benefit: true }]
@@ -503,7 +535,7 @@ export function payrollEngineSelfTestCM() {
 
   const ok =
     e1.employee_cnps_pension === 31500 && e1.employer_cnps_pension === 31500 &&
-    e1.irpp === 144391.67 && e1.cac === 14439.17 &&
+    e1.irpp === 144392 && e1.cac === 14439 &&
     e1.employee_cfc === 10000 && e1.employer_cfc === 15000 && e1.employer_fne === 10000 &&
     e1.tdl === 2500 && e1.crtv === 12350 &&
     e1.employer_cnps_family_allowance === 52500 && e1.employer_cnps_occupational_risk === 17500 &&
@@ -512,7 +544,7 @@ export function payrollEngineSelfTestCM() {
     cfc99999.employees[0].employee_cfc === 990 && cfc100001.employees[0].employee_cfc === 1000 &&
     exempt.employees[0].employer_cfc === 0 && exempt.employees[0].employer_fne === 0 && exempt.employees[0].employee_cfc === 10000 &&
     exempt.controls.journal_balanced &&
-    eHousing.benefit_in_kind === 9000 && eHousing.irpp === 411.33 && eHousing.cac === 41.13 &&
+    eHousing.benefit_in_kind === 9000 && eHousing.irpp === 411 && eHousing.cac === 41 &&
     eHousing.employee_cnps_pension === 2520 && housingBik.controls.journal_balanced;
 
   return { ok, r1, belowThreshold, cfc99999, cfc100001, exempt, housingBik };

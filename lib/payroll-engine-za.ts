@@ -76,6 +76,21 @@ export type ZaEmployeeInput = {
   // eti_eligible is true (drives the sub-160-hour gross-up/gross-down
   // proration SARS's own formula requires — see calculation below).
   eti_hours_worked?: number;
+  // Executive/other cash fringe benefit or allowance paid in CASH this
+  // period (e.g. a cash car allowance, cash bonus-in-lieu-of-benefit,
+  // executive cash perk) — v3. This is NOT a benefit-in-kind (no Seventh
+  // Schedule valuation rule applies to a cash amount): SARS treats a cash
+  // allowance/benefit as ordinary remuneration, added to taxable income for
+  // PAYE and to "remuneration" for UIF (subject to the same UIF ceiling)
+  // and SDL. It IS added to gross_pay for net_pay purposes (unlike a
+  // benefit-in-kind, the employee actually receives this in cash). Omit or
+  // 0 leaves every existing caller's figures unchanged. NOT currently
+  // added to the ETI grossed-up remuneration band check (see limitations)
+  // — in practice ETI-qualifying employees (age 18-29, remuneration under
+  // R7,500/month) are unlikely to also carry an "executive" cash fringe
+  // benefit, but a caller combining both should treat the ETI figure as
+  // approximate.
+  exec_cash_fringe_benefit?: number;
 };
 
 export type ZaPayrollRunInput = {
@@ -102,6 +117,7 @@ export type ZaEmployeeResult = {
   employee_id: string;
   name?: string;
   gross_pay: number;
+  exec_cash_fringe_benefit: number;
   paye: number;
   employee_uif: number;
   employer_uif: number;
@@ -125,6 +141,7 @@ export type ZaPayrollRunResult = {
   employees: ZaEmployeeResult[];
   totals: {
     gross_pay: number;
+    exec_cash_fringe_benefit: number;
     paye: number;
     employee_uif: number;
     employer_uif: number;
@@ -147,7 +164,12 @@ export const PAYROLL_RULE_PACK_ZA = {
   // v2: adds the Employment Tax Incentive (ETI), directly sourced from
   // SARS's own current ETI page (effective 1 April 2025 changes) rather
   // than approximated — see the eti table and evidence entry below.
-  id: 'ZA-2027-PAYE-UIF-SDL-ETI-DRAFT-V2',
+  //
+  // v3: adds exec_cash_fringe_benefit — a cash allowance/benefit is
+  // ordinary remuneration under SARS rules (no Seventh Schedule in-kind
+  // valuation applies to cash), so it is added to taxable income for PAYE
+  // and to "remuneration" for UIF/SDL purposes. See evidence/limitations.
+  id: 'ZA-2027-PAYE-UIF-SDL-ETI-FRINGE-DRAFT-V3',
   status: 'DRAFT_NEEDS_LEGAL_REVIEW' as const,
   currency: 'ZAR',
   paye: {
@@ -186,14 +208,17 @@ export const PAYROLL_RULE_PACK_ZA = {
     { authority: 'South African Revenue Service (SARS)', instrument: 'Unemployment Insurance Fund (UIF) — 1% employee + 1% employer, R17,712/month remuneration ceiling', url: 'https://www.sars.gov.za/businesses-and-employers/employers/uif/' },
     { authority: 'South African Revenue Service (SARS)', instrument: 'Skills Development Levy (SDL) — 1% of leviable remuneration, R500,000 12-month exemption threshold', url: 'https://www.sars.gov.za/businesses-and-employers/employers/skills-development-levy/' },
     { authority: 'South African Revenue Service (SARS)', instrument: 'Employment Tax Incentive (ETI) — own current page, changes effective 1 April 2025: months 1-12 (60% / R1,500 flat / R1,500 minus 75% taper), months 13-24 (30% / R750 flat / R750 minus 37.5% taper), R7,500/month ineligibility threshold, 160-hour gross-up/gross-down proration, 18-29 qualifying age', url: 'https://www.sars.gov.za/types-of-tax/pay-as-you-earn/employment-tax-incentive-eti/' },
-    { authority: 'User-supplied reference', instrument: '"South Africa 2026/27 Payroll Implementation Reference" (verified to 14 Sep 2026) — the source document this pack was built from. Not independently re-fetched from sars.gov.za directly this pass.', url: 'file: South_Africa_2026_27_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' }
+    { authority: 'User-supplied reference', instrument: '"South Africa 2026/27 Payroll Implementation Reference" (verified to 14 Sep 2026) — the source document this pack was built from. Not independently re-fetched from sars.gov.za directly this pass.', url: 'file: South_Africa_2026_27_Payroll_Implementation_Reference.pdf (user-supplied, 2026-09-15)' },
+    { authority: 'SARS / Guide for Employers in respect of Fringe Benefits (PAYE-GEN-01-G02)', instrument: 'Fringe benefits are valued under the Seventh Schedule to the Income Tax Act and added to remuneration, which attracts PAYE the same as cash salary; a cash allowance/benefit (no in-kind valuation rule applies) is ordinary remuneration from the outset', url: 'https://www.sars.gov.za/guide-for-employers-in-respect-of-fringe-benefits/' },
+    { authority: 'SARS', instrument: 'UIF and SDL are both calculated on "remuneration" (the same base PAYE uses, per the Fourth Schedule definition) — a cash allowance/benefit that increases taxable remuneration correspondingly increases the UIF (subject to the standard monthly ceiling) and SDL base', url: 'https://www.sars.gov.za/businesses-and-employers/employers/uif/' }
   ],
   limitations: [
     'v1 initial build, monthly payroll only, tax year 2027 (1 Mar 2026 - 28 Feb 2027). PAYE uses a simplified ANNUALIZE-CURRENT-PERIOD-AND-DIVIDE approximation — the source document explicitly warns against this exact shortcut ("Do not calculate monthly PAYE by merely applying 1/12 of annual brackets to current cash pay"), since real SARS payroll tables use period/annual-equivalent/remuneration/tax-status/directive logic this engine does not implement. This will diverge from the correct SARS figure whenever pay varies period to period.',
     'employee_age is a plain caller-supplied integer, not derived from date of birth as of the pay date.',
     'Employment Tax Incentive (ETI), v2: computed ONLY when the caller supplies eti_eligible: true plus eti_employment_months and eti_hours_worked, straight off SARS\'s own current formula (effective 1 April 2025) — including the 160-hour gross-up/gross-down proration the v1 scope note explicitly deferred. This is an EMPLOYER-side PAYE reduction only: it never changes the employee\'s own paye or net_pay figures, and is posted as its own ETI_GOVERNMENT_INCENTIVE_INCOME journal line plus an offsetting debit against PAYE_PAYABLE (so the two PAYE_PAYABLE lines together net to the actual amount remitted to SARS). This engine independently checks only ONE SARS eligibility rule — employee_age between 18 and 29 inclusive — and rejects eti_eligible: true outside that range. Every OTHER SARS eligibility test remains the caller\'s responsibility and is NOT verified by this engine: valid ID/asylum documentation, the employer itself not being disqualified (e.g. for underpaying minimum wage generally, or for a prior dismissal-and-rehire to claim ETI), the employee not being a domestic worker or a "connected person" to the employer, and the minimum-wage remuneration floor. Special Economic Zone (SEZ) employment, where the 18-29 age limit is waived entirely, is NOT supported — an SEZ employee outside 18-29 must be claimed outside this engine. The 24-month cumulative claim limit is enforced via eti_employment_months (rejected if >24), but this engine has no memory of its own between calls — the caller must track and pass the correct cumulative count each month. SDL is a flat 1% of gross pay gated on a caller-supplied employer_sdl_liable flag; the real R500,000 12-month projected-leviable-payroll exemption test is NOT computed by this engine.',
     'NOT IMPLEMENTED AT ALL in v1, rejected outright: taxable fringe benefits (vehicle, low-interest loans, etc. — gross_pay is assumed to be cash remuneration only); travel allowances; the bonus/irregular-payment annual-equivalent method (a bonus run through this engine as ordinary gross pay will be taxed incorrectly); severance/lump-sum SARS tax directives (payments requiring a directive MUST NOT be run through this engine\'s ordinary PAYE calculation — it has no directive path); COIDA (Compensation Fund assessment, explicitly marked DYNAMIC/employer-classification-specific in the source); all statutory filing/export (EMP201, EMP501, IRP5/IT3(a), SARS BRS validation). This engine prepares payroll and accounting outputs only — it does not file with SARS.',
-    'Source parameters come from a user-supplied implementation-reference document (itself citing SARS), not independently re-fetched from sars.gov.za directly this pass. Should be reconfirmed against SARS\'s own 2027 Guide for Employers and Tax Deduction Tables before this pack is marked VERIFIED_BASIC_RULES.'
+    'Source parameters come from a user-supplied implementation-reference document (itself citing SARS), not independently re-fetched from sars.gov.za directly this pass. Should be reconfirmed against SARS\'s own 2027 Guide for Employers and Tax Deduction Tables before this pack is marked VERIFIED_BASIC_RULES.',
+    'exec_cash_fringe_benefit (v3, new): a cash allowance/benefit (e.g. an executive cash perk, cash car allowance) is ordinary remuneration under SARS rules — unlike a benefit-in-kind, no Seventh Schedule valuation formula applies to an amount already paid in cash. This engine therefore adds it straight to the PAYE taxable base, to the UIF "remuneration" base (still capped at the same R17,712/month ceiling as any other remuneration — it does not raise the cap), to the SDL leviable-remuneration base, and to net_pay (the employee actually receives it, unlike a true in-kind benefit). It is NOT included in the ETI grossed-up remuneration band check — ETI-qualifying employees (age 18-29, monthly remuneration under R7,500) are unlikely in practice to also carry this kind of allowance, but a caller combining both inputs on the same employee should treat the resulting ETI figure as approximate pending confirmation. This field was NOT part of the user-supplied implementation reference the rest of this pack was built from; it follows general SARS remuneration/UIF/SDL principles (see evidence) and should be reconfirmed the same way as the rest of this pack before VERIFIED_BASIC_RULES.'
   ]
 };
 
@@ -278,6 +303,7 @@ export function calculateZaPayroll(input: ZaPayrollRunInput): ZaPayrollRunResult
     }
 
     const grossPay = requireNonNegativeMoney(employee.gross_pay, `gross_pay for ${employeeId}`);
+    const execCashFringeBenefit = requireNonNegativeMoney(employee.exec_cash_fringe_benefit ?? 0, `exec_cash_fringe_benefit for ${employeeId}`);
     const dependants = employee.medical_scheme_dependants ?? 0;
     if (!Number.isInteger(dependants) || dependants < 0) {
       const error = new Error(`medical_scheme_dependants for ${employeeId} must be a non-negative integer`);
@@ -285,8 +311,15 @@ export function calculateZaPayroll(input: ZaPayrollRunInput): ZaPayrollRunResult
       throw error;
     }
 
+    // A cash allowance/benefit is ordinary remuneration (no Seventh
+    // Schedule in-kind valuation applies) — see the exec_cash_fringe_benefit
+    // evidence/limitations entries. It feeds PAYE, UIF and SDL the same way
+    // gross_pay does, and (unlike a true benefit-in-kind) is actually paid
+    // out in cash, so it also feeds net_pay.
+    const totalCashRemuneration = money(grossPay + execCashFringeBenefit);
+
     // --- PAYE (simplified annualize-and-divide; see limitations) ---
-    const annualGross = money(grossPay * 12);
+    const annualGross = money(totalCashRemuneration * 12);
     const grossAnnualTax = bracketLookup(annualGross, p.paye.brackets);
     let rebate = p.paye.primary_rebate_annual;
     if (employee.employee_age >= 65) rebate += p.paye.secondary_rebate_annual;
@@ -302,13 +335,14 @@ export function calculateZaPayroll(input: ZaPayrollRunInput): ZaPayrollRunResult
     }
     const paye = Math.max(0, money(monthlyTax - medicalCredit));
 
-    // --- UIF ---
-    const uifBase = Math.min(grossPay, p.uif.max_remuneration_monthly);
+    // --- UIF (remuneration base includes the cash fringe benefit, still
+    // capped at the same monthly ceiling as any other remuneration) ---
+    const uifBase = Math.min(totalCashRemuneration, p.uif.max_remuneration_monthly);
     const employeeUif = money(p.uif.rate * uifBase);
     const employerUif = employeeUif;
 
-    // --- SDL ---
-    const employerSdl = employee.employer_sdl_liable ? money(p.sdl.rate * grossPay) : 0;
+    // --- SDL (leviable remuneration base includes the cash fringe benefit) ---
+    const employerSdl = employee.employer_sdl_liable ? money(p.sdl.rate * totalCashRemuneration) : 0;
 
     // --- ETI (Employment Tax Incentive, employer-side only; see limitations) ---
     let eti = 0;
@@ -350,13 +384,14 @@ export function calculateZaPayroll(input: ZaPayrollRunInput): ZaPayrollRunResult
       eti = hoursWorked < fullMonthHours ? money(rawIncentive * (hoursWorked / fullMonthHours)) : rawIncentive;
     }
 
-    const netPay = money(grossPay - paye - employeeUif);
-    const employerFundedTotal = money(grossPay + employerUif + employerSdl);
+    const netPay = money(totalCashRemuneration - paye - employeeUif);
+    const employerFundedTotal = money(totalCashRemuneration + employerUif + employerSdl);
 
     return {
       employee_id: employeeId,
       name: employee.name ? String(employee.name).trim() : undefined,
       gross_pay: grossPay,
+      exec_cash_fringe_benefit: execCashFringeBenefit,
       paye,
       employee_uif: employeeUif,
       employer_uif: employerUif,
@@ -373,6 +408,7 @@ export function calculateZaPayroll(input: ZaPayrollRunInput): ZaPayrollRunResult
 
   const totals = {
     gross_pay: sum(employees.map(e => e.gross_pay)),
+    exec_cash_fringe_benefit: sum(employees.map(e => e.exec_cash_fringe_benefit)),
     paye: sum(employees.map(e => e.paye)),
     employee_uif: sum(employees.map(e => e.employee_uif)),
     employer_uif: sum(employees.map(e => e.employer_uif)),
@@ -383,7 +419,11 @@ export function calculateZaPayroll(input: ZaPayrollRunInput): ZaPayrollRunResult
   };
 
   const journal: ZaJournalLine[] = [
-    { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: totals.gross_pay },
+    // SALARY_EXPENSE reflects total cash remuneration (gross_pay plus any
+    // exec_cash_fringe_benefit) — the fringe amount is actual cash paid to
+    // the employee and flows through paye/UIF/net_pay exactly like the rest
+    // of gross_pay, so it belongs in the same expense line, not a separate one.
+    { side: 'DEBIT', account_role: 'SALARY_EXPENSE', amount: money(totals.gross_pay + totals.exec_cash_fringe_benefit) },
     { side: 'DEBIT', account_role: 'EMPLOYER_UIF_SDL_EXPENSE', amount: money(totals.employer_uif + totals.employer_sdl) },
     { side: 'CREDIT', account_role: 'NET_PAYROLL_PAYABLE', amount: totals.net_pay },
     { side: 'CREDIT', account_role: 'PAYE_PAYABLE', amount: totals.paye },
@@ -511,6 +551,22 @@ export function payrollEngineSelfTestZA() {
   });
   const e7 = r7.employees[0];
 
+  // Case 8 (v3): exec_cash_fringe_benefit. gross_pay 20,000 + fringe 5,000
+  // = 25,000/month cash remuneration -> annual 300,000 -> bracket
+  // [245100,44118,0.26]: 44,118 + 0.26*(300,000-245,100) = 58,392.
+  // Rebate (under 65) 17,820 -> 40,572/12 = 3,381.00 monthly PAYE (no
+  // medical credit). UIF base capped at 17,712 -> 177.12 each side. SDL
+  // (liable) = 1% * 25,000 = 250. net_pay = 25,000 - 3,381 - 177.12 =
+  // 21,441.88 — proves the fringe amount is both taxed AND paid out.
+  const r8 = calculateZaPayroll({
+    pay_period_start: '2026-09-01', pay_period_end: '2026-09-30', pay_date: '2026-09-30',
+    employees: [{
+      employee_id: 'Z8', gross_pay: 20000, exec_cash_fringe_benefit: 5000, employee_age: 40,
+      medical_scheme_main_member: false, employer_sdl_liable: true
+    }]
+  });
+  const e8 = r8.employees[0];
+
   const ok =
     e1.paye === 2191.50 && r1.controls.journal_balanced &&
     e2.paye === 1185.50 && e2.employer_sdl === 204.25 && r2.controls.journal_balanced &&
@@ -518,7 +574,9 @@ export function payrollEngineSelfTestZA() {
     e4.eti === 1500 && r4.controls.journal_balanced &&
     e5.eti === 562.50 && r5.controls.journal_balanced &&
     e6.eti === 600 && r6.controls.journal_balanced &&
-    e7.eti === 0 && r7.controls.journal_balanced;
+    e7.eti === 0 && r7.controls.journal_balanced &&
+    e8.paye === 3381 && e8.employee_uif === 177.12 && e8.employer_sdl === 250 &&
+    e8.net_pay === 21441.88 && r8.controls.journal_balanced;
 
-  return { ok, r1, r2, r3, r4, r5, r6, r7 };
+  return { ok, r1, r2, r3, r4, r5, r6, r7, r8 };
 }
