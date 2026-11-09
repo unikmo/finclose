@@ -5,7 +5,7 @@ import './contact.css';
 
 export const metadata: Metadata = {
   title: 'Contact',
-  description: 'Contact the Finbuks team. Please do not send bank details or company records.',
+  description: 'Contact the Finbuks team.',
   alternates: { canonical: '/contact' }
 };
 
