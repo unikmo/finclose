@@ -21,7 +21,6 @@ export default function Contact() {
       <section className="pr-body">
         <h1>Contact</h1>
         <p className="pr-note">Ask a question about Finbuks. We reply by email.</p>
-        <p className="contact-warn">Please do not send bank details, passwords or company records in this form. Finbuks prepares work for your accountant and does not give accounting advice here.</p>
         <ContactForm />
         <p className="pr-note">Prefer email? Write to <a href="mailto:hello@finbuks.com">hello@finbuks.com</a>.</p>
         <p className="pr-note"><Link href="/faq">FAQ</Link> · <Link href="/how-it-works">How it works</Link></p>
