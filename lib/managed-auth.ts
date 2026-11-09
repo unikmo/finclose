@@ -166,7 +166,7 @@ export async function createFirebaseSessionResponse(idToken: string) {
   const decoded = await auth.verifyIdToken(idToken, true);
   const nowSeconds = Math.floor(Date.now() / 1000);
   if (!decoded.auth_time || nowSeconds - decoded.auth_time > MAX_AUTH_AGE_SECONDS) {
-    throw httpError('recent sign-in is required before creating a FinClose session', 401);
+    throw httpError('recent sign-in is required before creating a Finbuks session', 401);
   }
   if (!decoded.email) throw httpError('email identity is required', 403);
   const cookie = await auth.createSessionCookie(idToken, { expiresIn: FIREBASE_SESSION_MS });
@@ -252,7 +252,7 @@ export async function authenticateRequest(req: NextRequest): Promise<RequestIden
   await assertRealDataReleaseCertified();
   const user = await currentManagedUser(req);
   if (!user) throw httpError('sign in is required', 401);
-  if (!user.email_verified) throw httpError('verify your email before using real financial data in FinClose', 403);
+  if (!user.email_verified) throw httpError('verify your email before using real financial data in Finbuks', 403);
   return { kind: 'customer', user };
 }
 

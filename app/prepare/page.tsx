@@ -107,9 +107,9 @@ export default function PreparePage() {
   return (
     <main className="pr-shell">
       <header className="pr-nav">
-        <Link href="/" className="pr-brand" aria-label="FinClose home">
+        <Link href="/" className="pr-brand" aria-label="Finbuks home">
           <span className="pr-logo">F</span>
-          <span>FinClose <em>Prepare for review</em></span>
+          <span>Finbuks <em>Prepare for review</em></span>
         </Link>
       </header>
 

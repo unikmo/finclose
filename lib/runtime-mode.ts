@@ -1,10 +1,10 @@
 import { inspectFirebaseServiceAccountEnvironment } from './firebase-environment';
 
-export type FinCloseRuntimeMode = 'LAB' | 'PILOT' | 'PRODUCTION';
+export type FinbuksRuntimeMode = 'LAB' | 'PILOT' | 'PRODUCTION';
 export type UploadQuarantineMode = 'BLOCK' | 'MANUAL_REVIEW' | 'SCANNER';
 
 export type RuntimeReadiness = {
-  mode: FinCloseRuntimeMode;
+  mode: FinbuksRuntimeMode;
   real_data_mode: boolean;
   firebase_auth_server_ready: boolean;
   firebase_auth_client_ready: boolean;
@@ -21,7 +21,7 @@ export type RuntimeReadiness = {
   blockers: string[];
 };
 
-export function runtimeMode(): FinCloseRuntimeMode {
+export function runtimeMode(): FinbuksRuntimeMode {
   const raw = String(process.env.FINCLOSE_RUNTIME_MODE || 'LAB').trim().toUpperCase();
   if (raw === 'PILOT' || raw === 'PRODUCTION') return raw;
   return 'LAB';
@@ -45,7 +45,7 @@ function productionReleaseGateApproved() {
   return String(process.env.FINCLOSE_PRODUCTION_RELEASE_GATE || '').trim().toUpperCase() === 'APPROVED';
 }
 
-function releaseGateApproved(mode: FinCloseRuntimeMode) {
+function releaseGateApproved(mode: FinbuksRuntimeMode) {
   if (mode === 'PILOT') return pilotReleaseGateApproved();
   if (mode === 'PRODUCTION') return productionReleaseGateApproved();
   return false;

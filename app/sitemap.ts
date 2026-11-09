@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 
-const BASE_URL = 'https://antibalcony.com';
+const BASE_URL = 'https://finbuks.com';
 
 const SERVICES = ['balance-books', 'do-bookkeeping'];
 

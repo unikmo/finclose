@@ -230,7 +230,7 @@ export function usageStatement(plan: FirmPlan | null, firmId: string, month: str
     billable_clients: billable,
     total_cents: billable.length * price,
     notes: [
-      'A count of clients and a price. FinClose collects no money: no card or payment provider is connected.',
+      'A count of clients and a price. Finbuks collects no money: no card or payment provider is connected.',
       'No proration and no revenue share are calculated.',
       ...(plan ? [] : ['No plan has been set, so the price is zero.'])
     ]

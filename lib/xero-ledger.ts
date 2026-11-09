@@ -39,8 +39,8 @@ export class XeroLedgerSource implements LedgerSource {
     const { token, tenantId } = await this.auth();
     this.used += 1;
     const response = await this.fetchFn(`${API}/${path}`, { headers: { Authorization: `Bearer ${token}`, 'xero-tenant-id': tenantId, Accept: 'application/json' } });
-    if (response.status === 401 || response.status === 403) throw httpError(`Xero would not let FinClose read ${path.split('?')[0]} (${response.status}). Reconnect and allow read access`, response.status);
-    if (response.status === 429) throw httpError('Xero asked FinClose to slow down (429)', 429);
+    if (response.status === 401 || response.status === 403) throw httpError(`Xero would not let Finbuks read ${path.split('?')[0]} (${response.status}). Reconnect and allow read access`, response.status);
+    if (response.status === 429) throw httpError('Xero asked Finbuks to slow down (429)', 429);
     if (!response.ok) throw httpError(`Xero answered ${response.status} for ${path.split('?')[0]}`, 502);
     return obj(await response.json());
   }

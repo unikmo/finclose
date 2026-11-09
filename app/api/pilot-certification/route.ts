@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   try {
     assertLabToken(req);
     if (runtimeMode() !== 'LAB') {
-      return NextResponse.json({ detail: 'pilot certification must run while FinClose remains in LAB; do not use certification to justify an already-active real-data mode' }, { status: 409 });
+      return NextResponse.json({ detail: 'pilot certification must run while Finbuks remains in LAB; do not use certification to justify an already-active real-data mode' }, { status: 409 });
     }
     await ensureFirebaseWebClientConfig();
     return NextResponse.json(await runReleaseBoundPilotCertification());

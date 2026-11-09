@@ -3,8 +3,8 @@ import type { VatSummary } from './vat-summary';
 import { JURISDICTIONS, normaliseJurisdiction } from './jurisdictions';
 
 // A VAT RETURN WORKSHEET for the period of a pack: the figures an accountant needs to fill in the
-// return, laid out in FinClose's own lines. It is not a filing and it is not the country's form:
-// no form-box numbers are used because FinClose has not checked them against the authority's current
+// return, laid out in Finbuks's own lines. It is not a filing and it is not the country's form:
+// no form-box numbers are used because Finbuks has not checked them against the authority's current
 // form (kmd_mapping stays NOT_MAPPED). Every figure comes from the bank lines and linked invoices
 // in the pack; anything that could not be counted is listed rather than guessed.
 

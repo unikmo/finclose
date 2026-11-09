@@ -1,4 +1,4 @@
-// How long each kind of stored record is kept. Defaults are FinClose's own choice, NOT a legal period:
+// How long each kind of stored record is kept. Defaults are Finbuks's own choice, NOT a legal period:
 // how long an accounting record must be kept is for the company and its accountant to confirm.
 // Each period can be changed per deployment with an environment variable; a bad value falls back to the default.
 

@@ -40,7 +40,7 @@ export async function ensurePersonalOrganization(user: ManagedUser) {
   const orgRef = db.ref(`finclose_organizations/${orgId}`);
   const now = Date.now();
   const existing = await orgRef.once('value');
-  const organizationName = user.name ? `${user.name}'s organization` : 'FinClose organization';
+  const organizationName = user.name ? `${user.name}'s organization` : 'Finbuks organization';
   if (!existing.exists()) {
     const auditKey = db.ref('finclose_audit_events').push().key!;
     await db.ref().update({

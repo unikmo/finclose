@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 
-// Counting how many client companies a partner runs FinClose on, without holding any of their
+// Counting how many client companies a partner runs Finbuks on, without holding any of their
 // financial data. A run reports only: the partner's id, the company's country and registry number
 // (public information), and the month. The server counts distinct companies per partner per month
 // and hands back a signed token for that company and month.

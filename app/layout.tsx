@@ -8,14 +8,14 @@ import './firm-portfolio.css';
 import './prepare.css';
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://antibalcony.com'),
+  metadataBase: new URL('https://finbuks.com'),
   title: {
-    default: 'FinClose — Book Close Support',
-    template: '%s | FinClose'
+    default: 'Finbuks — Book Close Support',
+    template: '%s | Finbuks'
   },
   description: 'Choose the financial operations help you need: bookkeeping, account reconciliation, monthly close or year-end close.',
   openGraph: {
-    siteName: 'FinClose',
+    siteName: 'Finbuks',
     type: 'website',
     locale: 'en_US'
   },

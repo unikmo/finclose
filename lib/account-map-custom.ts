@@ -1,6 +1,6 @@
 import { buildAccountMap, type Account, type AccountMap } from './chart-of-accounts';
 
-// A company's own account numbers, layered over FinClose's default map. Only the code and name
+// A company's own account numbers, layered over Finbuks's default map. Only the code and name
 // can change: the account type stays with the default, so an expense can't be turned into an
 // asset by a typo. Overrides are validated before they are stored and again before they are used.
 

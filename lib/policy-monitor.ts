@@ -78,7 +78,7 @@ async function fetchAndHash(url: string, timeoutMs: number): Promise<{ hash: str
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { 'user-agent': 'FinCloseComplianceMonitor/1.0 (weekly source-change check; contact via finclose product team)' }
+      headers: { 'user-agent': 'FinbuksComplianceMonitor/1.0 (weekly source-change check; contact via finclose product team)' }
     });
     const contentType = res.headers.get('content-type') || '';
     const buffer = Buffer.from(await res.arrayBuffer());

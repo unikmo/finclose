@@ -94,7 +94,7 @@ export default function FirmPortfolioPage() {
         <div className="fp-empty">
           <h1>Sign in to view your Firm Workspace</h1>
           <p>For signed-in firm members only.</p>
-          <Link href="/" className="fp-link">← Back to FinClose</Link>
+          <Link href="/" className="fp-link">← Back to Finbuks</Link>
         </div>
       </main>
     );
@@ -103,9 +103,9 @@ export default function FirmPortfolioPage() {
   return (
     <main className="fp-shell">
       <header className="fp-nav">
-        <Link href="/" className="fp-brand" aria-label="FinClose home">
+        <Link href="/" className="fp-brand" aria-label="Finbuks home">
           <span className="fp-logo">F</span>
-          <span>FinClose <em>Firm Workspace</em></span>
+          <span>Finbuks <em>Firm Workspace</em></span>
         </Link>
         <Link href="/firm/partner">Calendar, team, plan and branding</Link>
         {firms && firms.length > 1 && (
@@ -124,7 +124,7 @@ export default function FirmPortfolioPage() {
         <div className="fp-empty">
           <h1>No firm yet</h1>
           <p>No firm yet. Ask a partner to add you, or create one.</p>
-          <Link href="/" className="fp-link">← Back to FinClose</Link>
+          <Link href="/" className="fp-link">← Back to Finbuks</Link>
         </div>
       )}
 

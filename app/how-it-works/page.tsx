@@ -9,19 +9,19 @@ export const metadata: Metadata = {
 
 const steps = [
   ['Choose a service', 'Book close, or ongoing bookkeeping.'],
-  ['Add your company', 'Pick a company already in FinClose, or set it up once with the form for your country.'],
-  ['Upload prior records', 'Ledger, trial balance, bank statements, open items. This shows FinClose your starting position.'],
+  ['Add your company', 'Pick a company already in Finbuks, or set it up once with the form for your country.'],
+  ['Upload prior records', 'Ledger, trial balance, bank statements, open items. This shows Finbuks your starting position.'],
   ['Connect your current system', 'Secure file upload, or a read-only connection to your accounting system where available.'],
-  ['Review and sign off', 'FinClose prepares and flags what needs a decision. Your accountant reviews and signs off. FinClose posts nothing to your books.']
+  ['Review and sign off', 'Finbuks prepares and flags what needs a decision. Your accountant reviews and signs off. Finbuks posts nothing to your books.']
 ];
 
 export default function HowItWorks() {
   return (
     <main className="pr-shell">
       <header className="pr-nav">
-        <Link href="/" className="pr-brand" aria-label="FinClose home">
+        <Link href="/" className="pr-brand" aria-label="Finbuks home">
           <span className="pr-logo">F</span>
-          <span>FinClose <em>How it works</em></span>
+          <span>Finbuks <em>How it works</em></span>
         </Link>
       </header>
       <section className="pr-body">

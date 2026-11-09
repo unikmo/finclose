@@ -94,7 +94,7 @@ export async function completeXeroAuthorisation(
   if (!response.ok) throw httpError(`Xero would not list the organisations (code ${response.status})`, 502);
   const tenants = (await response.json()) as { tenantId?: string; tenantName?: string; tenantType?: string }[];
   const organisations = (Array.isArray(tenants) ? tenants : []).filter(t => t.tenantId && (!t.tenantType || t.tenantType === 'ORGANISATION'));
-  if (organisations.length === 0) throw httpError('no Xero organisation was shared with FinClose', 409);
+  if (organisations.length === 0) throw httpError('no Xero organisation was shared with Finbuks', 409);
   if (organisations.length > 1) throw httpError('more than one Xero organisation was shared. Connect again and tick only the one for this company', 409);
   const connection: Connection = {
     company_id: state.company_id,

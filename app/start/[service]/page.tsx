@@ -7,11 +7,11 @@ const SERVICES = new Set(['balance-books', 'do-bookkeeping']);
 const SERVICE_METADATA: Record<string, { title: string; description: string }> = {
   'balance-books': {
     title: 'Monthly & Year-End Book Close',
-    description: 'FinClose prepares the close. Your accountant signs off.'
+    description: 'Finbuks prepares the close. Your accountant signs off.'
   },
   'do-bookkeeping': {
     title: 'Ongoing Bookkeeping',
-    description: 'FinClose keeps your books current between closes.'
+    description: 'Finbuks keeps your books current between closes.'
   }
 };
 
@@ -34,7 +34,7 @@ export default function ServiceStartPage({ params }: { params: { service: string
       <main className="service-start-shell">
         <div className="service-start-error">
           <h1>Service not found</h1>
-          <Link href="/">← Back to FinClose</Link>
+          <Link href="/">← Back to Finbuks</Link>
         </div>
       </main>
     );

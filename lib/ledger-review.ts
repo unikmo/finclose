@@ -15,7 +15,7 @@ export type Proposal = {
   kind: ProposalKind;
   severity: 'HIGH' | 'MEDIUM' | 'LOW';
   summary: string;
-  suggested_action: string; // what a person could do; FinClose does none of it
+  suggested_action: string; // what a person could do; Finbuks does none of it
   records: { type: 'INVOICE' | 'PAYMENT' | 'ENTRY' | 'ACCOUNT'; id: string; label: string }[];
 };
 
@@ -132,8 +132,8 @@ export function reviewLedger(snapshot: LedgerSnapshot): LedgerReview {
       if (!inUse.has(v.code)) continue;
       if (!country.allowed_rates.includes(v.rate_percent)) raise({
         key: v.code, kind: 'QUESTION', severity: 'MEDIUM',
-        summary: `VAT code "${v.code}" is ${v.rate_percent}%, which is not among the rates FinClose knows for ${country.name} (${country.allowed_rates.join(', ')}), and it is used on invoices.`,
-        suggested_action: country.vat_status === 'UNVERIFIED' ? 'FinClose\'s rate list for this country is unverified, so confirm with the accountant before changing anything.' : 'Confirm the code with the accountant.',
+        summary: `VAT code "${v.code}" is ${v.rate_percent}%, which is not among the rates Finbuks knows for ${country.name} (${country.allowed_rates.join(', ')}), and it is used on invoices.`,
+        suggested_action: country.vat_status === 'UNVERIFIED' ? 'Finbuks\'s rate list for this country is unverified, so confirm with the accountant before changing anything.' : 'Confirm the code with the accountant.',
         records: [{ type: 'ACCOUNT', id: v.code, label: `VAT code ${v.code}` }]
       });
     }

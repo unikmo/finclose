@@ -123,7 +123,7 @@ function isEmployeeMaterial(deltaAmount: number, deltaPct: number | null) {
 
 export function computePayrollVariance(currentRun: PayrollRunRecord, previousRun: PayrollRunRecord | null): PayrollVarianceResult {
   const limitations = [
-    'Compares gross_pay and net_pay only -- the two fields every FinClose payroll engine produces with the same meaning. Country-specific lines (e.g. individual US state taxes, employer contribution breakdowns) are not compared here.',
+    'Compares gross_pay and net_pay only -- the two fields every Finbuks payroll engine produces with the same meaning. Country-specific lines (e.g. individual US state taxes, employer contribution breakdowns) are not compared here.',
     'A per-employee flag requires BOTH the percentage and dollar-amount thresholds to be crossed, so a large swing on a small salary and a small swing on a large salary are both suppressed from the flagged list -- they still appear in the full employee table.',
     'This is a mechanical comparison against the immediately prior run for this deployment. It does not know WHY a number moved (raise, backdated correction, rate change, data error) -- that judgment is the reviewing accountant\'s.'
   ];

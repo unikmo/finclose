@@ -1,6 +1,6 @@
 import type { JournalView } from './chart-of-accounts';
 
-// DATEV file export of the PROPOSED journal, for a German accountant to import. FinClose has no
+// DATEV file export of the PROPOSED journal, for a German accountant to import. Finbuks has no
 // live DATEV connection: DATEV's own interfaces need a partner registration.
 //
 // UNVERIFIED: the layout follows the DATEV "Buchungsstapel" (EXTF, format 700, category 21) as

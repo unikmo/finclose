@@ -81,12 +81,12 @@ export function buildTemplate(country: Country) {
     ['trading_name','Trading name','','NO','If different.'],
     ['entity_type','Entity type','corporation','YES','corporation | llc | partnership | sole_proprietor'],
     ['registration_number','Registration number','','YES','Company registry identifier.'],
-    ['service_scope','FinClose service scope','BOOKKEEPING_AND_PAYROLL','YES','BOOKKEEPING_ONLY | PAYROLL_ONLY | BOOKKEEPING_AND_PAYROLL'],
+    ['service_scope','Finbuks service scope','BOOKKEEPING_AND_PAYROLL','YES','BOOKKEEPING_ONLY | PAYROLL_ONLY | BOOKKEEPING_AND_PAYROLL'],
     ['company_stage','Company stage','EXISTING','YES','NEW | EXISTING'],
     ['base_currency','Base currency',country.currency,'YES','Functional/base accounting currency.'],
     ['timezone','Company timezone',country.timezone,'YES','IANA timezone.'],
     ['fiscal_year_start','Fiscal year start','2026-01-01','YES','YYYY-MM-DD.'],
-    ['cutover_date','FinClose cutover date','2026-01-01','YES','First date FinClose owns the new operating process.'],
+    ['cutover_date','Finbuks cutover date','2026-01-01','YES','First date Finbuks owns the new operating process.'],
     ['source_as_of_date','Source system as-of date','2025-12-31','YES','Last trusted date from predecessor/source system.'],
     ['finance_admin_email','Finance admin email','','YES','Operational finance contact.'],
     ['payroll_approver_email','Payroll approver email','','CONDITIONAL','Required if payroll is enabled.'],
@@ -98,7 +98,7 @@ export function buildTemplate(country: Country) {
   XLSX.utils.book_append_sheet(wb, fieldSheet('Payroll Setup','Complete when service scope includes payroll',[
     ['payroll_country','Payroll country',country.code,'CONDITIONAL','Required when payroll enabled.'],
     ['pay_frequency','Pay frequency','monthly','CONDITIONAL','monthly | semimonthly | biweekly | weekly'],
-    ['first_finclose_pay_date','First FinClose pay date','2026-01-31','CONDITIONAL','YYYY-MM-DD.'],
+    ['first_finclose_pay_date','First Finbuks pay date','2026-01-31','CONDITIONAL','YYYY-MM-DD.'],
     ['workweek_timezone','Workweek timezone',country.timezone,'CONDITIONAL','IANA timezone.'],
     ['historical_payroll_ytd_available','Historical payroll YTD available','YES','CONDITIONAL','YES / NO / NOT_APPLICABLE.']
   ]),'Payroll Setup');
@@ -110,7 +110,7 @@ export function buildTemplate(country: Country) {
     ['bank_statements_available','Bank statements available','YES','NO','Uploaded separately; no credentials.'],
     ['payroll_history_available','Payroll history available','YES','CONDITIONAL','Required as applicable for payroll takeover.']
   ]),'Historical Takeover');
-  XLSX.utils.book_append_sheet(wb, fieldSheet('Attestation','Confirm the initialization facts are complete enough for FinClose to validate',[
+  XLSX.utils.book_append_sheet(wb, fieldSheet('Attestation','Confirm the initialization facts are complete enough for Finbuks to validate',[
     ['authorized_to_provide','Authorized to provide company data','','YES','YES required.'],
     ['data_is_synthetic','Data is synthetic/test data',synthetic,'YES',isRealDataMode() ? 'Use NO for real company data and YES only for a test company.' : 'Lab requires YES.'],
     ['information_complete_to_best_knowledge','Information complete to best knowledge','','YES','YES required.'],

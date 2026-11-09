@@ -49,8 +49,8 @@ export class QuickBooksLedgerSource implements LedgerSource {
       const sql = `select * from ${entity}${where ? ' where ' + where : ''} startposition ${page * PAGE + 1} maxresults ${PAGE}`;
       this.used += 1;
       const response = await this.fetchFn(`${this.base}/v3/company/${this.realm}/query?query=${encodeURIComponent(sql)}&minorversion=70`, { headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/json' } });
-      if (response.status === 401 || response.status === 403) throw httpError(`QuickBooks would not let FinClose read ${entity} (${response.status}). The token may have expired`, response.status);
-      if (response.status === 429) throw httpError('QuickBooks asked FinClose to slow down (429)', 429);
+      if (response.status === 401 || response.status === 403) throw httpError(`QuickBooks would not let Finbuks read ${entity} (${response.status}). The token may have expired`, response.status);
+      if (response.status === 429) throw httpError('QuickBooks asked Finbuks to slow down (429)', 429);
       if (!response.ok) throw httpError(`QuickBooks answered ${response.status} for ${entity}`, 502);
       const rows = arr(obj(obj(await response.json()).QueryResponse)[entity]);
       out.push(...rows);

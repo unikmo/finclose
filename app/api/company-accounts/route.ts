@@ -12,7 +12,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 // A company's own account numbers for the proposed journal.
 //   GET  ?company_id=            (VIEWER)  the map in force; ?format=csv downloads it for editing
 //   PUT  { company_id, jurisdiction?, overrides | csv }   (ADMIN)  replaces the company's overrides
-//   DELETE ?company_id=          (ADMIN)  back to the FinClose default map
+//   DELETE ?company_id=          (ADMIN)  back to the Finbuks default map
 // Jurisdiction decides which default map the overrides sit on; it defaults to EE.
 const FIXED_LABELS: Record<string, string> = { bank: 'Bank account', vat_input: 'VAT you can reclaim', vat_output: 'VAT you owe', suspense: 'Unsorted payments' };
 // What a screen needs to show each row: the slot key, a plain label, and the account now in force.

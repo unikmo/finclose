@@ -7,7 +7,7 @@ const scryptAsync = promisify(crypto.scrypt);
 const SESSION_COOKIE = 'finclose_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
-export type FinCloseUser = {
+export type FinbuksUser = {
   user_id: string;
   name: string;
   email: string;
@@ -53,7 +53,7 @@ async function passwordHash(password: string, salt: string) {
   return derived.toString('base64url');
 }
 
-function encodeSession(user: FinCloseUser) {
+function encodeSession(user: FinbuksUser) {
   const payload = Buffer.from(JSON.stringify({
     v: 1,
     uid: user.user_id,
@@ -65,7 +65,7 @@ function encodeSession(user: FinCloseUser) {
   return `${payload}.${signature}`;
 }
 
-function decodeSession(raw?: string | null): FinCloseUser | null {
+function decodeSession(raw?: string | null): FinbuksUser | null {
   if (!raw) return null;
   const [payload, signature] = raw.split('.');
   if (!payload || !signature) return null;
@@ -87,7 +87,7 @@ function decodeSession(raw?: string | null): FinCloseUser | null {
   }
 }
 
-function setSessionCookie(response: NextResponse, user: FinCloseUser) {
+function setSessionCookie(response: NextResponse, user: FinbuksUser) {
   response.cookies.set({
     name: SESSION_COOKIE,
     value: encodeSession(user),
@@ -112,7 +112,7 @@ export async function registerLabAccount(input: Record<string, unknown>) {
 
   const salt = crypto.randomBytes(18).toString('base64url');
   const now = Date.now();
-  const user: FinCloseUser = { user_id: crypto.randomUUID(), name, email };
+  const user: FinbuksUser = { user_id: crypto.randomUUID(), name, email };
   const record = {
     ...user,
     password_hash: await passwordHash(password, salt),
@@ -150,10 +150,10 @@ export async function loginLabAccount(input: Record<string, unknown>) {
     user_id: String(record.user_id),
     name: String(record.name || ''),
     email: String(record.email || email)
-  } satisfies FinCloseUser;
+  } satisfies FinbuksUser;
 }
 
-export function accountResponse(user: FinCloseUser) {
+export function accountResponse(user: FinbuksUser) {
   return setSessionCookie(NextResponse.json({ authenticated: true, user }), user);
 }
 

@@ -207,7 +207,7 @@ export async function GET(req: NextRequest, { params }: { params: { path?: strin
       return new NextResponse(new Uint8Array(buffer), {
         headers: {
           'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'content-disposition': `attachment; filename="FinCloseAgent_Initialization_${country.code}.xlsx"`
+          'content-disposition': `attachment; filename="FinbuksAgent_Initialization_${country.code}.xlsx"`
         }
       });
     }
