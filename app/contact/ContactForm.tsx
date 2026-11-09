@@ -2,10 +2,6 @@
 
 import { useState } from 'react';
 
-// Sends through Web3Forms, which emails hello@finbuks.com.
-// The access key is public by design. Set NEXT_PUBLIC_WEB3FORMS_KEY in Vercel.
-const ACCESS_KEY = process.env.NEXT_PUBLIC_WEB3FORMS_KEY || '';
-
 export default function ContactForm() {
   const [status, setStatus] = useState<{ text: string; kind: '' | 'ok' | 'err' }>({ text: '', kind: '' });
   const [busy, setBusy] = useState(false);
@@ -19,28 +15,16 @@ export default function ContactForm() {
       setStatus({ text: 'Please fill in your name, a valid email and a message.', kind: 'err' });
       return;
     }
-    if (!ACCESS_KEY) {
-      setStatus({ text: 'The form is not switched on yet. Please email hello@finbuks.com.', kind: 'err' });
-      return;
-    }
     setBusy(true);
     setStatus({ text: 'Sending…', kind: '' });
     try {
-      const res = await fetch('https://api.web3forms.com/submit', {
+      const res = await fetch('/api/contact', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          access_key: ACCESS_KEY,
-          subject: 'Finbuks contact form: ' + data.topic,
-          from_name: 'Finbuks website',
-          name: data.name,
-          email: data.email,
-          topic: data.topic,
-          message: data.message
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: data.name, email: data.email, topic: data.topic, message: data.message })
       });
-      const out = await res.json();
-      if (!res.ok || !out.success) throw new Error(out.message || 'failed');
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || !out.success) throw new Error(out.error || 'failed');
       form.reset();
       setStatus({ text: 'Thank you. We got your message and will reply by email.', kind: 'ok' });
     } catch {
