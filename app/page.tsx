@@ -2,12 +2,12 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'FinClose — Book Close Support',
-  description: 'FinClose prepares the close. Your accountant reviews and signs off.',
+  title: 'Finbuks — Book Close Support',
+  description: 'Finbuks prepares the close. Your accountant reviews and signs off.',
   alternates: { canonical: '/' },
   openGraph: {
-    title: 'FinClose — Book Close Support',
-    description: 'FinClose prepares the close. Your accountant reviews and signs off.',
+    title: 'Finbuks — Book Close Support',
+    description: 'Finbuks prepares the close. Your accountant reviews and signs off.',
     url: '/'
   }
 };
@@ -16,7 +16,7 @@ const products = [
   {
     number: '01',
     title: 'Closing your books',
-    description: 'FinClose prepares the close. Your accountant signs off.',
+    description: 'Finbuks prepares the close. Your accountant signs off.',
     href: '/start/balance-books',
     tag: 'Book close',
     steps: ['Collect & classify', 'Match & reconcile', 'Flag exceptions', 'Accountant reviews & signs off']
@@ -55,10 +55,10 @@ export default function Home() {
   return (
     <main className="home-shell">
       <header className="home-nav">
-        <Link href="/" className="home-brand" aria-label="FinClose home">
+        <Link href="/" className="home-brand" aria-label="Finbuks home">
           <span className="home-logo">F</span>
           <span className="home-brand-copy">
-            <strong>FinClose</strong>
+            <strong>Finbuks</strong>
             <small>Bookkeeping · Close</small>
           </span>
         </Link>
@@ -67,21 +67,21 @@ export default function Home() {
       <section className="help-hero">
         <div className="help-intro">
           <h1>
-            <span>FinClose does</span>
+            <span>Finbuks does</span>
             <span>the work.</span>
           </h1>
-          <p>FinClose prepares the close. Your accountant signs off.</p>
+          <p>Finbuks prepares the close. Your accountant signs off.</p>
           <Link href="/start/balance-books" className="home-cta">
             Start closing your books →
           </Link>
-          <div className="help-trust-row" aria-label="FinClose capabilities">
-            <span>Prepared by FinClose</span>
+          <div className="help-trust-row" aria-label="Finbuks capabilities">
+            <span>Prepared by Finbuks</span>
             <span>Reviewed by your accountant</span>
             <span>Monthly & year-end close</span>
           </div>
         </div>
 
-        <div className="help-grid help-grid-primary" aria-label="FinClose products">
+        <div className="help-grid help-grid-primary" aria-label="Finbuks products">
           {products.map((product) => (
             <Link key={product.number} href={product.href} className="help-card help-card-primary">
               <div className="help-card-top">
@@ -105,7 +105,7 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="pipeline" aria-label="How FinClose works">
+        <div className="pipeline" aria-label="How Finbuks works">
           {pipeline.map((step, i) => (
             <div className="pipeline-step" key={step.label}>
               <span className="pipeline-node">{pipelineIcons[i]}</span>
@@ -131,6 +131,7 @@ export default function Home() {
       <footer className="home-footer">
         <Link href="/how-it-works">How it works</Link>
         <Link href="/faq">FAQ</Link>
+        <Link href="/contact">Contact</Link>
       </footer>
     </main>
   );

@@ -1,4 +1,4 @@
-# Independent Red Team — FinClose v0.35 Pilot Release Verification & Activation
+# Independent Red Team — Finbuks v0.35 Pilot Release Verification & Activation
 
 Date: 2026-09-07
 Scope: PR #20 / `feature/pilot-release-verification-v035-active`

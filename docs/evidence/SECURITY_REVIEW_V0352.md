@@ -1,10 +1,10 @@
-# FinClose — Independent Security Review
+# Finbuks — Independent Security Review
 
 **Pilot-activation blocker P0 #6** (`independent_security_review` certification gate) · issue unikmo/finclose#21
 
 | | |
 |---|---|
-| Release under review | FinClose `v0.35.2` |
+| Release under review | Finbuks `v0.35.2` |
 | Source SHA | `6996db90439bc3889c51571cbd7981d621073e69` (bound to certification run `20260909080958_9a77588a3a`) |
 | Scope | Controlled **PILOT** activation only (real data, one trusted customer, low volume). **Not** unrestricted PRODUCTION. |
 | Reviewer | Claude (Sonnet 5), acting as reviewer-of-record for the written analysis |
@@ -72,13 +72,13 @@ Severity reflects **residual risk in the controlled-pilot deployment as configur
 
 - `npm audit` flags Next 14.2.35 for a long list of advisories. Assessed by reachability against `next.config.mjs` (which sets only `trailingSlash: false`) and the codebase:
   - **NOT reachable:** Image Optimization AVIF RCE (GHSA-2xp9-vwfh-vxw4, *critical*) — no `next/image` usage anywhere, no `images` config; Image-Optimizer `remotePatterns` DoS — same; rewrites SSRF (GHSA-p9j2-gv94-2wf4 / GHSA-ggv3-7p47-pfv8) — no `rewrites`; middleware / i18n bypass (GHSA-36qx-fr4f-26g5, *high*) — no `middleware.ts`, App Router only; Windows RCE (GHSA-p293-qw3h-jr36, *critical*, CWE-22) — deployment is Vercel/Linux (this one **does** affect the Windows dev workstation running `next dev` — see F-6).
-  - **Potentially reachable:** several **HIGH** "DoS with Server Components / Server Actions" advisories, and "unauthenticated disclosure of internal Server Function endpoints" (*moderate*). FinClose has 3 RSC pages and uses route handlers; Server Actions usage is minimal but the framework endpoints exist. Impact is **availability** (and minor endpoint-name disclosure), not customer-data confidentiality or integrity.
+  - **Potentially reachable:** several **HIGH** "DoS with Server Components / Server Actions" advisories, and "unauthenticated disclosure of internal Server Function endpoints" (*moderate*). Finbuks has 3 RSC pages and uses route handlers; Server Actions usage is minimal but the framework endpoints exist. Impact is **availability** (and minor endpoint-name disclosure), not customer-data confidentiality or integrity.
 - **Reachability of the criticals in the pilot deployment: effectively nil.** Residual is DoS on a one-customer pilot, further cushioned by Vercel platform protections.
 - **Recommendation:** plan the upgrade to a current Next.js release (15.5.24+) as a **tracked pilot fast-follow with an owner and a date**. It is a 14→15 major migration and should not be rushed onto the activation critical path given the low reachable risk. Re-run `npm audit` and the full test suite after.
 
 ### F-3 — Transitive `firebase-admin` advisories (`google-gax`, `gaxios`, `retry-request`, `teeny-request`, `uuid`) — **LOW**
 
-- All **moderate**, all deep transitive dependencies of `firebase-admin@13`. The notable one is `uuid <11.1.1` (missing buffer bounds check, only triggerable when a caller passes a `buf` argument — the Google libraries do not). No direct FinClose code path.
+- All **moderate**, all deep transitive dependencies of `firebase-admin@13`. The notable one is `uuid <11.1.1` (missing buffer bounds check, only triggerable when a caller passes a `buf` argument — the Google libraries do not). No direct Finbuks code path.
 - **Recommendation:** `npm update firebase-admin` to pick up patched transitives at the next maintenance window; not pilot-blocking.
 
 ### F-4 — `assertLabToken` / lab-session token comparison is not constant-time — **LOW**
@@ -137,7 +137,7 @@ Severity reflects **residual risk in the controlled-pilot deployment as configur
 
 ## 7. Recommendation to the approver
 
-> Based on this review, the FinClose `v0.35.2` application controls are **adequate for a controlled pilot** with one trusted, low-volume customer. The identity, tenancy, ledger-integrity, upload-quarantine and release-gating controls are well designed and are backed by passing live certification evidence at source SHA `6996db9…`.
+> Based on this review, the Finbuks `v0.35.2` application controls are **adequate for a controlled pilot** with one trusted, low-volume customer. The identity, tenancy, ledger-integrity, upload-quarantine and release-gating controls are well designed and are backed by passing live certification evidence at source SHA `6996db9…`.
 >
 > The outstanding risk is dependency-driven (F-1, F-2). In the pilot deployment as configured, no *critical* advisory is reachable. F-1 (`xlsx`) touches an attacker-influenceable parse path and I recommend fixing it **before** activation or accepting it with a firm, dated remediation commitment. F-2 (Next.js) is an availability concern suitable as a tracked fast-follow.
 >

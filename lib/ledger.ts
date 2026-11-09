@@ -1,4 +1,4 @@
-// The common shape every accounting-system adapter fills in. FinClose only ever READS a ledger
+// The common shape every accounting-system adapter fills in. Finbuks only ever READS a ledger
 // into this shape; the review in ledger-review.ts turns it into proposals. Nothing in here writes
 // to a client's books. Money is integer cents; dates are YYYY-MM-DD.
 

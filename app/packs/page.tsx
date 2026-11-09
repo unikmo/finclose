@@ -172,7 +172,7 @@ export default function PacksPage() {
     <main className="pr-shell" id="main">
       <a className="pr-skip" href="#content">Skip to the content</a>
       <header className="pr-nav">
-        <Link href="/" className="pr-brand" aria-label="FinClose home"><span className="pr-logo" aria-hidden="true">F</span><span>FinClose <em>Saved review packs</em></span></Link>
+        <Link href="/" className="pr-brand" aria-label="Finbuks home"><span className="pr-logo" aria-hidden="true">F</span><span>Finbuks <em>Saved review packs</em></span></Link>
       </header>
       <section className="pr-body" id="content">
         <h1>Saved review packs</h1>

@@ -1,10 +1,10 @@
-# FinClose — Accounting-Control QA Review
+# Finbuks — Accounting-Control QA Review
 
 **Pilot-activation blocker P0 #7** (`accounting_control_qa` certification gate) · issue unikmo/finclose#21
 
 | | |
 |---|---|
-| Release under review | FinClose `v0.35.2` |
+| Release under review | Finbuks `v0.35.2` |
 | Source SHA | `6996db90439bc3889c51571cbd7981d621073e69` (bound to certification run `20260909080958_9a77588a3a`) |
 | Scope | Controlled **PILOT** activation only (real data, one trusted customer, low volume). **Not** unrestricted PRODUCTION. |
 | Reviewer | Claude (Sonnet 5), producing the written analysis + recommendation |
@@ -64,7 +64,7 @@ All ten areas from the v0.35 review were re-checked. No regression. Summary:
 | 6 | **Period locking** | PASS — **and the live concurrency proof QA-035-03 required is now green**. Lock requires approved close + Layer A still ready + evidence hash still equals the approved hash. Firestore transaction verifies ownership, matches the authoritative approval/evidence hash, reads the single per-company active-lock state inside the transaction, rejects overlapping locked ranges, and writes snapshot + lock + index + event + audit atomically. |
 | 7 | **Reopen control** | PASS. Requires a locked close + a ≥10-char reason + authenticated real-data identity + Firestore lock-ownership validation. Prior lock/approval history is preserved; the lock is marked reopened and removed from active state; a reopened close needs a new close version before re-approval. |
 | 8 | **Authorization hierarchy** | PASS — **live tenant/role proof now green**. `ACCOUNTANT` for source evidence / balance-sheet scope+reconciliation / accounting config; `APPROVER` for approve + lock; `ADMIN` for reopen. Every real-data branch resolves org/deployment/company ownership before acting. |
-| 9 | **Payroll / bookkeeping execution boundary** | PASS. Payroll is prepared, not paid/filed. Bookkeeping is prepared, not posted to Xero / QuickBooks / DATEV / SmartAccounts. FinClose locks no external periods. External payments and statutory filings are disabled. This is the single biggest limiter of pilot financial risk. |
+| 9 | **Payroll / bookkeeping execution boundary** | PASS. Payroll is prepared, not paid/filed. Bookkeeping is prepared, not posted to Xero / QuickBooks / DATEV / SmartAccounts. Finbuks locks no external periods. External payments and statutory filings are disabled. This is the single biggest limiter of pilot financial risk. |
 | 10 | **Deterministic engines** | PASS. Payroll (GE basic), bookkeeping core, finance cycle, monthly-close controls, source completeness, balance-sheet reconciliation, close approval + period lock — all self-tests green in source and live. |
 
 ---
@@ -94,7 +94,7 @@ Payroll rule packs and country requirements cover US / DE / GB / EE / GE / CM at
 
 ## 6. Recommendation to the approver
 
-> The FinClose `v0.35.2` accounting-control architecture is **suitable for a controlled pilot**. Journal integrity, source-completeness derivation, balance-sheet reconciliation gating, approval-evidence binding, period locking and reopen controls are well designed, deterministic, and — as of certification run `20260909080958` — backed by passing **live** Firestore idempotency / concurrency / tenant-role evidence bound to source SHA `6996db9…`. The prepared-not-posted execution boundary materially caps pilot risk.
+> The Finbuks `v0.35.2` accounting-control architecture is **suitable for a controlled pilot**. Journal integrity, source-completeness derivation, balance-sheet reconciliation gating, approval-evidence binding, period locking and reopen controls are well designed, deterministic, and — as of certification run `20260909080958` — backed by passing **live** Firestore idempotency / concurrency / tenant-role evidence bound to source SHA `6996db9…`. The prepared-not-posted execution boundary materially caps pilot risk.
 >
 > The v0.35 review's release blocker (QA-035-03) is resolved. QA-035-01 is fixed. The one remaining item, maker-checker (QA-2-02), is an accepted boundary for a single-operator pilot and must be recorded in the customer agreement and added to the backlog for multi-user use.
 >

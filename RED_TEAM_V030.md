@@ -1,4 +1,4 @@
-# FinClose v0.30 — Independent Red Team
+# Finbuks v0.30 — Independent Red Team
 
 Date: 2026-09-06
 Scope: deterministic bookkeeping core after the Georgia payroll engine.

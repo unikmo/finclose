@@ -113,12 +113,12 @@ export const CLOSE_GOVERNANCE_CAPABILITIES = {
   ],
   safeguards: [
     'A close cannot be approved unless core close controls pass, source completeness is system-derived complete, and all material balance-sheet accounts reconcile.',
-    'Source evidence must reference stored FinClose service-source artifacts belonging to the same deployment.',
+    'Source evidence must reference stored Finbuks service-source artifacts belonging to the same deployment.',
     'A close cannot be locked if its evidence snapshot changed after approval.',
     'A locked period blocks overlapping new payroll/bookkeeping/finance-cycle work until explicitly reopened.',
     'Reopening never deletes the original lock or approval history.',
-    'In PILOT/PRODUCTION, Cloud Firestore is the authoritative FinClose close-evidence and period-lock boundary; external provider locks remain separate.',
-    'Manual-upload evidence proves artifact presence and declared coverage inside FinClose, not independent third-party connector completeness.'
+    'In PILOT/PRODUCTION, Cloud Firestore is the authoritative Finbuks close-evidence and period-lock boundary; external provider locks remain separate.',
+    'Manual-upload evidence proves artifact presence and declared coverage inside Finbuks, not independent third-party connector completeness.'
   ],
   execution_boundary: 'LAB_OR_CONTROLLED_REAL_DATA_WITH_FIRESTORE'
 } as const;
@@ -206,7 +206,7 @@ function actorRecord(actor: CloseActor) {
       email: String(actor.email).trim().toLowerCase()
     };
   }
-  return { kind: 'lab', user_id: null, name: 'FinClose Lab', email: null };
+  return { kind: 'lab', user_id: null, name: 'Finbuks Lab', email: null };
 }
 
 async function requireClose(deploymentId: string, closeId: string) {

@@ -1,4 +1,4 @@
-# FinClose v0.26 — Independent Red Team
+# Finbuks v0.26 — Independent Red Team
 
 Date: 2026-09-03
 
@@ -19,7 +19,7 @@ The service route no longer exposes agent internals, connector cards, initializa
 A service deployment can link to an existing `finclose_companies` record. This avoids re-initializing a company such as MDA for every new service purchase.
 
 ### PASS — balance-books boundary
-`balance-books` can proceed after registration without a FinClose company initialization. Historical accounting context is still required before current-system connection.
+`balance-books` can proceed after registration without a Finbuks company initialization. Historical accounting context is still required before current-system connection.
 
 ### PASS — history separated from current source
 Historical files use a dedicated `finclose_service_history` record and `historical-context` Storage path. Current operational source continues through the connector/source path.

@@ -1,11 +1,11 @@
-# ADR-0001 — Firebase-only FinClose data architecture
+# ADR-0001 — Firebase-only Finbuks data architecture
 
 Status: Accepted
 Date: 2026-09-06
 
 ## Decision
 
-FinClose will not introduce Supabase or a separate PostgreSQL service. The production data architecture remains inside Firebase:
+Finbuks will not introduce Supabase or a separate PostgreSQL service. The production data architecture remains inside Firebase:
 
 - Firebase Authentication for customer identity.
 - Firebase Realtime Database for workflow/control-plane state.
@@ -16,7 +16,7 @@ Vercel remains the application/API runtime.
 
 ## Rationale
 
-The user explicitly requires the FinClose data stack to stay on Firebase. Cloud Firestore provides server-side transactions and atomic multi-document writes suitable for the controlled-pilot invariants implemented by FinClose. The application compensates for the absence of relational foreign-key constraints with deterministic IDs, server-only writes, tenant/RBAC checks, evidence hashes and transactionally maintained company lock state.
+The user explicitly requires the Finbuks data stack to stay on Firebase. Cloud Firestore provides server-side transactions and atomic multi-document writes suitable for the controlled-pilot invariants implemented by Finbuks. The application compensates for the absence of relational foreign-key constraints with deterministic IDs, server-only writes, tenant/RBAC checks, evidence hashes and transactionally maintained company lock state.
 
 ## Consequences
 

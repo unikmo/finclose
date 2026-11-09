@@ -1,4 +1,4 @@
-# FinClose v0.31 — Independent Red Team
+# Finbuks v0.31 — Independent Red Team
 
 Date: 2026-09-06
 Scope: Payroll run → payroll journal → bookkeeping → bank reconciliation → monthly-close control handoff.
@@ -7,7 +7,7 @@ Scope: Payroll run → payroll journal → bookkeeping → bank reconciliation �
 
 **PASS WITH MATERIAL LIMITS — SYNTHETIC LAB ONLY**
 
-The v0.31 change closes the previous orchestration gap without pretending that FinClose can yet post, pay, file, lock a period or certify a production accounting close. The implemented object is a deterministic finance-cycle/control package, not an autonomous production close.
+The v0.31 change closes the previous orchestration gap without pretending that Finbuks can yet post, pay, file, lock a period or certify a production accounting close. The implemented object is a deterministic finance-cycle/control package, not an autonomous production close.
 
 ## What was challenged
 

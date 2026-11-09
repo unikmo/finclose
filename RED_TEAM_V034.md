@@ -1,4 +1,4 @@
-# Independent Red Team — FinClose v0.34 Firebase pilot activation hardening
+# Independent Red Team — Finbuks v0.34 Firebase pilot activation hardening
 
 Date: 2026-09-06
 Scope: `feature/firebase-pilot-activation-v034` / PR #19
@@ -64,4 +64,4 @@ The branch was corrected before merge. Each artifact now has a deterministic tra
 
 ## Release recommendation
 
-Merge v0.34 after the final CI build succeeds. Keep the deployed runtime in `LAB`. Deploy the source to the canonical FinClose Vercel project, verify `/api/health?deep=1`, then complete every item in `docs/FIREBASE_PILOT_RELEASE_GATE.md` against the actual Firebase/Vercel environment before setting `FINCLOSE_PILOT_RELEASE_GATE=APPROVED` or onboarding any real-data pilot customer.
+Merge v0.34 after the final CI build succeeds. Keep the deployed runtime in `LAB`. Deploy the source to the canonical Finbuks Vercel project, verify `/api/health?deep=1`, then complete every item in `docs/FIREBASE_PILOT_RELEASE_GATE.md` against the actual Firebase/Vercel environment before setting `FINCLOSE_PILOT_RELEASE_GATE=APPROVED` or onboarding any real-data pilot customer.

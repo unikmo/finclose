@@ -1,4 +1,4 @@
-# FinClose v0.32 — Independent Red Team Review
+# Finbuks v0.32 — Independent Red Team Review
 
 Date: 2026-09-06
 Scope: Layer A close governance only
@@ -31,13 +31,13 @@ Firebase RTDB remains a Lab persistence layer, not the approved accounting ledge
 Approval, lock and reopen use guarded reads plus multi-location writes, but they are not yet serialized by a database transaction/compare-and-set mechanism. Concurrent production requests must be protected against double approval/lock/reopen races.
 
 ### P1 — Manual-upload completeness strength
-For secure file upload, FinClose independently verifies artifact existence, ownership and SHA-256 fingerprints and evaluates configured coverage/sequence expectations. It cannot independently prove that the human-declared coverage window itself is complete. Strong independent completeness requires connector-native sync cursors/statement metadata or another authoritative source-population proof.
+For secure file upload, Finbuks independently verifies artifact existence, ownership and SHA-256 fingerprints and evaluates configured coverage/sequence expectations. It cannot independently prove that the human-declared coverage window itself is complete. Strong independent completeness requires connector-native sync cursors/statement metadata or another authoritative source-population proof.
 
 ### P1 — Balance-sheet population completeness
-The engine requires every material account in the configured balance-sheet scope to reconcile and fingerprints that scope. Production use still needs an authoritative trial-balance/chart-of-accounts population feed so FinClose can prove that no material balance-sheet account was omitted from the configured scope.
+The engine requires every material account in the configured balance-sheet scope to reconcile and fingerprints that scope. Production use still needs an authoritative trial-balance/chart-of-accounts population feed so Finbuks can prove that no material balance-sheet account was omitted from the configured scope.
 
 ### P1 — External provider period lock
-The internal FinClose lock is implemented. It does not lock periods inside Xero, QuickBooks, DATEV or SmartAccounts; those provider-specific actions belong to the external connector layer.
+The internal Finbuks lock is implemented. It does not lock periods inside Xero, QuickBooks, DATEV or SmartAccounts; those provider-specific actions belong to the external connector layer.
 
 ## Control conclusion
 

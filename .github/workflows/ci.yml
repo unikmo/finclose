@@ -1,4 +1,4 @@
-name: FinClose CI
+name: Finbuks CI
 
 on:
   push:

@@ -9,7 +9,7 @@ import { checkRateLimit } from '../../../lib/rate-limit';
 export const dynamic = 'force-dynamic';
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-// GET ?partner_id=&partner_code=&month=2026-10   -> how many client companies this partner ran FinClose on
+// GET ?partner_id=&partner_code=&month=2026-10   -> how many client companies this partner ran Finbuks on
 //   A partner sees only its own count, with the partner code we issued.
 // GET ?partner_id=&issue_code=1   with the operator bearer token (same token as the scheduled jobs)
 //   -> issues the partner code for that partner id. Operator only.

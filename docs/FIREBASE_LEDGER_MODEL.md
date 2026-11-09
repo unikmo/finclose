@@ -1,4 +1,4 @@
-# FinClose Cloud Firestore Ledger Model
+# Finbuks Cloud Firestore Ledger Model
 
 ## Purpose
 

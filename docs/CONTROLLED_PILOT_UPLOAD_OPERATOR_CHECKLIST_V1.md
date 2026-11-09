@@ -1,4 +1,4 @@
-# FinClose Controlled Pilot Upload Operator Checklist v1
+# Finbuks Controlled Pilot Upload Operator Checklist v1
 
 Effective date: 2026-09-07
 Scope: controlled PILOT only
@@ -38,7 +38,7 @@ Complete this section for every quarantined pilot artifact.
   - [ ] direct statement/document from known financial/tax/payroll provider
   - [ ] customer-prepared file from own records
   - [ ] other — must reject unless separately approved
-- Downloaded only through the FinClose ADMIN review route: `YES` / `NO`
+- Downloaded only through the Finbuks ADMIN review route: `YES` / `NO`
 - File opened without enabling active content: `YES` / `NO`
 - Content consistent with declared financial source: `YES` / `NO`
 - Unexpected execution/download/credential request observed: `YES` / `NO`

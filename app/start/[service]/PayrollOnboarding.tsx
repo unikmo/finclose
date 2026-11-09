@@ -119,7 +119,7 @@ export default function PayrollOnboarding() {
       setAuthReady(true);
     }).catch(() => {
       setAuthReady(true);
-      setNote('FinClose could not load the payroll setup. Please reload the page.');
+      setNote('Finbuks could not load the payroll setup. Please reload the page.');
     });
   }, []);
 
@@ -386,9 +386,9 @@ export default function PayrollOnboarding() {
   return (
     <main className="payroll-flow-shell">
       <header className="payroll-nav">
-        <Link href="/" className="home-brand" aria-label="FinClose home">
+        <Link href="/" className="home-brand" aria-label="Finbuks home">
           <span className="home-logo">F</span>
-          <span className="home-brand-copy"><strong>FinClose</strong><small>Bookkeeping · Payroll · Close</small></span>
+          <span className="home-brand-copy"><strong>Finbuks</strong><small>Bookkeeping · Payroll · Close</small></span>
         </Link>
         <div className="payroll-nav-actions">
           {user && <span className="payroll-user">{user.email}</span>}
@@ -542,7 +542,7 @@ export default function PayrollOnboarding() {
             <div>
               <span className="payroll-stage-number">04</span>
               <h2>{sourceComplete ? 'Payroll setup received' : 'Connect current payroll data'}</h2>
-              <p>{sourceComplete ? 'Everything FinClose needs is in.' : 'Send your latest payroll export.'}</p>
+              <p>{sourceComplete ? 'Everything Finbuks needs is in.' : 'Send your latest payroll export.'}</p>
             </div>
             <div className="payroll-account-chip company"><span>✓</span>{deployment.company_name || 'Company added'}</div>
           </div>

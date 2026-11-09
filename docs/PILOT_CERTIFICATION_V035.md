@@ -1,4 +1,4 @@
-# FinClose v0.35 — Pilot Release Verification & Activation
+# Finbuks v0.35 — Pilot Release Verification & Activation
 
 Date: 2026-09-07
 

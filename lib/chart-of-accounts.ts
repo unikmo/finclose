@@ -2,7 +2,7 @@ import type { ProposedEntry, ReviewPack } from './review-pack';
 import { normaliseJurisdiction } from './jurisdictions';
 
 // Maps each category to an account and turns a review pack into PROPOSED journal
-// lines for the accountant. The numbering below is FinClose's own default, NOT a
+// lines for the accountant. The numbering below is Finbuks's own default, NOT a
 // statutory chart: Estonia has no mandatory chart of accounts, and every firm
 // maps to its own. An accountant can replace the map per company before use.
 // Nothing here posts anywhere.
@@ -133,7 +133,7 @@ export function buildJournal(pack: ReviewPack, map: AccountMap = buildAccountMap
     balanced: debit === credit,
     notice: map.status === 'COMPANY_CUSTOMISED_NOT_STATUTORY'
       ? 'Proposed lines for accountant review using this company\'s own account numbers. Not a statutory chart, not posted anywhere.'
-      : 'Proposed lines for accountant review using FinClose default account numbers. Not a statutory chart, not posted anywhere.'
+      : 'Proposed lines for accountant review using Finbuks default account numbers. Not a statutory chart, not posted anywhere.'
   };
 }
 

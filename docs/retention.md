@@ -1,6 +1,6 @@
 # Retention and scheduled purge
 
-Checked 2026-10-29 against the code in this repository. **The periods below are FinClose's own defaults, not a legal requirement.** How long a company must keep accounting records is for the company and its accountant to confirm (the default for signed-off packs, 365 days, is a placeholder for that decision).
+Checked 2026-10-29 against the code in this repository. **The periods below are Finbuks's own defaults, not a legal requirement.** How long a company must keep accounting records is for the company and its accountant to confirm (the default for signed-off packs, 365 days, is a placeholder for that decision).
 
 | Record | Default kept | Setting | Counted from |
 |---|---|---|---|

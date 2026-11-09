@@ -1,4 +1,4 @@
-# FinClose Firebase Backup & Recovery Policy v1
+# Finbuks Firebase Backup & Recovery Policy v1
 
 Effective date: 2026-09-07
 Scope: controlled PILOT
@@ -6,7 +6,7 @@ Status: POLICY DEFINED; LIVE ENABLEMENT/VERIFICATION STILL REQUIRED
 
 ## Objective
 
-FinClose must be recoverable from accidental deletion, application corruption and operator error before controlled real customer financial data is admitted. The recovery design covers the authoritative Firestore ledger, the RTDB workflow/control plane and Firebase Cloud Storage financial artifacts.
+Finbuks must be recoverable from accidental deletion, application corruption and operator error before controlled real customer financial data is admitted. The recovery design covers the authoritative Firestore ledger, the RTDB workflow/control plane and Firebase Cloud Storage financial artifacts.
 
 This document defines the required pilot policy. It does not assert that the settings are already enabled in the `theantibalcony` Firebase/Google Cloud project.
 
@@ -16,7 +16,7 @@ Required before PILOT activation:
 
 ### Point-in-time recovery
 
-- Enable Firestore point-in-time recovery (PITR) for the default FinClose ledger database.
+- Enable Firestore point-in-time recovery (PITR) for the default Finbuks ledger database.
 - Required retention capability: seven-day PITR window.
 - Use PITR for surgical recovery from accidental writes/deletions and short-RPO incidents.
 - Record the `earliestVersionTime` / enabled status as release evidence.
@@ -53,19 +53,19 @@ Required before PILOT activation:
 
 Firebase's automated backup feature creates daily JSON backups of database data and Security Rules in a Cloud Storage bucket for eligible Blaze-plan projects and supports a 30-day lifecycle option.
 
-RTDB is not the authoritative accounting ledger, but loss of orchestration, tenant mappings, workflow state or certification/audit references can still materially disrupt FinClose. RTDB therefore requires an independent backup layer rather than relying only on Firestore recovery.
+RTDB is not the authoritative accounting ledger, but loss of orchestration, tenant mappings, workflow state or certification/audit references can still materially disrupt Finbuks. RTDB therefore requires an independent backup layer rather than relying only on Firestore recovery.
 
 ## 3. Firebase Cloud Storage — financial source artifacts
 
 Required before PILOT activation:
 
-- Confirm Cloud Storage soft delete is enabled for the FinClose bucket.
+- Confirm Cloud Storage soft delete is enabled for the Finbuks bucket.
 - Pilot target retention: **30 days** for soft-deleted objects/buckets, unless cost or legal constraints require a separately documented change.
 - Do not rely on Object Versioning as the primary deletion-protection control. Google currently recommends soft delete for protection from accidental or malicious permanent deletion, including bucket-level deletion scenarios.
 - Preserve the application's SHA-256 upload fingerprints in RTDB/audit evidence so restored files can be revalidated against their recorded identity.
 - Quarantined/rejected files remain subject to the controlled pilot upload procedure and must not become operational merely because they are restored.
 
-Cloud Storage currently enables soft delete by default on supported buckets with seven-day retention and allows configuration from 7 to 90 days. FinClose's pilot policy deliberately requires 30 days once verified/configured.
+Cloud Storage currently enables soft delete by default on supported buckets with seven-day retention and allows configuration from 7 to 90 days. Finbuks's pilot policy deliberately requires 30 days once verified/configured.
 
 ## 4. Recovery authority
 
@@ -74,7 +74,7 @@ For the controlled pilot:
 - Recovery configuration changes require an administrator with the relevant Firebase/Google Cloud permissions.
 - A recovery of authoritative financial ledger data must be treated as a controlled incident, not an ordinary application action.
 - Record the reason, actor, source recovery point/backup, destination, start/completion time and reconciliation result.
-- After any recovery, FinClose must re-run ledger/close integrity checks before resuming write operations on affected companies/periods.
+- After any recovery, Finbuks must re-run ledger/close integrity checks before resuming write operations on affected companies/periods.
 
 ## 5. Recovery priority
 

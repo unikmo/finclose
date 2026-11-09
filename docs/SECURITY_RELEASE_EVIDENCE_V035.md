@@ -1,4 +1,4 @@
-# FinClose v0.35 Security Release Evidence
+# Finbuks v0.35 Security Release Evidence
 
 Date: 2026-09-07
 Scope: controlled PILOT
@@ -10,7 +10,7 @@ Verdict: **SOURCE/LAB-DEPLOYMENT PASS; LIVE AUTH/RULES CERTIFICATION PENDING**
 
 ### Source and CI
 
-- PR #20 (`FinClose v0.35: Pilot release verification and activation`) passed CI on its final head.
+- PR #20 (`Finbuks v0.35: Pilot release verification and activation`) passed CI on its final head.
 - The squash-merged `main` commit also passed CI.
 - Independent v0.35 red-team review concluded the source is suitable for merge and LAB deployment while explicitly blocking PILOT activation until certification has no mandatory FAIL/BLOCKED gates.
 
@@ -18,7 +18,7 @@ Verdict: **SOURCE/LAB-DEPLOYMENT PASS; LIVE AUTH/RULES CERTIFICATION PENDING**
 
 The canonical Vercel deployment reports:
 
-- FinClose version `0.35.0`;
+- Finbuks version `0.35.0`;
 - runtime `LAB`;
 - real-data mode disabled;
 - Firebase server/Admin authentication credential configured;

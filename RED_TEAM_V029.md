@@ -1,4 +1,4 @@
-# FinClose v0.29 — Independent Red Team
+# Finbuks v0.29 — Independent Red Team
 
 Date: 2026-09-06
 Scope: first operational payroll engine, Georgia basic regular cash employment only.

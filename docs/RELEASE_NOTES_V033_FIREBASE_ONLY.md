@@ -1,4 +1,4 @@
-# FinClose v0.33 — Firebase-only production foundation
+# Finbuks v0.33 — Firebase-only production foundation
 
 ## Added
 

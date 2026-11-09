@@ -1,4 +1,4 @@
-# FinClose v0.35.1 — Hardening Release Notes
+# Finbuks v0.35.1 — Hardening Release Notes
 
 Date: 2026-09-07
 Source commit: `25242880b4c37d14bc4af4c2f85660ad9047be5e`

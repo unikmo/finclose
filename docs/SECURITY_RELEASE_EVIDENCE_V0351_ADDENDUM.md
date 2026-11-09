@@ -1,4 +1,4 @@
-# FinClose v0.35.1 Security Release Evidence Addendum
+# Finbuks v0.35.1 Security Release Evidence Addendum
 
 Date: 2026-09-07
 Scope: controlled PILOT
@@ -27,7 +27,7 @@ The Web-config discovery selection logic is isolated and deterministic. CI cover
 - deleted Web Apps excluded;
 - explicit Web App ID authoritative;
 - single active Web App selected;
-- unique FinClose/canonical-host match selected;
+- unique Finbuks/canonical-host match selected;
 - ambiguous or absent candidates fail closed.
 
 No API key, Admin access token or service-account credential is returned in discovery diagnostics.

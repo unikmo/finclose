@@ -52,7 +52,7 @@ export async function eraseCompanyData(packs: PackStore, docs: DocumentStore, co
   await packs.setAccountOverrides(companyId, null);
   let connectionsRemoved = 0;
   if (connections && (await connections.get(companyId, 'xero'))) {
-    await connections.delete(companyId, 'xero'); // the sealed tokens go; the user can also revoke FinClose inside Xero
+    await connections.delete(companyId, 'xero'); // the sealed tokens go; the user can also revoke Finbuks inside Xero
     connectionsRemoved += 1;
   }
   const receipt = { company_id: companyId, erased_at: now, packs: packCount, documents: documentList.length, learned_rules: rules, account_map: hadAccountMap, connections: connectionsRemoved };

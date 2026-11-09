@@ -227,7 +227,7 @@ test('DATEV file pairs a balanced journal into Konto/Gegenkonto rows and refuses
       { transaction_id: 't1', date: '2026-03-03', account_code: '1200', account_name: 'Bank', debit_cents: 0, credit_cents: 11900, memo: 'Rent' }
     ]
   };
-  const opts = { consultant_number: '1001', client_number: '10001', fiscal_year_start: '2026-01-01', label: 'FinClose', generated_at: new Date('2026-10-31T10:00:00Z') };
+  const opts = { consultant_number: '1001', client_number: '10001', fiscal_year_start: '2026-01-01', label: 'Finbuks', generated_at: new Date('2026-10-31T10:00:00Z') };
   const file = datevBuchungsstapel(journal, opts);
   const lines = file.trim().split('\r\n');
   assert.ok(lines[0].startsWith('"EXTF";700;21;"Buchungsstapel"'));

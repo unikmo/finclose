@@ -8,7 +8,7 @@ import { joinFirmByInvitation, listFirmMembers } from '../../../lib/firm-tenancy
 export const dynamic = 'force-dynamic';
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-// Staff invitations. FinClose sends no email: the manager gets a one-time link to pass on, and the
+// Staff invitations. Finbuks sends no email: the manager gets a one-time link to pass on, and the
 // invitee must sign in with the invited, verified email address.
 //   GET    ?firm_id=                                  (MANAGER) invitations, never the secret
 //   POST   { firm_id, email, role }                   (MANAGER) -> { invitation, token, accept_path }

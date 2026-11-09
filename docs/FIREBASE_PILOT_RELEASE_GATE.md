@@ -1,4 +1,4 @@
-# FinClose Firebase Pilot Activation Gate
+# Finbuks Firebase Pilot Activation Gate
 
 `PILOT` may not be enabled until every mandatory item below is verified against the actual Firebase project and the deployed runtime. Source code or a successful build is not proof that the Firebase environment is ready.
 
@@ -60,7 +60,7 @@
 - Fresh independent security review complete.
 - Accounting-control QA complete.
 - Tenant isolation/concurrency tests run against the actual deployed Firebase environment.
-- FinClose source release `v0.35.1` (`25242880b4c37d14bc4af4c2f85660ad9047be5e`) is deployed to the intended canonical runtime before activation.
+- Finbuks source release `v0.35.1` (`25242880b4c37d14bc4af4c2f85660ad9047be5e`) is deployed to the intended canonical runtime before activation.
 - Live `/api/health?deep=1`, account, upload quarantine, Firestore ledger and close-lock paths are verified post-release.
 - The protected v0.35 certification report has zero mandatory `FAIL` or `BLOCKED` gates and reports `release_ready=true` and `activation_allowed=true` before the activation change set.
 - Only after those checks may the first controlled real-data pilot customer be onboarded.

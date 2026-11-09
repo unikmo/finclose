@@ -1,4 +1,4 @@
-# FinClose Pilot-Activation Evidence — v0.35.2
+# Finbuks Pilot-Activation Evidence — v0.35.2
 
 Signed / verified evidence for the seven P0 pilot-activation blockers in issue #21.
 

@@ -1,10 +1,10 @@
-# FinClose homepage — Red Team review
+# Finbuks homepage — Red Team review
 
 Date: 2026-09-03
 
 ## Decision under review
 
-Make `/` a service-first `How Can We Help?` layer and move the technical FinClose Lab to `/lab`.
+Make `/` a service-first `How Can We Help?` layer and move the technical Finbuks Lab to `/lab`.
 
 ## Independent critique
 
@@ -19,4 +19,4 @@ Make `/` a service-first `How Can We Help?` layer and move the technical FinClos
 
 ## Verdict
 
-**PASS WITH MINOR COPY RISK** for deployment to the current synthetic FinClose test environment.
+**PASS WITH MINOR COPY RISK** for deployment to the current synthetic Finbuks test environment.

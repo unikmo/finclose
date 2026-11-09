@@ -60,7 +60,7 @@ export const FINANCE_CYCLE_CAPABILITIES = {
     'persist finance-cycle and monthly-close lineage to payroll and bookkeeping records'
   ],
   safeguards: [
-    'FinClose never guesses chart-of-accounts codes; account-role mapping is mandatory.',
+    'Finbuks never guesses chart-of-accounts codes; account-role mapping is mandatory.',
     'Final monthly-close approval requires Layer A source completeness and material balance-sheet reconciliation.',
     'A monthly close can pass controls only when a bank closing-balance control is supplied and balances agree.',
     'Ambiguous or unmatched bank reconciliation items remain close blockers.',
@@ -297,7 +297,7 @@ export function evaluateMonthlyClose(input: {
     exceptions,
     limitations: [
       'This core close package requires Layer A source-completeness and balance-sheet controls before approval.',
-      'Internal FinClose approval and period locking are handled by CLOSE-GOVERNANCE-LAYER-A-V1.',
+      'Internal Finbuks approval and period locking are handled by CLOSE-GOVERNANCE-LAYER-A-V1.',
       'No external accounting-system posting, external-provider period lock, filing or payment is performed.',
       'period_scope_complete is retained only as a deprecated compatibility attestation and is not an approval control.'
     ]

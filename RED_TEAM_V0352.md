@@ -1,4 +1,4 @@
-# FinClose v0.35.2 — Independent Release Red Team
+# Finbuks v0.35.2 — Independent Release Red Team
 
 Date: 2026-09-08
 Scope: Firebase-only controlled PILOT release integrity
@@ -46,7 +46,7 @@ v0.35.2 rechecks both runtime configuration and release certification on every a
 
 v0.35.2 therefore requires an exact 40-character release source SHA from `VERCEL_GIT_COMMIT_SHA` or the controlled fallback `FINCLOSE_RELEASE_SOURCE_SHA`. The certification report is bound to both:
 
-- FinClose release/certification version; and
+- Finbuks release/certification version; and
 - exact Git source SHA.
 
 A PILOT runtime whose source identity differs from the pre-activation certification fails closed.

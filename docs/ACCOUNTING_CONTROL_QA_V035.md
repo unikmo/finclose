@@ -1,4 +1,4 @@
-# FinClose v0.35 Accounting-Control QA
+# Finbuks v0.35 Accounting-Control QA
 
 Date: 2026-09-07
 Scope: controlled PILOT release review
@@ -19,7 +19,7 @@ The bookkeeping core rejects journals unless:
 - journal date falls inside the batch period;
 - duplicate external journal IDs within a batch are rejected.
 
-Execution remains `PREPARED_NOT_POSTED`; FinClose does not yet post these journals automatically into external accounting systems.
+Execution remains `PREPARED_NOT_POSTED`; Finbuks does not yet post these journals automatically into external accounting systems.
 
 ## 2. Bank-to-ledger reconciliation — PASS WITH DELIBERATELY CONSERVATIVE MATCHING
 
@@ -38,7 +38,7 @@ This is appropriate for a controlled pilot because the engine favors false negat
 Close source completeness is not accepted from a caller-provided `period_scope_complete` assertion. It is derived from:
 
 - a separately configured expected-source registry;
-- period evidence linked to stored FinClose source artifacts;
+- period evidence linked to stored Finbuks source artifacts;
 - same-deployment ownership validation;
 - `RECEIVED` artifact status;
 - SHA-256 artifact fingerprint presence;
@@ -119,7 +119,7 @@ The v0.35 live certification must still prove cross-tenant denial and the VIEWER
 
 ### Segregation-of-duties boundary
 
-FinClose does **not** currently require the APPROVER to be a different physical user from the ACCOUNTANT/preparer. That is acceptable for the initial solopreneur/small-company pilot where one owner may legitimately perform both roles, but it is not a full enterprise maker-checker control. Before marketing FinClose for larger organizations that require formal segregation of duties, add an optional policy requiring a distinct approver identity.
+Finbuks does **not** currently require the APPROVER to be a different physical user from the ACCOUNTANT/preparer. That is acceptable for the initial solopreneur/small-company pilot where one owner may legitimately perform both roles, but it is not a full enterprise maker-checker control. Before marketing Finbuks for larger organizations that require formal segregation of duties, add an optional policy requiring a distinct approver identity.
 
 ## 9. Payroll/bookkeeping execution boundary — PASS
 
@@ -127,7 +127,7 @@ The current control architecture deliberately stops short of higher-risk externa
 
 - payroll remains prepared, not paid/filed;
 - bookkeeping remains prepared, not posted to external accounting systems;
-- FinClose does not lock periods in Xero, QuickBooks, DATEV or SmartAccounts;
+- Finbuks does not lock periods in Xero, QuickBooks, DATEV or SmartAccounts;
 - external payments and statutory filings remain disabled.
 
 This materially limits pilot operational risk while the internal accounting evidence/close process is validated.

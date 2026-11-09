@@ -71,7 +71,7 @@ export const SERVICE_PROFILES: Record<ServiceKey, ServiceProfile> = {
   'bookkeeping-payroll': {
     key: 'bookkeeping-payroll',
     title: 'Bookkeeping & Payroll',
-    description: 'Deploy bookkeeping and payroll together under one coordinated FinClose service.',
+    description: 'Deploy bookkeeping and payroll together under one coordinated Finbuks service.',
     agents: ['orchestrator', 'bookkeeping', 'payroll'],
     fullCompanyInitializationRequired: true,
     countryRequiredAtRegistration: true,
@@ -90,7 +90,7 @@ export const CONNECTORS: Record<ConnectorKey, Connector> = {
     capabilities: ['accounting-read', 'accounting-write', 'payroll-read', 'payroll-write'],
     accountingCountries: ['*'],
     payrollCountries: ['GB'],
-    note: 'OAuth 2.0 accounting connector. Payroll access is only offered where the selected Xero payroll API and country are supported; FinClose currently routes payroll through Xero only for the UK profile.'
+    note: 'OAuth 2.0 accounting connector. Payroll access is only offered where the selected Xero payroll API and country are supported; Finbuks currently routes payroll through Xero only for the UK profile.'
   },
   'quickbooks-online': {
     id: 'quickbooks-online',
@@ -99,7 +99,7 @@ export const CONNECTORS: Record<ConnectorKey, Connector> = {
     capabilities: ['accounting-read', 'accounting-write'],
     accountingCountries: ['*'],
     payrollCountries: [],
-    note: 'OAuth 2.0 accounting connector. FinClose does not advertise this adapter as a payroll connector.'
+    note: 'OAuth 2.0 accounting connector. Finbuks does not advertise this adapter as a payroll connector.'
   },
   datev: {
     id: 'datev',

@@ -60,7 +60,7 @@ const overflow = () => page.evaluate(() => {
 });
 
 test('the page loads with a skip link first in the tab order and a visible heading', async () => {
-  assert.equal(await page.title(), 'Saved review packs | FinClose');
+  assert.equal(await page.title(), 'Saved review packs | Finbuks');
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Skip to the content');
   assert.ok(await page.getByRole('heading', { name: 'Saved review packs', level: 1 }).isVisible());

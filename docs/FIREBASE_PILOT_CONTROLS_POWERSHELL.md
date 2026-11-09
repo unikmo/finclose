@@ -1,4 +1,4 @@
-# FinClose Firebase Pilot Controls — PowerShell
+# Finbuks Firebase Pilot Controls — PowerShell
 
 Date: 2026-09-07
 Script: `scripts/firebase-pilot-controls.ps1`
@@ -8,7 +8,7 @@ Scope: non-Vercel Firebase backup/recovery preparation
 
 The helper turns the backup/PITR policy into a repeatable Windows PowerShell workflow. It is read-only unless `-Apply` is supplied and writes a timestamped JSON evidence file under `artifacts/pilot-evidence` by default.
 
-It does **not** activate FinClose PILOT, change any FinClose release latch, modify Vercel, enable RTDB automated backups, or perform a Firestore restore rehearsal.
+It does **not** activate Finbuks PILOT, change any Finbuks release latch, modify Vercel, enable RTDB automated backups, or perform a Firestore restore rehearsal.
 
 ## Prerequisites
 
@@ -31,13 +31,13 @@ Do not place access tokens, service-account JSON or passwords in command history
 
 ## 1. Read-only status first
 
-From the FinClose repository:
+From the Finbuks repository:
 
 ```powershell
 .\scripts\firebase-pilot-controls.ps1
 ```
 
-If the FinClose Storage bucket name is known, include it so soft-delete metadata is also inspected:
+If the Finbuks Storage bucket name is known, include it so soft-delete metadata is also inspected:
 
 ```powershell
 .\scripts\firebase-pilot-controls.ps1 -StorageBucket "YOUR_BUCKET_NAME"
@@ -79,7 +79,7 @@ The script cannot complete the release gate by itself.
 
 ### RTDB automated backup
 
-In Firebase Console, open Realtime Database > Backups for the FinClose instance and verify/enable:
+In Firebase Console, open Realtime Database > Backups for the Finbuks instance and verify/enable:
 
 - daily automated backup;
 - application data and Security Rules;
@@ -117,4 +117,4 @@ The helper writes JSON evidence, but `FINCLOSE_BACKUP_PITR_VERIFIED=YES` remains
 - Storage soft delete is verified at 30 days;
 - `docs/BACKUP_RECOVERY_VERIFICATION_RECORD_V1.md` is completed with overall `PASS`.
 
-The helper never changes FinClose runtime/release environment variables.
+The helper never changes Finbuks runtime/release environment variables.

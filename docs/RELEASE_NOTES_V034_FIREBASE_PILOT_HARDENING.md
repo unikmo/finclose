@@ -1,4 +1,4 @@
-# FinClose v0.34 — Firebase pilot activation hardening
+# Finbuks v0.34 — Firebase pilot activation hardening
 
 Date: 2026-09-06
 
@@ -18,6 +18,6 @@ Date: 2026-09-06
 
 v0.34 is **source-ready for merge after CI** but is **not authorization to activate PILOT**.
 
-The canonical deployed FinClose runtime must remain `LAB` until the actual Firebase/Vercel environment passes the mandatory checks in `docs/FIREBASE_PILOT_RELEASE_GATE.md`. In particular, Firestore/Auth/rules, tenant isolation, role escalation, session revocation, locked-period concurrency and controlled upload handling require live verification.
+The canonical deployed Finbuks runtime must remain `LAB` until the actual Firebase/Vercel environment passes the mandatory checks in `docs/FIREBASE_PILOT_RELEASE_GATE.md`. In particular, Firestore/Auth/rules, tenant isolation, role escalation, session revocation, locked-period concurrency and controlled upload handling require live verification.
 
 `PRODUCTION` remains blocked. A verified automated malware scanner is required before unrestricted production uploads.

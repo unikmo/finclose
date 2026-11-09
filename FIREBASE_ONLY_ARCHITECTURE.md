@@ -1,6 +1,6 @@
-# FinClose Firebase-only production architecture
+# Finbuks Firebase-only production architecture
 
-Canonical decision: production data services remain on Firebase. Supabase/PostgreSQL is not part of FinClose.
+Canonical decision: production data services remain on Firebase. Supabase/PostgreSQL is not part of Finbuks.
 
 - Vercel: application and server API runtime.
 - Firebase Authentication: customer identity and server session cookies.

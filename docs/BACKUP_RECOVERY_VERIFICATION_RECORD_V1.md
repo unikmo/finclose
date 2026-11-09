@@ -1,4 +1,4 @@
-# FinClose Backup & Recovery Verification Record v1
+# Finbuks Backup & Recovery Verification Record v1
 
 Effective date: 2026-09-07
 Scope: controlled PILOT
@@ -58,7 +58,7 @@ The rehearsal must be non-destructive to the live default database.
 
 | Check | Required result | Evidence captured | Result |
 |---|---|---|---|
-| Automated backup | Enabled for FinClose RTDB | Live configuration | PENDING |
+| Automated backup | Enabled for Finbuks RTDB | Live configuration | PENDING |
 | Data + rules | Both included | Configuration/evidence | PENDING |
 | Compression | Gzip enabled | Configuration/evidence | PENDING |
 | Retention | At least 30 days | Destination lifecycle/configuration | PENDING |
@@ -73,7 +73,7 @@ Latest successful backup: _______________________________
 |---|---|---|---|
 | Soft delete | Enabled | Bucket policy/configuration | PENDING |
 | Retention | 30 days for controlled pilot | Retention seconds/days | PENDING |
-| Bucket identity | Correct FinClose bucket | Bucket name/project | PENDING |
+| Bucket identity | Correct Finbuks bucket | Bucket name/project | PENDING |
 
 Notes: _________________________________________________________________
 

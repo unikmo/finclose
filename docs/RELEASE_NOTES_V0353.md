@@ -1,4 +1,4 @@
-# FinClose v0.35.3 — certification evidence hash fix
+# Finbuks v0.35.3 — certification evidence hash fix
 
 ## Fix
 

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       const loaded = await getPack(await packStore(), String(params.get('pack_id') || ''), caller.company_id);
       const overrides = await (await packStore()).accountOverrides(caller.company_id);
       const journal = buildJournal(loaded.result.pack, applyOverrides(loaded.result.pack.company.jurisdiction, overrides));
-      return new NextResponse(xeroManualJournalCsv(journal, `FinClose ${loaded.result.pack.company.name}`), { headers: { ...NO_STORE, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="xero-manual-journal.csv"' } });
+      return new NextResponse(xeroManualJournalCsv(journal, `Finbuks ${loaded.result.pack.company.name}`), { headers: { ...NO_STORE, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="xero-manual-journal.csv"' } });
     }
     if (params.get('error')) throw httpError('Xero sign-in was cancelled', 400);
     const state = String(params.get('state') || '');
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       const loaded = await getPack(store, String(body.pack_id || ''), caller.company_id);
       const overrides = await store.accountOverrides(caller.company_id);
       const journal = buildJournal(loaded.result.pack, applyOverrides(loaded.result.pack.company.jurisdiction, overrides));
-      const result = await pushJournalAsDraft(await connectionStore(), fetch as never, { company_id: caller.company_id, journal, pack_hash: loaded.result.pack.pack_hash, narration: `FinClose ${loaded.result.pack.company.name}` });
+      const result = await pushJournalAsDraft(await connectionStore(), fetch as never, { company_id: caller.company_id, journal, pack_hash: loaded.result.pack.pack_hash, narration: `Finbuks ${loaded.result.pack.company.name}` });
       return NextResponse.json(result, { headers: NO_STORE });
     }
     throw httpError("action must be 'start', 'push' or 'disconnect'", 400);

@@ -1,4 +1,4 @@
-# FinClose Controlled Pilot Upload Review Procedure v1
+# Finbuks Controlled Pilot Upload Review Procedure v1
 
 Effective date: 2026-09-07
 Scope: controlled PILOT only
@@ -6,7 +6,7 @@ Status: READY FOR OPERATOR ADOPTION; NOT A PRODUCTION MALWARE-SCANNING SUBSTITUT
 
 ## Purpose
 
-This procedure defines the human security control required before FinClose may use `FINCLOSE_UPLOAD_QUARANTINE_MODE=MANUAL_REVIEW` for a controlled real-data pilot. It is deliberately narrow. Manual review is permitted only for trusted pilot sources and does not replace an automated malware scanner for unrestricted production.
+This procedure defines the human security control required before Finbuks may use `FINCLOSE_UPLOAD_QUARANTINE_MODE=MANUAL_REVIEW` for a controlled real-data pilot. It is deliberately narrow. Manual review is permitted only for trusted pilot sources and does not replace an automated malware scanner for unrestricted production.
 
 ## Allowed pilot sources
 
@@ -14,7 +14,7 @@ A file may enter the controlled pilot only when its provenance is known and attr
 
 1. A direct export produced by the pilot customer's accounting, payroll or banking system.
 2. A statement/document downloaded by the pilot customer directly from a known bank, tax authority, payroll provider or accounting platform.
-3. A file prepared by the pilot customer from its own records and transferred directly to the FinClose controlled upload flow.
+3. A file prepared by the pilot customer from its own records and transferred directly to the Finbuks controlled upload flow.
 
 Do not accept files forwarded from unknown senders, public download links, unsolicited email attachments, third-party file-sharing links of uncertain provenance or files whose origin cannot be independently explained by the pilot customer.
 
@@ -36,7 +36,7 @@ A file that fails application validation is rejected before manual review and mu
 
 ## Reviewer authorization
 
-Only a user authorized as `ADMIN` for the same FinClose organization/deployment may perform the manual review action. The reviewer must authenticate through the managed Firebase customer identity path in PILOT.
+Only a user authorized as `ADMIN` for the same Finbuks organization/deployment may perform the manual review action. The reviewer must authenticate through the managed Firebase customer identity path in PILOT.
 
 The review endpoint must verify deployment and organization ownership before the artifact can be downloaded or decided.
 
@@ -47,7 +47,7 @@ For each quarantined artifact:
 1. Confirm the expected customer, organization, company, deployment and upload purpose.
 2. Confirm the customer expected this specific file and can identify its source.
 3. Confirm the displayed filename, file type, size and SHA-256 fingerprint are consistent with the upload record.
-4. Download only through the FinClose ADMIN review route. The response is forced as an attachment and uses `no-store` and `nosniff` controls.
+4. Download only through the Finbuks ADMIN review route. The response is forced as an attachment and uses `no-store` and `nosniff` controls.
 5. Inspect the file only on a current, patched, non-privileged review workstation with active endpoint protection. Do not enable macros, scripts, external content, document links or embedded active content.
 6. For spreadsheets, prefer structural/data inspection. `.xlsx` is permitted; macro-enabled Office formats are not.
 7. For PDFs/images, confirm the document content matches the declared financial source and does not unexpectedly request execution, credentials, external downloads or active content.
@@ -57,7 +57,7 @@ For each quarantined artifact:
 
 ## Decision semantics
 
-- `CLEAN`: the quarantined artifact becomes `RECEIVED` and may advance the relevant FinClose workflow.
+- `CLEAN`: the quarantined artifact becomes `RECEIVED` and may advance the relevant Finbuks workflow.
 - `REJECTED`: the artifact remains unusable for operational accounting/payroll processing.
 - Decisions are immutable through the review endpoint. A previously cleared/rejected artifact must not be flipped by a later review request.
 - Concurrent conflicting review attempts must resolve to one immutable decision; last-writer-wins behavior is not permitted.

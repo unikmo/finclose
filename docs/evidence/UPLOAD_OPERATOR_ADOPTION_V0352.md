@@ -1,4 +1,4 @@
-# FinClose Controlled Pilot Upload — Operator Adoption Record
+# Finbuks Controlled Pilot Upload — Operator Adoption Record
 
 **Status: ADOPTED — PASS**
 **Date prepared:** 2026.09.09
@@ -33,7 +33,7 @@ The technical side is already proven by the live certification (`upload_review_c
 
 ### Procedure summary
 
-- **Allowed sources only:** direct export from the customer's accounting/payroll/banking system; a statement the customer downloaded themselves from a known bank/tax/payroll/accounting provider; or a file the customer prepared from their own records and sent straight to FinClose. **Reject** anything forwarded from unknown senders, public links, unsolicited attachments, or uncertain provenance.
+- **Allowed sources only:** direct export from the customer's accounting/payroll/banking system; a statement the customer downloaded themselves from a known bank/tax/payroll/accounting provider; or a file the customer prepared from their own records and sent straight to Finbuks. **Reject** anything forwarded from unknown senders, public links, unsolicited attachments, or uncertain provenance.
 - **App already enforces:** ≤25 MB, allowlist `.xlsx/.csv/.pdf/.png/.jpg/.jpeg`, filename sanitisation, magic-byte check, no executables, no macro-enabled Office, SHA-256 fingerprint, tenant-scoped private Storage path, quarantine before use. A file failing app validation is rejected before review and must **not** be manually overridden.
 - **Reviewer must be `ADMIN`** for that org/deployment, authenticated via managed Firebase identity. Download only through the ADMIN review route (forced attachment, `no-store`, `nosniff`).
 - **Per file:** confirm customer/org/company/deployment + purpose; confirm the customer expected this specific file and can name its source; confirm filename/type/size/SHA-256 match the upload record; inspect on the patched non-privileged workstation without enabling active content; for spreadsheets prefer structural/data inspection; for PDF/images confirm content matches the declared source and doesn't request execution/credentials/external downloads.

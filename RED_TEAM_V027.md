@@ -1,4 +1,4 @@
-# FinClose v0.27 — Independent Red Team
+# Finbuks v0.27 — Independent Red Team
 
 Date: 2026-09-05
 
@@ -20,7 +20,7 @@ A customer no longer has to understand `FINCLOSE_LAB_TOKEN`. The service route b
 Before authentication, company initialization, historical uploads, connectors and agent details are hidden. After authentication, only the next required layer is exposed.
 
 ### PASS — service-specific company gate
-`balance-books` skips company initialization. Payroll, bookkeeping and combined service ask for company country, then allow reuse of an existing initialized FinClose company or the existing country initialization workbook.
+`balance-books` skips company initialization. Payroll, bookkeeping and combined service ask for company country, then allow reuse of an existing initialized Finbuks company or the existing country initialization workbook.
 
 ### PASS — existing initialization reuse
 Previously initialized companies remain reusable. The UI explicitly treats MDA as an example of an existing company that should not be initialized again.

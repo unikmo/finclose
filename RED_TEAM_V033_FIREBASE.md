@@ -1,4 +1,4 @@
-# Independent Red Team — FinClose v0.33 Firebase-only production foundation
+# Independent Red Team — Finbuks v0.33 Firebase-only production foundation
 
 Date: 2026-09-06
 Scope: `feature/production-foundation-v033d`

@@ -42,7 +42,7 @@ export function validateFinancialUpload(filename: string, buffer: Buffer, purpos
     throw httpError('unsupported file type; use XLSX, CSV, PDF, PNG or JPG', 415);
   }
   if (purpose === 'initialization' && extension !== '.xlsx') {
-    throw httpError('initialization requires the FinClose XLSX template', 415);
+    throw httpError('initialization requires the Finbuks XLSX template', 415);
   }
 
   let contentType = 'application/octet-stream';

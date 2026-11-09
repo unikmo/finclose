@@ -6,7 +6,7 @@ import { eraseCompanyData, exportCompanyData } from '../../../lib/data-rights';
 export const dynamic = 'force-dynamic';
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-// Everything FinClose holds for one company in the review-pack feature.
+// Everything Finbuks holds for one company in the review-pack feature.
 //   GET     ?company_id=   export as JSON (ADMIN)
 //   DELETE  json { company_id, confirm }   erase packs, documents and learned rules (OWNER); confirm must equal company_id
 export async function GET(req: NextRequest) {

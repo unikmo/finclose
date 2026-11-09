@@ -26,11 +26,11 @@ Added 2026-10-31. Each item says what it does, how to switch it on, and what has
 - Works today with no credentials: journal CSV, and a Xero manual-journal import CSV.
 - Xero live connector coded: OAuth 2.0 with PKCE, sealed token storage (AES-256-GCM), token refresh with rotation, and push of the proposed journal as DRAFT manual journals (never posted), one per day, once per pack content.
 - Switch on: `FINCLOSE_CONNECTORS_ENABLED=true`, `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `XERO_REDIRECT_URI` (must point at `/api/connectors/xero`), `FINCLOSE_TOKEN_KEY` (32+ characters, keep it safe: losing it means everyone reconnects), optionally `XERO_SCOPES`.
-- Erasing a company's data deletes its stored tokens. The user should also revoke FinClose inside Xero.
+- Erasing a company's data deletes its stored tokens. The user should also revoke Finbuks inside Xero.
 - NOT checked: the real Xero (endpoints, scopes and field names are from recollection of its public docs), the Xero import template columns, QuickBooks, DATEV and SmartAccounts (not built).
 
 ## 5. Partner layer (`lib/partner-layer.ts`, routes `app/api/firm-*`, pages `/firm/partner` and `/firm/join`)
-- Staff invitations: one-time link (FinClose sends no email), stored hashed, accepted only by the invited and verified email, seven-day expiry, nobody can invite above their own role.
+- Staff invitations: one-time link (Finbuks sends no email), stored hashed, accepted only by the invited and verified email, seven-day expiry, nobody can invite above their own role.
 - Client invitations and staffing routes over the existing consent model, with the plan's client limit.
 - Plan and usage: price per client per month, client and staff limits, a monthly usage statement and CSV. No payment provider: nothing is charged.
 - Branding: name, colour, https logo, support email, footer. Clients see only that, on their pack and in the pack's Markdown.
@@ -40,7 +40,7 @@ Added 2026-10-31. Each item says what it does, how to switch it on, and what has
 - NOT checked: the partner pages in a browser, any flow against a real Firebase project, accept-by-client UI (the API exists; there is no screen for the client's admin to accept), Stripe or any invoicing, revenue share.
 
 ## 6. Review inside the client's own accounting system (added 2026-10-31, second pass)
-Direction agreed with the owner: FinClose works inside the system the client already uses, reads it with the client's own access, and **proposes only**. It decides nothing and writes nothing to the client's books. The client registers nothing with FinClose.
+Direction agreed with the owner: Finbuks works inside the system the client already uses, reads it with the client's own access, and **proposes only**. It decides nothing and writes nothing to the client's books. The client registers nothing with Finbuks.
 
 - **Common shape** (`lib/ledger.ts`): every system is read into one snapshot (accounts, VAT codes, bank accounts, invoices, payments, ledger entries). Only GET requests are made.
 - **Review** (`lib/ledger-review.ts`): eight checks (unbalanced entries, missing documents, duplicate supplier invoices, VAT arithmetic, VAT rate not in the country's list, long-overdue invoices, unmatched payments, entries outside the period). Output is proposals with the rule, the records, and a suggested action for a person. The headline is never "books are correct": the best it says is "the N checks run found nothing", with a list of what was not checked. Anything the adapter could not read makes the status DATA_INCOMPLETE.

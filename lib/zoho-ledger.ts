@@ -45,8 +45,8 @@ export class ZohoLedgerSource implements LedgerSource {
       this.used += 1;
       const query = new URLSearchParams({ organization_id: tenantId, page: String(page), per_page: String(PER_PAGE), ...extra });
       const response = await this.fetchFn(`${this.base}/books/v3/${path}?${query}`, { headers: { Authorization: `Zoho-oauthtoken ${token}`, Accept: 'application/json' } });
-      if (response.status === 401 || response.status === 403) throw httpError(`Zoho Books would not let FinClose read ${name} (${response.status}). Reconnect and allow read access`, response.status);
-      if (response.status === 429) throw httpError('Zoho Books asked FinClose to slow down (429)', 429);
+      if (response.status === 401 || response.status === 403) throw httpError(`Zoho Books would not let Finbuks read ${name} (${response.status}). Reconnect and allow read access`, response.status);
+      if (response.status === 429) throw httpError('Zoho Books asked Finbuks to slow down (429)', 429);
       if (!response.ok) throw httpError(`Zoho Books answered ${response.status} for ${name}`, 502);
       const body = obj(await response.json());
       const rows = Array.isArray(body[name]) ? (body[name] as Record<string, unknown>[]) : (Object.values(body).find(v => Array.isArray(v)) as Record<string, unknown>[] | undefined) || [];

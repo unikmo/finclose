@@ -1,4 +1,4 @@
-# FinClose Backup & Recovery Verification Record
+# Finbuks Backup & Recovery Verification Record
 
 **Pilot-activation blocker P0 #2** (`backup_pitr_policy` certification gate) · issue unikmo/finclose#21
 Operationalizes `docs/FIREBASE_BACKUP_PITR_POLICY_V1.md` and `docs/BACKUP_RECOVERY_VERIFICATION_RECORD_V1.md`.
@@ -18,11 +18,11 @@ Operationalizes `docs/FIREBASE_BACKUP_PITR_POLICY_V1.md` and `docs/BACKUP_RECOVE
 - Firebase / Google Cloud project: **`theantibalcony`**
 - Firestore database: **`(default)`**, Firestore-native, location **`eur3`** (Belgium + Netherlands, EU)
 - Realtime Database: **`theantibalcony-default-rtdb`**, location **`europe-west1`** (Belgium, EU)
-- Cloud Storage — FinClose financial artifacts bucket: **`theantibalcony-finclose-eu`**, **`eu`** multi-region
+- Cloud Storage — Finbuks financial artifacts bucket: **`theantibalcony-finclose-eu`**, **`eu`** multi-region
 - Cloud Storage — RTDB backup bucket: **`theantibalcony-default-rtdb-backups`**, **`europe-west1`**
-- Legacy bucket `theantibalcony.firebasestorage.app` (`us-east1`) — superseded by the EU bucket; not used by the FinClose runtime (env `FIREBASE_STORAGE_BUCKET=theantibalcony-finclose-eu`). Recommend deleting once confirmed empty.
+- Legacy bucket `theantibalcony.firebasestorage.app` (`us-east1`) — superseded by the EU bucket; not used by the Finbuks runtime (env `FIREBASE_STORAGE_BUCKET=theantibalcony-finclose-eu`). Recommend deleting once confirmed empty.
 
-**All three FinClose data stores are in the EU.** The earlier US/EU residency split is resolved.
+**All three Finbuks data stores are in the EU.** The earlier US/EU residency split is resolved.
 
 ---
 
@@ -89,11 +89,11 @@ Console: Firebase → Realtime Database → *Sicherungen*.
 
 | Check | Required | Observed | Result |
 |---|---|---|---|
-| Soft delete enabled | Enabled on FinClose bucket | **Enabled** on `theantibalcony-finclose-eu` (Protection: "Soft Delete"; "Disable" available) | ✅ PASS |
+| Soft delete enabled | Enabled on Finbuks bucket | **Enabled** on `theantibalcony-finclose-eu` (Protection: "Soft Delete"; "Disable" available) | ✅ PASS |
 | Retention | 30 days (pilot policy) | **30 days**, effective 2026-09-09 07:05:09 UTC+2 | ✅ PASS |
-| Bucket identity | Correct FinClose bucket | `theantibalcony-finclose-eu`, `eu` multi-region — matches `FIREBASE_STORAGE_BUCKET` | ✅ PASS |
+| Bucket identity | Correct Finbuks bucket | `theantibalcony-finclose-eu`, `eu` multi-region — matches `FIREBASE_STORAGE_BUCKET` | ✅ PASS |
 | RTDB backup bucket protection | — | `theantibalcony-default-rtdb-backups` also shows soft-delete protection + 30-day delete lifecycle | ✅ PASS |
-| SHA-256 upload fingerprints preserved | Per policy §3 | FinClose records `sha256` on every stored artifact in RTDB + audit events (`saveDataChunk`, upload-review claims) — restored files can be revalidated against recorded identity | ✅ PASS (by design) |
+| SHA-256 upload fingerprints preserved | Per policy §3 | Finbuks records `sha256` on every stored artifact in RTDB + audit events (`saveDataChunk`, upload-review claims) — restored files can be revalidated against recorded identity | ✅ PASS (by design) |
 
 Console: GCP → Cloud Storage → `theantibalcony-finclose-eu` → *Protection*.
 

@@ -143,7 +143,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
       setAuthReady(true);
     }).catch(() => {
       setAuthReady(true);
-      setNote('Could not load FinClose setup information.');
+      setNote('Could not load Finbuks setup information.');
     });
   }, []);
 
@@ -420,7 +420,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
     return '';
   }
 
-  if (!profile || !authReady) return <main className="service-start-shell"><div className="service-loading">Loading FinClose…</div></main>;
+  if (!profile || !authReady) return <main className="service-start-shell"><div className="service-loading">Loading Finbuks…</div></main>;
 
   const heroText = !user
     ? ''
@@ -435,9 +435,9 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
   return (
     <main className="service-start-shell">
       <header className="service-start-nav">
-        <Link href="/" className="home-brand" aria-label="FinClose home">
+        <Link href="/" className="home-brand" aria-label="Finbuks home">
           <span className="home-logo">F</span>
-          <span className="home-brand-copy"><strong>FinClose</strong><small>Account first · company second</small></span>
+          <span className="home-brand-copy"><strong>Finbuks</strong><small>Account first · company second</small></span>
         </Link>
         <div className="service-nav-actions">
           {user && <span className="signed-in-as">{user.email}</span>}
@@ -452,7 +452,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
           <h1>{profile.title}</h1>
           {heroText && <p>{heroText}</p>}
         </div>
-        <div className="phase-strip" aria-label="FinClose onboarding phases">
+        <div className="phase-strip" aria-label="Finbuks onboarding phases">
           {phases.map((phase, index) => <span className={phaseClass(index)} key={phase}>{index + 1} · {phase}</span>)}
         </div>
       </section>
@@ -513,7 +513,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
           </div>
 
           <div className="setup-block">
-            <span className="choice-label">New to FinClose</span>
+            <span className="choice-label">New to Finbuks</span>
             <h3>Initialize this company</h3>
             <p>Fill in the workbook for this country.</p>
             <div className="inline-actions">
@@ -532,7 +532,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         {companyInitializationRequired && <div className="completed-line"><span>✓</span> Company · {deployment.company_name || 'initialized company'}</div>}
         <div className="focus-kicker">STEP {companyInitializationRequired ? '3' : '2'}</div>
         <h2>Upload prior information</h2>
-        <p className="focus-lead">Past records show FinClose your balances and open items.</p>
+        <p className="focus-lead">Past records show Finbuks your balances and open items.</p>
 
         <div className="history-layout">
           <div className="history-guidance">
@@ -554,7 +554,7 @@ export default function ServiceOnboarding({ serviceKey }: { serviceKey: string }
         <div className="completed-line"><span>✓</span> Prior information {deployment.history_status === 'NOT_APPLICABLE_NEW_COMPANY' ? 'not applicable for new company' : 'received'}</div>
         <div className="focus-kicker">STEP {companyInitializationRequired ? '4' : '3'}</div>
         <h2>Connect the current system</h2>
-        <p className="focus-lead">Choose where FinClose reads your current records.</p>
+        <p className="focus-lead">Choose where Finbuks reads your current records.</p>
 
         <div className="connector-grid refined">
           {visibleConnectors.map(connector => (

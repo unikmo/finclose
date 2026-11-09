@@ -1,4 +1,4 @@
-# FinClose v0.23 Red Team Gate
+# Finbuks v0.23 Red Team Gate
 
 Date: 2026-09-03
 Scope: Vercel runtime + Firebase Firestore/Storage Lab migration

@@ -113,7 +113,7 @@ function Get-FirebaseState {
 Require-Command 'firebase'
 if ($StorageBucket) { Require-Command 'gcloud' }
 
-Write-Host "FinClose Firebase pilot-control helper"
+Write-Host "Finbuks Firebase pilot-control helper"
 Write-Host "Project: $ProjectId"
 Write-Host "Database: $DatabaseId"
 Write-Host ("Mode: " + $(if ($Apply) { 'APPLY SAFE CONFIGURATION' } else { 'READ-ONLY STATUS' }))

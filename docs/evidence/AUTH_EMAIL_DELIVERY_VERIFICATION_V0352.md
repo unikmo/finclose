@@ -1,4 +1,4 @@
-# FinClose Auth Email Delivery Verification Record — v0.35.2
+# Finbuks Auth Email Delivery Verification Record — v0.35.2
 
 Pilot-activation blocker P0 #5 (`auth_email_human_delivery` certification gate) · issue #21
 

@@ -1,4 +1,4 @@
-# FinClose v0.24 — Independent Red Team
+# Finbuks v0.24 — Independent Red Team
 
 Date: 2026-09-03
 

@@ -1,4 +1,4 @@
-# FinClose Payroll Onboarding — Independent Red Team
+# Finbuks Payroll Onboarding — Independent Red Team
 
 Date: 2026-09-06
 Scope: customer route `Help me do payroll` only

@@ -118,7 +118,7 @@ async function connected(handlers = goodHandlers()) {
 
 test('pushing sends DRAFT journals, one per day, each balanced, with the tenant header', async () => {
   const { store, fetchFn, calls } = await connected();
-  const result = await pushJournalAsDraft(store, fetchFn, { company_id: 'c1', journal, pack_hash: 'a'.repeat(64), narration: 'FinClose Test OU' }, env, 3_000);
+  const result = await pushJournalAsDraft(store, fetchFn, { company_id: 'c1', journal, pack_hash: 'a'.repeat(64), narration: 'Finbuks Test OU' }, env, 3_000);
   assert.equal(result.already_pushed, false);
   assert.deepEqual(result.journals.map(j => j.date), ['2026-03-03', '2026-03-10']);
   const post = calls.find(c => c.url.endsWith('/ManualJournals'))!;
@@ -136,7 +136,7 @@ test('pushing sends DRAFT journals, one per day, each balanced, with the tenant 
 
 test('pushing the same pack twice sends nothing the second time', async () => {
   const { store, fetchFn, calls } = await connected();
-  const args = { company_id: 'c1', journal, pack_hash: 'b'.repeat(64), narration: 'FinClose' };
+  const args = { company_id: 'c1', journal, pack_hash: 'b'.repeat(64), narration: 'Finbuks' };
   await pushJournalAsDraft(store, fetchFn, args, env, 3_000);
   const posts = () => calls.filter(c => c.url.endsWith('/ManualJournals')).length;
   assert.equal(posts(), 1);
@@ -179,7 +179,7 @@ test('a Xero error is reported without leaking tokens, and records no push', asy
 });
 
 test('the Xero import file has one signed row per journal line', () => {
-  const csv = xeroManualJournalCsv(journal, 'FinClose Test OU');
+  const csv = xeroManualJournalCsv(journal, 'Finbuks Test OU');
   const rows = csv.trim().split('\n');
   assert.equal(rows.length, 6);
   assert.match(rows[0], /\*Narration/);

@@ -60,8 +60,8 @@ export class FreshBooksLedgerSource implements LedgerSource {
       this.used += 1;
       const joiner = path.includes('?') ? '&' : '?';
       const response = await this.fetchFn(`${BASE}/accounting/account/${encodeURIComponent(tenantId)}/${path}${joiner}page=${page}&per_page=${PER_PAGE}`, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' } });
-      if (response.status === 401 || response.status === 403) throw httpError(`FreshBooks would not let FinClose read ${name} (${response.status}). Reconnect and allow read access`, response.status);
-      if (response.status === 429) throw httpError('FreshBooks asked FinClose to slow down (429)', 429);
+      if (response.status === 401 || response.status === 403) throw httpError(`FreshBooks would not let Finbuks read ${name} (${response.status}). Reconnect and allow read access`, response.status);
+      if (response.status === 429) throw httpError('FreshBooks asked Finbuks to slow down (429)', 429);
       if (!response.ok) throw httpError(`FreshBooks answered ${response.status} for ${name}`, 502);
       const { rows, pages } = listOf(await response.json(), name);
       out.push(...rows);

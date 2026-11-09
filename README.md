@@ -1,6 +1,6 @@
-# FinClose
+# Finbuks
 
-Canonical repository for the FinClose financial-operations product.
+Canonical repository for the Finbuks financial-operations product.
 
 ## Canonical architecture — v0.33 production foundation
 
@@ -17,7 +17,7 @@ Cloud Firestore is the authoritative financial-state boundary for real-data mode
 
 ## Runtime modes
 
-FinClose has three explicit modes:
+Finbuks has three explicit modes:
 
 - `LAB` — synthetic/test financial data and the legacy internal test bridge.
 - `PILOT` — controlled real customer/company data with Firebase Authentication, tenant isolation, Firestore ledger controls and human approval.
@@ -41,7 +41,7 @@ Balance-books skips company initialization. Payroll, bookkeeping and combined se
 In `PILOT` / `PRODUCTION`:
 
 - Firebase Authentication provides the user identity.
-- FinClose exchanges Firebase credentials for secure HTTP-only server session cookies.
+- Finbuks exchanges Firebase credentials for secure HTTP-only server session cookies.
 - Organizations and memberships use `OWNER`, `ADMIN`, `ACCOUNTANT`, `APPROVER` and `VIEWER` roles.
 - Service deployments and companies are organization-owned.
 - Company lists and financial actions are tenant-scoped server-side.
@@ -78,7 +78,7 @@ External accounting-provider locks, filings and payments remain separate executi
 
 ## Financial source documents
 
-Firebase Cloud Storage stores historical and current source files under tenant/company-specific private paths. FinClose currently enforces:
+Firebase Cloud Storage stores historical and current source files under tenant/company-specific private paths. Finbuks currently enforces:
 
 - SHA-256 fingerprints;
 - filename sanitization;
@@ -116,7 +116,7 @@ Core server configuration:
 - `FINCLOSE_RUNTIME_MODE`
 - `FINCLOSE_LAB_TOKEN` only for `LAB`
 
-No Supabase or PostgreSQL connection string is part of FinClose.
+No Supabase or PostgreSQL connection string is part of Finbuks.
 
 ## Real-data release gate
 

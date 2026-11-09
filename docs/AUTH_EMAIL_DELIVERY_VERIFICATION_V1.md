@@ -1,4 +1,4 @@
-# FinClose Firebase Auth Email Delivery Verification v1
+# Finbuks Firebase Auth Email Delivery Verification v1
 
 Effective date: 2026-09-07
 Scope: controlled PILOT
@@ -18,7 +18,7 @@ Do not record passwords, tokens, OOB codes or full session cookies in this docum
 
 ## B. Email verification flow
 
-- [ ] A controlled test account was created through the intended FinClose/Firebase path.
+- [ ] A controlled test account was created through the intended Finbuks/Firebase path.
 - [ ] The account initially showed `emailVerified=false`.
 - [ ] A verification email was requested.
 - [ ] The message arrived in the controlled mailbox.

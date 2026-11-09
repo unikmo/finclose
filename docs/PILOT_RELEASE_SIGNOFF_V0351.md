@@ -1,4 +1,4 @@
-# FinClose Controlled Pilot Release Sign-off v0.35.1
+# Finbuks Controlled Pilot Release Sign-off v0.35.1
 
 Date prepared: 2026-09-07
 Release source: `25242880b4c37d14bc4af4c2f85660ad9047be5e`
