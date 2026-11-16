@@ -1,5 +1,5 @@
 // Auto-generated from each payroll engine's own evidence array by
-// build-policy-registry.ts (2026-09-15) -- do not hand-edit rows; add a new
+// build-policy-registry.ts (2026-11-16) -- do not hand-edit rows; add a new
 // engine evidence entry and regenerate instead, so this registry can never
 // drift from what the engines actually cite. See lib/policy-monitor.ts for
 // how this registry is used.
@@ -90,6 +90,12 @@ export const POLICY_MONITOR_SOURCES: PolicyMonitorSource[] = [
   { id: 'za_a83c8883e9', country: 'ZA', authority: 'South African Revenue Service (SARS)', instrument: 'Unemployment Insurance Fund (UIF) — 1% employee + 1% employer, R17,712/month remuneration ceiling', url: 'https://www.sars.gov.za/businesses-and-employers/employers/uif/' },
   { id: 'za_b4197a5772', country: 'ZA', authority: 'South African Revenue Service (SARS)', instrument: 'Skills Development Levy (SDL) — 1% of leviable remuneration, R500,000 12-month exemption threshold', url: 'https://www.sars.gov.za/businesses-and-employers/employers/skills-development-levy/' },
   { id: 'za_940985b118', country: 'ZA', authority: 'South African Revenue Service (SARS)', instrument: 'Employment Tax Incentive (ETI) — own current page, changes effective 1 April 2025: months 1-12 (60% / R1,500 flat / R1,500 minus 75% taper), months 13-24 (30% / R750 flat / R750 minus 37.5% taper), R7,500/month ineligibility threshold, 160-hour gross-up/gross-down proration, 18-29 qualifying age', url: 'https://www.sars.gov.za/types-of-tax/pay-as-you-earn/employment-tax-incentive-eti/' },
+  { id: 'ee_78517041c7', country: 'EE', authority: 'Estonian Tax and Customs Board (EMTA)', instrument: 'Tax rates — 2026 income tax, social tax, unemployment insurance, funded pension and minimum social-tax base', url: 'https://www.emta.ee/en/private-client/taxes-and-payment/declaration-income/tax-rates' },
+  { id: 'ee_03291302f6', country: 'EE', authority: 'Estonian Tax and Customs Board (EMTA)', instrument: 'Calculation of basic exemption — 2026 EUR 700 monthly exemption, EUR 776 at pensionable age, written-application rules', url: 'https://www.emta.ee/en/private-client/taxes-and-payment/tax-incentives/calculation-basic-exemption' },
+  { id: 'ee_a644bb72c0', country: 'EE', authority: 'Estonian Tax and Customs Board (EMTA)', instrument: 'Social tax — 33% rate, 2026 EUR 886 minimum monthly base, exceptions and proration guidance', url: 'https://www.emta.ee/en/business-client/taxes-and-payment/income-and-social-taxes/social-tax' },
+  { id: 'ee_b21d670f49', country: 'EE', authority: 'Estonian Tax and Customs Board (EMTA)', instrument: 'Unemployment insurance premiums — employee and employer treatment including pension cases', url: 'https://www.emta.ee/en/business-client/taxes-and-payment/income-and-social-taxes/unemployment-insurance-premiums' },
+  { id: 'ee_bb6156a258', country: 'EE', authority: 'Riigi Teataja', instrument: 'Income Tax Act, current 2026 text — §42 deductions before withholding; employee UI and mandatory funded-pension contributions deductible before withheld income tax', url: 'https://www.riigiteataja.ee/en/tolge/pdf/515042026001' },
+  { id: 'ee_6c4ae0d2f7', country: 'EE', authority: 'Estonian Tax and Customs Board (EMTA)', instrument: 'Income from employment — ordinary salary labour taxes and TSD payment-type boundary', url: 'https://www.emta.ee/en/private-client/taxes-and-payment/taxable-income/income-employment' },
   { id: 'ge_fb7dc49900', country: 'GE', authority: 'Legislative Herald of Georgia (Matsne)', instrument: 'Tax Code of Georgia, Article 81 and Article 101', url: 'https://www.matsne.gov.ge/en/document/view/1043717' },
   { id: 'ge_6dba9dc7cc', country: 'GE', authority: 'Legislative Herald of Georgia (Matsne)', instrument: 'Law of Georgia on Funded Pension, Article 3', url: 'https://www.matsne.gov.ge/en/document/view/4280127' },
 ];
