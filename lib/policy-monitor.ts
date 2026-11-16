@@ -18,8 +18,8 @@
 // real bracket update). Every flagged source needs a human — or a
 // follow-up Claude session reading the page directly — to confirm whether
 // the corresponding payroll-engine-*.ts file needs updating. This is
-// designed to narrow 79 sources down to "here are the 3 that changed this
-// week," not to auto-apply anything.
+// designed to narrow the full source registry down to "here are the few that
+// changed this week," not to auto-apply anything.
 //
 // PDFs and other binary sources are hashed at the byte level (no text
 // extraction — this repo has no PDF-parsing dependency and adding one
