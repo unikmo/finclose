@@ -176,10 +176,20 @@ export const PAYROLL_RULE_PACK_EE = {
       authority: 'Estonian Tax and Customs Board (EMTA)',
       instrument: 'Income from employment — ordinary salary labour taxes and TSD payment-type boundary',
       url: 'https://www.emta.ee/en/private-client/taxes-and-payment/taxable-income/income-employment'
+    },
+    {
+      authority: 'Estonian Tax and Customs Board (EMTA)',
+      instrument: 'TSD 2026 worked example — EUR 2,100 ordinary employment salary: exact social tax, II-pillar, UI, withheld income tax and net pay',
+      url: 'https://www.emta.ee/en/business-client/taxes-and-payment/income-and-social-taxes/submission-declaration-form-tsd/naide-1-tootasu-2100-eurot'
+    },
+    {
+      authority: 'Estonian Tax and Customs Board (EMTA)',
+      instrument: 'TSD 2026 worked example — EUR 600 salary below social-tax monthly base: EUR 886 minimum base and exemption capped after employee deductions',
+      url: 'https://www.emta.ee/en/business-client/taxes-and-payment/income-and-social-taxes/submission-declaration-form-tsd/naide-3-tootasu-alla-sotsiaalmaksu-kuumaara'
     }
   ],
   limitations: [
-    'DRAFT_NEEDS_LEGAL_REVIEW: official 2026 sources were checked, but this pack has not yet been independently validated against an e-MTA/TSD calculation or a real Estonian payroll golden fixture. It must not be marked VERIFIED_BASIC_RULES until that review is complete.',
+    'DRAFT_NEEDS_LEGAL_REVIEW: the core arithmetic reproduces EMTA\'s official 2026 TSD worked examples for both a EUR 2,100 standard salary and a EUR 600 salary below the social-tax minimum base. A separate local payroll/legal review is still required before the pack may be marked VERIFIED_BASIC_RULES for real payroll.',
     'Only ordinary cash remuneration under an employment contract is modeled. Redundancy/termination compensation, employer sickness-benefit special treatment, board/member remuneration, contracts under the law of obligations, fringe benefits, stock/options, garnishments and other payment types are outside v1.',
     'The caller supplies the basic_exemption_amount for the payment month. FinClose does not infer whether another employer, the Social Insurance Board or another payment in the same month has already consumed part of the employee\'s monthly exemption.',
     'The caller supplies pensionable_age_for_tax_year. For pensioners, the Social Insurance Board may already apply the EUR 776 exemption to pension; only an unused amount supported by the employee\'s application should be supplied to this payroll run.',
@@ -267,17 +277,20 @@ export function calculateEePayroll(input: EePayrollRunInput): EePayrollRunResult
       fail('minimum_social_tax_base cannot exceed the 2026 statutory monthly base of EUR 886 for ' + employeeId);
     }
 
-    const basicExemptionApplied = money(Math.min(requestedExemption, grossPay));
     const fundedPension = money(grossPay * fundedRate);
     const employeeUi = employee.employee_unemployment_insurance_applicable
       ? money(grossPay * PAYROLL_RULE_PACK_EE.employee_unemployment_insurance_rate)
       : 0;
     const employerUi = money(grossPay * PAYROLL_RULE_PACK_EE.employer_unemployment_insurance_rate);
 
-    // Income Tax Act §42: withheld employee UI and mandatory funded-pension
-    // contributions are deducted from the payment before withheld income tax.
-    // Basic exemption is then included as an additional permitted deduction.
-    const incomeTaxBase = money(Math.max(0, grossPay - employeeUi - fundedPension - basicExemptionApplied));
+    // Income Tax Act §42: employee UI and mandatory funded-pension
+    // contributions are deducted before withholding income tax. EMTA's
+    // official 2026 low-wage TSD example also demonstrates that the basic
+    // exemption actually applied to a payment cannot exceed what remains
+    // after those employee contributions (EUR 600 - 12 - 9.60 = 578.40).
+    const exemptionAvailableOnPayment = money(Math.max(0, grossPay - employeeUi - fundedPension));
+    const basicExemptionApplied = money(Math.min(requestedExemption, exemptionAvailableOnPayment));
+    const incomeTaxBase = money(Math.max(0, exemptionAvailableOnPayment - basicExemptionApplied));
     const incomeTax = money(incomeTaxBase * PAYROLL_RULE_PACK_EE.income_tax_rate);
 
     const socialTaxBase = money(Math.max(grossPay, minimumSocialTaxBase));
@@ -363,7 +376,7 @@ export function payrollEngineSelfTestEE() {
     pay_date: '2026-06-30',
     employees: [{
       employee_id: 'EE001',
-      gross_pay: 2000,
+      gross_pay: 2100,
       basic_exemption_amount: 700,
       pensionable_age_for_tax_year: false,
       funded_pension_rate: 0.02,
@@ -411,10 +424,10 @@ export function payrollEngineSelfTestEE() {
     pay_date: '2026-02-28',
     employees: [{
       employee_id: 'EE004',
-      gross_pay: 500,
-      basic_exemption_amount: 0,
+      gross_pay: 600,
+      basic_exemption_amount: 700,
       pensionable_age_for_tax_year: false,
-      funded_pension_rate: 0,
+      funded_pension_rate: 0.02,
       employee_unemployment_insurance_applicable: true,
       minimum_social_tax_base: 886
     }]
@@ -443,15 +456,15 @@ export function payrollEngineSelfTestEE() {
 
   return {
     ok:
-      s.employee_unemployment_insurance === 32 &&
-      s.employer_unemployment_insurance === 16 &&
-      s.funded_pension === 40 &&
+      s.employee_unemployment_insurance === 33.60 &&
+      s.employer_unemployment_insurance === 16.80 &&
+      s.funded_pension === 42 &&
       s.basic_exemption_applied === 700 &&
-      s.income_tax_base === 1228 &&
-      s.income_tax === 270.16 &&
-      s.employer_social_tax === 660 &&
-      s.net_pay === 1657.84 &&
-      s.employer_funded_total === 2676 &&
+      s.income_tax_base === 1324.40 &&
+      s.income_tax === 291.37 &&
+      s.employer_social_tax === 693 &&
+      s.net_pay === 1733.03 &&
+      s.employer_funded_total === 2809.80 &&
       standard.controls.journal_balanced &&
       p6.funded_pension === 180 &&
       p6.employee_unemployment_insurance === 48 &&
@@ -467,9 +480,12 @@ export function payrollEngineSelfTestEE() {
       pensioner.controls.journal_balanced &&
       lw.social_tax_base === 886 &&
       lw.employer_social_tax === 292.38 &&
-      lw.employee_unemployment_insurance === 8 &&
-      lw.income_tax === 108.24 &&
-      lw.net_pay === 383.76 &&
+      lw.funded_pension === 12 &&
+      lw.employee_unemployment_insurance === 9.60 &&
+      lw.employer_unemployment_insurance === 4.80 &&
+      lw.basic_exemption_applied === 578.40 &&
+      lw.income_tax === 0 &&
+      lw.net_pay === 578.40 &&
       lowWageMinimum.controls.journal_balanced &&
       rejected2027,
     standard,
