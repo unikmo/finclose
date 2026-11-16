@@ -37,7 +37,7 @@ allOk = check('scanSignals: does NOT flag 2026 itself as forward', forwardResult
 // Registry sanity: every source must be a real https URL, have a unique
 // id, and be tagged to one of the countries this codebase actually has a
 // payroll engine for.
-const validCountries = new Set(['US', 'DE', 'GB', 'CA', 'KE', 'ZA', 'RW', 'MU', 'CM', 'GE']);
+const validCountries = new Set(['US', 'DE', 'GB', 'CA', 'KE', 'ZA', 'RW', 'MU', 'CM', 'GE', 'EE']);
 const ids = new Set<string>();
 let registryOk = true;
 for (const source of POLICY_MONITOR_SOURCES) {
