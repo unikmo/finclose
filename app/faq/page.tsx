@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 const questions = [
-  ['Who decides?', 'Your accountant. Finbuks prepares proposals and flags items. It decides nothing and posts nothing to your books.'],
+  ['Who decides?', 'Your accountant. Finbuks prepares proposals and flags items. It decides nothing and posts nothing to your books.'],\n  ['What do I get when the books are finished?', 'Two things: the finished accounting records for your accountant, and an Owner Financial Summary for you. It explains sales, costs, profit or loss, cash, what customers owe you, what you owe suppliers, taxes and loans in plain language. It uses the same final accounting figures; it does not treat bank money in and out as profit.'],
   ['Why upload prior records?', 'They show Finbuks your balances, open items and earlier decisions before it sees current data. This is not another sign-up step.'],
   ['What can I upload?', 'XLSX, XLS, CSV and PDF for prior records. Receipts: PDF, PNG or JPG, up to 25 MB. PDF statements must be text, not scans.'],
   ['Why are my files held for review?', 'During the pilot, uploads are quarantined until an administrator clears them. Nothing is processed before that.'],
