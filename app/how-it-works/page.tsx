@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'How it works',
-  description: 'Five steps from sign-up to accountant sign-off.',
+  description: 'Five steps from sign-up to finished books and an owner-readable financial summary.',
   alternates: { canonical: '/how-it-works' }
 };
 
@@ -12,7 +12,7 @@ const steps = [
   ['Add your company', 'Pick a company already in Finbuks, or set it up once with the form for your country.'],
   ['Upload prior records', 'Ledger, trial balance, bank statements, open items. This shows Finbuks your starting position.'],
   ['Connect your current system', 'Secure file upload, or a read-only connection to your accounting system where available.'],
-  ['Review and sign off', 'Finbuks prepares and flags what needs a decision. Your accountant reviews and signs off. Finbuks posts nothing to your books.']
+  ['Review, sign off, understand', 'Finbuks prepares and flags what needs a decision. Your accountant reviews and signs off. You receive the finished books plus an Owner Financial Summary explaining sales, costs, profit or loss, cash, amounts customers owe, bills, taxes and loans in plain language.']
 ];
 
 export default function HowItWorks() {

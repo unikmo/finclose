@@ -3,11 +3,11 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Finbuks — Book Close Support',
-  description: 'Finbuks prepares the close. Your accountant reviews and signs off.',
+  description: 'Finbuks prepares the close. Your accountant signs off. You get finished books and a plain-English owner financial summary.',
   alternates: { canonical: '/' },
   openGraph: {
     title: 'Finbuks — Book Close Support',
-    description: 'Finbuks prepares the close. Your accountant reviews and signs off.',
+    description: 'Finbuks prepares the close. Your accountant signs off. You get finished books and a plain-English owner financial summary.',
     url: '/'
   }
 };
@@ -16,10 +16,10 @@ const products = [
   {
     number: '01',
     title: 'Closing your books',
-    description: 'Finbuks prepares the close. Your accountant signs off.',
+    description: 'Finished books, accountant sign-off, and a simple financial summary you can actually read.',
     href: '/start/balance-books',
     tag: 'Book close',
-    steps: ['Collect & classify', 'Match & reconcile', 'Flag exceptions', 'Accountant reviews & signs off']
+    steps: ['Collect & classify', 'Match & reconcile', 'Flag exceptions', 'Sign off + owner summary']
   }
 ];
 
@@ -31,7 +31,7 @@ const pipeline = [
   { label: 'Collect', detail: 'Statements & records' },
   { label: 'Match', detail: 'Reconcile every line' },
   { label: 'Flag', detail: 'Surface exceptions' },
-  { label: 'Sign off', detail: 'Your accountant approves' }
+  { label: 'Finish', detail: 'Signed-off books + owner summary' }
 ];
 
 function BookCloseIcon() {
@@ -70,14 +70,14 @@ export default function Home() {
             <span>Finbuks does</span>
             <span>the work.</span>
           </h1>
-          <p>Finbuks prepares the close. Your accountant signs off.</p>
+          <p>Finished books for your accountant. A simple financial summary for you.</p>
           <Link href="/start/balance-books" className="home-cta">
             Start closing your books →
           </Link>
           <div className="help-trust-row" aria-label="Finbuks capabilities">
             <span>Prepared by Finbuks</span>
             <span>Reviewed by your accountant</span>
-            <span>Monthly & year-end close</span>
+            <span>Plain-English owner summary</span>
           </div>
         </div>
 
