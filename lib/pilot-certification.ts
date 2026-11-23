@@ -13,6 +13,7 @@ import { financeCycleSelfTest } from './finance-cycle-engine';
 import { closeGovernanceSelfTest } from './close-governance-engine';
 import { ledgerHealth } from './production-ledger';
 import { canonicalJSONStringify } from './pilot-release-evidence';
+import { legalIdentityCheck } from './legal-config';
 
 export type CertificationGateStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'WARN';
 export type CertificationGate = {
@@ -323,7 +324,9 @@ function engineGate() {
 }
 
 function manualGates() {
+  const legal = legalIdentityCheck();
   return [
+    gate('legal_operator_identity', 'Legal provider/controller identity configured', legal.ok ? 'PASS' : 'BLOCKED', legal.ok ? 'Required provider/controller identity fields are configured.' : 'Missing legal configuration: ' + legal.missing.join(', '), true, { operator_type: legal.operator_type, missing_fields: legal.missing, register_details_configured: legal.has_register_details, vat_id_configured: legal.has_vat_id, privacy_contact_configured: legal.has_privacy_contact }),
     gate('backup_pitr_policy', 'Firebase backup / PITR policy approved', yes('FINCLOSE_BACKUP_PITR_VERIFIED') ? 'PASS' : 'BLOCKED', yes('FINCLOSE_BACKUP_PITR_VERIFIED') ? 'FINCLOSE_BACKUP_PITR_VERIFIED=YES' : 'Manual Firebase backup/PITR policy evidence is still required.'),
     gate('independent_security_review', 'Independent security review approved', yes('FINCLOSE_SECURITY_REVIEW_APPROVED') ? 'PASS' : 'BLOCKED', yes('FINCLOSE_SECURITY_REVIEW_APPROVED') ? 'FINCLOSE_SECURITY_REVIEW_APPROVED=YES' : 'Independent security review has not been explicitly approved.'),
     gate('accounting_control_qa', 'Accounting-control QA approved', yes('FINCLOSE_ACCOUNTING_QA_APPROVED') ? 'PASS' : 'BLOCKED', yes('FINCLOSE_ACCOUNTING_QA_APPROVED') ? 'FINCLOSE_ACCOUNTING_QA_APPROVED=YES' : 'Accounting-control QA has not been explicitly approved.'),
