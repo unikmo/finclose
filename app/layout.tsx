@@ -6,6 +6,7 @@ import './payroll-onboarding.css';
 import './payroll-v028-polish.css';
 import './firm-portfolio.css';
 import './prepare.css';
+import SiteFooter from './site-footer';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://finbuks.com'),
@@ -25,5 +26,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="en"><body>{children}<SiteFooter /></body></html>;
 }
