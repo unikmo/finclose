@@ -9,6 +9,9 @@ Effective date: 2026-09-07
 | Canonical repository | `unikmo/finclose` | Verified GitHub repository | ACTIVE | FinClose branches inside `unikmo/Unikmo` |
 | Hosting/runtime | Vercel | User decision | ACTIVE | Firebase Hosting candidate |
 | Main homepage | `How Can We Help?` service-selection layer; no technical Lab entry is exposed to customers | User decision + UX correction | ACTIVE | Homepage `Open test lab` link |
+| Public navigation | Homepage exposes How it works, FAQ and Legal; every page has a global footer with Product and Legal navigation | User decision + implementation | ACTIVE | Brand-only header / no global legal navigation |
+| Legal surfaces | Public routes `/legal`, `/privacy` and `/terms` are mandatory. Missing operator/controller identity is displayed as a pre-release warning rather than fabricated | User decision + implementation | ACTIVE / OPERATOR DATA REQUIRED | No legal pages |
+| Legal release gate | PILOT certification includes a mandatory `legal_operator_identity` gate. Required operator type, name, address and email must be configured; legal entities additionally require legal form and representative. Register/VAT details are supplied where applicable | Release safeguard | ACTIVE / BLOCKED UNTIL CONFIGURED | No legal release gate |
 | Homepage choices | Help me balance my books; Help me do payroll; Do my bookkeeping; Bookkeeping & Payroll | User wording | ACTIVE | Previous #4 `I need bookkeeping` |
 | Deployment principle | Deploy and bill only the agent capabilities required by the selected service | User decision | ACTIVE | Generic full-company onboarding for every customer |
 | Core internal agents | Orchestrator; Close & Reconciliation; Bookkeeping; Payroll | User/product architecture | ACTIVE | Ad hoc task-specific agents |
