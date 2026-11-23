@@ -30,3 +30,55 @@
 .help-card p{font-size:14.5px}
 .help-card-steps li{font-size:13px}
 }
+
+
+/* Global navigation/legal surfaces */
+.home-menu{display:flex;align-items:center;gap:24px;font-size:12px;font-weight:750;color:var(--fc-parchment-dim)}
+.home-menu a{padding:9px 0;border-bottom:1px solid transparent;transition:color .18s ease,border-color .18s ease}
+.home-menu a:hover{color:var(--fc-parchment);border-color:var(--fc-brass)}
+.site-footer{background:var(--fc-void);color:var(--fc-parchment);border-top:1px solid rgba(141,183,227,.18);padding:34px 32px}
+.site-footer-inner{width:min(1180px,100%);margin:0 auto;display:grid;grid-template-columns:1fr auto 1fr;gap:48px;align-items:start}
+.site-footer-brand{display:flex;align-items:center;gap:12px}
+.site-footer-logo{width:38px;height:38px;display:grid;place-items:center;border-radius:10px;background:var(--fc-brass);color:var(--fc-ink);font-weight:900}
+.site-footer-brand div{display:flex;flex-direction:column;gap:3px}
+.site-footer-brand strong{font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif;font-size:17px}
+.site-footer-brand span,.site-footer-note{font-size:10px;color:var(--fc-parchment-dim)}
+.site-footer-nav{display:grid;grid-template-columns:repeat(2,minmax(110px,1fr));gap:38px}
+.site-footer-nav>div{display:flex;flex-direction:column;gap:9px}
+.site-footer-nav strong{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--fc-brass)}
+.site-footer-nav a{font-size:11px;color:var(--fc-parchment-dim)}
+.site-footer-nav a:hover{color:var(--fc-parchment)}
+.site-footer-note{display:flex;flex-direction:column;gap:6px;line-height:1.5;text-align:right}
+.legal-shell{min-height:calc(100vh - 160px);padding:52px 24px 72px;background:var(--bg)}
+.legal-card{width:min(820px,100%);margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:18px;padding:38px 42px;box-shadow:0 16px 48px rgba(9,21,34,.07)}
+.legal-back{display:inline-block;margin-bottom:28px;font-size:12px;font-weight:750;color:#355d9c}
+.legal-card h1{margin:0;font-family:Charter,"Bitstream Charter","Sitka Text",Cambria,Georgia,serif;font-size:42px;letter-spacing:-.03em;color:var(--fc-ink)}
+.legal-lead{font-size:16px;line-height:1.65;color:var(--muted);margin:14px 0 30px}
+.legal-card section{padding:24px 0;border-top:1px solid var(--line)}
+.legal-card h2{margin:0 0 12px;font-size:16px;color:var(--fc-ink)}
+.legal-card p,.legal-card li,.legal-card dd,.legal-card dt{font-size:13px;line-height:1.7}
+.legal-card p{color:#46536a}
+.legal-card ul{margin:8px 0 0;padding-left:20px;color:#46536a}
+.legal-card li+li{margin-top:8px}
+.legal-warning{border:1px solid #e2c87d;background:#fff8e4;border-radius:12px;padding:16px 18px;margin:0 0 28px;color:#6c4d00}
+.legal-warning strong{font-size:13px}
+.legal-warning p{margin:6px 0 0;color:#6c4d00}
+.legal-details{margin:0;display:grid;gap:10px}
+.legal-details>div{display:grid;grid-template-columns:160px 1fr;gap:18px}
+.legal-details dt{font-weight:750;color:#59667a}
+.legal-details dd{margin:0;color:var(--text)}
+.legal-updated{margin:28px 0 0;font-size:11px!important;color:#7a8798!important}
+@media(max-width:760px){
+  .home-menu{gap:14px;font-size:10px}
+  .site-footer{padding:30px 18px}
+  .site-footer-inner{grid-template-columns:1fr;gap:28px}
+  .site-footer-note{text-align:left}
+  .legal-shell{padding:28px 14px 48px}
+  .legal-card{padding:28px 22px}
+  .legal-card h1{font-size:34px}
+  .legal-details>div{grid-template-columns:1fr;gap:1px}
+}
+@media(max-width:520px){
+  .home-menu a:nth-child(1){display:none}
+  .home-menu{gap:12px}
+}

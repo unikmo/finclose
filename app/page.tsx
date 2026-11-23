@@ -62,6 +62,11 @@ export default function Home() {
             <small>Bookkeeping · Close</small>
           </span>
         </Link>
+        <nav className="home-menu" aria-label="Main navigation">
+          <Link href="/how-it-works">How it works</Link>
+          <Link href="/faq">FAQ</Link>
+          <Link href="/legal">Legal</Link>
+        </nav>
       </header>
 
       <section className="help-hero">
@@ -128,10 +133,6 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="home-footer">
-        <Link href="/how-it-works">How it works</Link>
-        <Link href="/faq">FAQ</Link>
-      </footer>
     </main>
   );
 }
