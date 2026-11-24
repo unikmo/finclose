@@ -90,3 +90,62 @@
 .site-footer-wordmark{display:block;width:170px;height:auto;max-height:52px}
 .logo{background:transparent url('/brand/finbuks-icon.svg') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important;box-shadow:none!important}
 @media(max-width:760px){.home-wordmark{width:158px}.site-footer-wordmark{width:150px}}
+
+
+/* 2026-11 visual system: centered, compact, premium reading rails */
+:root{
+  --fc-rail-nav:1120px;
+  --fc-rail-main:1040px;
+  --fc-rail-reading:760px;
+  --fc-gutter:clamp(20px,3vw,40px);
+}
+
+@media(min-width:981px){
+  .home-shell{padding-left:0;padding-right:0}
+  .home-nav{width:min(var(--fc-rail-nav),calc(100% - (var(--fc-gutter) * 2)))}
+  .help-hero{
+    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:48px;
+    padding:54px 0 42px;
+    align-items:start;
+  }
+  .help-intro{max-width:500px;padding:0;justify-self:start}
+  .help-intro h1{font-size:clamp(52px,4.9vw,68px);line-height:.98}
+  .help-intro>p{max-width:440px;font-size:18px;line-height:1.62}
+  .help-grid-primary{
+    width:100%;
+    max-width:500px;
+    justify-self:end;
+    align-self:start;
+    margin-top:0;
+  }
+  .help-card-primary{min-height:340px;padding:28px 30px}
+  .help-card-copy{margin-top:28px;padding-right:34px}
+  .help-card p{font-size:14px;line-height:1.55}
+  .help-card-steps{margin-top:16px;padding-top:14px}
+  .pipeline,.help-secondary{
+    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+  }
+  .site-footer-inner{
+    width:min(var(--fc-rail-nav),calc(100% - (var(--fc-gutter) * 2)));
+  }
+  .topin,.shell{
+    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+  }
+}
+
+.home-wordmark{width:176px;max-height:48px;object-fit:contain;object-position:left center}
+.site-footer-wordmark{width:158px;max-height:44px;object-fit:contain;object-position:left center}
+.legal-card{width:min(var(--fc-rail-reading),100%)}
+
+@media(max-width:980px){
+  .home-nav,.help-hero,.pipeline,.help-secondary,.site-footer-inner{
+    width:min(100% - 36px,760px);
+  }
+  .help-grid-primary{max-width:680px}
+}
+
+@media(max-width:600px){
+  .home-nav,.help-hero,.pipeline,.help-secondary,.site-footer-inner{width:100%}
+}
