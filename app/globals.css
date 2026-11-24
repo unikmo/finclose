@@ -98,13 +98,14 @@
   --fc-rail-main:1040px;
   --fc-rail-reading:760px;
   --fc-gutter:clamp(20px,3vw,40px);
+  --fc-inset:clamp(40px,6vw,80px);
 }
 
 @media(min-width:981px){
   .home-shell{padding-left:0;padding-right:0}
-  .home-nav{width:min(var(--fc-rail-nav),calc(100% - (var(--fc-gutter) * 2)))}
+  .home-nav{width:min(var(--fc-rail-nav),calc(100% - var(--fc-inset)))}
   .help-hero{
-    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+    width:min(var(--fc-rail-main),calc(100% - var(--fc-inset)));
     grid-template-columns:minmax(0,1fr) minmax(0,1fr);
     gap:48px;
     padding:54px 0 42px;
@@ -125,13 +126,13 @@
   .help-card p{font-size:14px;line-height:1.55}
   .help-card-steps{margin-top:16px;padding-top:14px}
   .pipeline,.help-secondary{
-    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+    width:min(var(--fc-rail-main),calc(100% - var(--fc-inset)));
   }
   .site-footer-inner{
-    width:min(var(--fc-rail-nav),calc(100% - (var(--fc-gutter) * 2)));
+    width:min(var(--fc-rail-nav),calc(100% - var(--fc-inset)));
   }
   .topin,.shell{
-    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+    width:min(var(--fc-rail-main),calc(100% - var(--fc-inset)));
   }
 }
 
