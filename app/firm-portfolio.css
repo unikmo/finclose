@@ -52,3 +52,12 @@
 }
 
 .fp-logo{background:transparent url('/brand/finbuks-icon.svg') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important}
+
+
+/* Centered premium firm rail */
+@media(min-width:981px){
+  .fp-shell{padding-left:0;padding-right:0}
+  .fp-nav,.fp-body,.fp-loading,.fp-note{
+    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+  }
+}
