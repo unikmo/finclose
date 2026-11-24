@@ -3,4 +3,27 @@
 @media(max-width:720px){.service-start-shell{padding:0 18px 30px}.service-start-nav{height:76px}.service-start-hero{padding:42px 0 24px}.service-start-copy h1{font-size:50px}.service-start-copy>p{font-size:15px}.phase-strip{grid-template-columns:1fr}.focus-panel{padding:26px 20px 28px;border-radius:22px}.service-form-row{grid-template-columns:1fr}.connector-grid{grid-template-columns:1fr 1fr}.connector-card{min-height:112px}.service-start-shell .home-brand-copy small{display:none}}
 @media(max-width:460px){.connector-grid{grid-template-columns:1fr}.service-start-copy h1{font-size:44px}.service-back{font-size:10px}.focus-panel>h2{font-size:34px}}
 
-.service-start-shell .home-logo{background:transparent url('/brand/finbuks-icon.svg') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important;box-shadow:none!important}
+.service-start-shell .home-logo{background:transparent url('/brand/finbuks-icon-approved.png') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important;box-shadow:none!important}
+
+
+/* Centered premium service rail */
+@media(min-width:981px){
+  .service-start-shell{padding-left:0;padding-right:0}
+  .service-start-nav{width:min(var(--fc-rail-nav),calc(100% - var(--fc-inset)))}
+  .service-start-hero{
+    width:min(var(--fc-rail-main),calc(100% - var(--fc-inset)));
+    padding:46px 0 26px;
+  }
+  .service-start-hero.compact{
+    grid-template-columns:minmax(0,1fr) 320px;
+    gap:40px;
+    align-items:start;
+  }
+  .service-start-copy{max-width:620px}
+  .service-start-copy>p{max-width:580px}
+  .focus-panel{
+    width:min(900px,calc(100% - var(--fc-inset)));
+    padding:32px 34px 36px;
+  }
+  .service-status-note{width:min(900px,calc(100% - var(--fc-inset)))}
+}

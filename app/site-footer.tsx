@@ -6,7 +6,7 @@ export default function SiteFooter() {
       <div className="site-footer-inner">
         <div className="site-footer-brand">
           <Link href="/" aria-label="Finbuks home">
-            <img src="/brand/finbuks-logo-on-dark.svg" alt="Finbuks" className="site-footer-wordmark" />
+            <img src="/brand/finbuks-logo-approved-on-dark.png" alt="Finbuks" className="site-footer-wordmark" />
           </Link>
         </div>
 

@@ -56,7 +56,7 @@ export default function Home() {
     <main className="home-shell">
       <header className="home-nav">
         <Link href="/" className="home-brand home-brand-wordmark" aria-label="Finbuks home">
-          <img src="/brand/finbuks-logo-on-dark.svg" alt="Finbuks" className="home-wordmark" />
+          <img src="/brand/finbuks-logo-approved-on-dark.png" alt="Finbuks" className="home-wordmark" />
         </Link>
         <nav className="home-menu" aria-label="Main navigation">
           <Link href="/how-it-works">How it works</Link>
