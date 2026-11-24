@@ -5,11 +5,9 @@ export default function SiteFooter() {
     <footer className="site-footer">
       <div className="site-footer-inner">
         <div className="site-footer-brand">
-          <Link href="/" className="site-footer-logo" aria-label="Finbuks home">F</Link>
-          <div>
-            <strong>Finbuks</strong>
-            <span>Bookkeeping · Close</span>
-          </div>
+          <Link href="/" aria-label="Finbuks home">
+            <img src="/brand/finbuks-logo-on-dark.svg" alt="Finbuks" className="site-footer-wordmark" />
+          </Link>
         </div>
 
         <nav className="site-footer-nav" aria-label="Footer navigation">
