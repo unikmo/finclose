@@ -117,7 +117,7 @@
 @media(min-width:981px){
   .pr-shell{padding-left:0;padding-right:0}
   .pr-nav,.pr-body{
-    width:min(900px,calc(100% - (var(--fc-gutter) * 2)));
+    width:min(900px,calc(100% - var(--fc-inset)));
   }
   .pr-body{padding-top:36px}
   .pr-lead,.pr-note{max-width:66ch}
