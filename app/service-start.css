@@ -9,9 +9,9 @@
 /* Centered premium service rail */
 @media(min-width:981px){
   .service-start-shell{padding-left:0;padding-right:0}
-  .service-start-nav{width:min(var(--fc-rail-nav),calc(100% - (var(--fc-gutter) * 2)))}
+  .service-start-nav{width:min(var(--fc-rail-nav),calc(100% - var(--fc-inset)))}
   .service-start-hero{
-    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+    width:min(var(--fc-rail-main),calc(100% - var(--fc-inset)));
     padding:46px 0 26px;
   }
   .service-start-hero.compact{
@@ -22,8 +22,8 @@
   .service-start-copy{max-width:620px}
   .service-start-copy>p{max-width:580px}
   .focus-panel{
-    width:min(900px,calc(100% - (var(--fc-gutter) * 2)));
+    width:min(900px,calc(100% - var(--fc-inset)));
     padding:32px 34px 36px;
   }
-  .service-status-note{width:min(900px,calc(100% - (var(--fc-gutter) * 2)))}
+  .service-status-note{width:min(900px,calc(100% - var(--fc-inset)))}
 }
