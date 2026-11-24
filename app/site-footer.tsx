@@ -23,6 +23,7 @@ export default function SiteFooter() {
             <Link href="/legal">Legal notice</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>
+            <Link href="/contact">Contact</Link>
           </div>
         </nav>
 
