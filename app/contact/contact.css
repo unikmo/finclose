@@ -1,0 +1,9 @@
+.contact-form{display:grid;gap:16px;max-width:620px;margin-top:20px}
+.contact-form label{display:grid;gap:6px;font-size:13px;font-weight:700;color:var(--fc-parchment)}
+.contact-form textarea{border-radius:10px;border:1px solid rgba(141,183,227,.27);background:rgba(255,255,255,.04);color:var(--fc-parchment);padding:10px;font-size:14px;font-family:inherit;resize:vertical}
+.contact-form input,.contact-form select{font-weight:400}
+.contact-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.contact-error{margin:0;color:#ff9b9b;font-size:13px;font-weight:700}
+.contact-sent{max-width:620px;margin-top:20px;padding:22px;border:1px solid rgba(141,183,227,.27);border-radius:14px;background:rgba(255,255,255,.03)}
+.contact-sent h2{margin:0 0 8px}
+.contact-side{margin-top:32px;max-width:620px}
