@@ -88,7 +88,7 @@
 .home-brand-wordmark{display:inline-flex;align-items:center}
 .home-wordmark{display:block;width:190px;height:auto;max-height:54px}
 .site-footer-wordmark{display:block;width:170px;height:auto;max-height:52px}
-.logo{background:transparent url('/brand/finbuks-icon.svg') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important;box-shadow:none!important}
+.logo{background:transparent url('/brand/finbuks-icon-approved.png') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important;box-shadow:none!important}
 @media(max-width:760px){.home-wordmark{width:158px}.site-footer-wordmark{width:150px}}
 
 
