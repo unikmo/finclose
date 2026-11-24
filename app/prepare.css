@@ -111,3 +111,15 @@
 .pr-note a{color:var(--fc-brass);text-decoration:underline;text-underline-offset:3px}
 
 .pr-logo{background:transparent url('/brand/finbuks-icon.svg') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important}
+
+
+/* Centered premium review/content rail */
+@media(min-width:981px){
+  .pr-shell{padding-left:0;padding-right:0}
+  .pr-nav,.pr-body{
+    width:min(900px,calc(100% - (var(--fc-gutter) * 2)));
+  }
+  .pr-body{padding-top:36px}
+  .pr-lead,.pr-note{max-width:66ch}
+  .pr-list{max-width:72ch}
+}
