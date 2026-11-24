@@ -55,12 +55,8 @@ export default function Home() {
   return (
     <main className="home-shell">
       <header className="home-nav">
-        <Link href="/" className="home-brand" aria-label="Finbuks home">
-          <span className="home-logo">F</span>
-          <span className="home-brand-copy">
-            <strong>Finbuks</strong>
-            <small>Bookkeeping · Close</small>
-          </span>
+        <Link href="/" className="home-brand home-brand-wordmark" aria-label="Finbuks home">
+          <img src="/brand/finbuks-logo-on-dark.svg" alt="Finbuks" className="home-wordmark" />
         </Link>
         <nav className="home-menu" aria-label="Main navigation">
           <Link href="/how-it-works">How it works</Link>
