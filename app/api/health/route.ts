@@ -3,7 +3,7 @@ import { realtimeDatabase, storageBucket } from '../../../lib/finclose-backend';
 import { inspectFirebaseServiceAccountEnvironment } from '../../../lib/firebase-environment';
 import { ensureFirebaseWebClientConfig } from '../../../lib/firebase-web-config-discovery';
 import { getPilotReleaseEvidenceStatus } from '../../../lib/pilot-release-gate';
-import { FINCLOSE_RELEASE_VERSION } from '../../../lib/release-version';
+import { FINCLOSE_RELEASE_VERSION, releaseSourceIdentityReady, releaseSourceSha } from '../../../lib/release-version';
 import { runtimeReadiness } from '../../../lib/runtime-mode';
 import { ledgerHealth } from '../../../lib/production-ledger';
 import { FINANCIAL_UPLOAD_SECURITY } from '../../../lib/file-security';
@@ -19,11 +19,16 @@ export async function GET(req: NextRequest) {
   const firebaseWebConfigDiscovery = await ensureFirebaseWebClientConfig();
   const readiness = runtimeReadiness();
   const credentialEnvironment = inspectFirebaseServiceAccountEnvironment();
+  const sourceIdentity = {
+    sha: releaseSourceIdentityReady() ? releaseSourceSha() : null,
+    ready: releaseSourceIdentityReady()
+  };
   const configured = credentialEnvironment.status === 'PRESENT' && Boolean(process.env.FIREBASE_STORAGE_BUCKET);
   const deep = req.nextUrl.searchParams.get('deep') === '1';
   if (!deep || !configured) {
     return NextResponse.json({
       version: FINCLOSE_RELEASE_VERSION,
+      release_source: sourceIdentity,
       hosting: 'vercel',
       database: 'firebase-realtime-database',
       storage: 'firebase-storage',
@@ -39,6 +44,9 @@ export async function GET(req: NextRequest) {
   const errors: string[] = [];
   if (readiness.real_data_mode && !readiness.real_data_allowed_by_config) {
     errors.push(`runtime: ${readiness.blockers.join(', ') || 'real-data release gate is not ready'}`);
+  }
+  if (readiness.real_data_mode && !sourceIdentity.ready) {
+    errors.push('release-source: exact release source identity is not available');
   }
   try {
     await realtimeDatabase().ref('finclose_health').limitToFirst(1).once('value');
@@ -69,10 +77,11 @@ export async function GET(req: NextRequest) {
   const certification = await getLatestPilotCertification().catch(() => null);
   const engineOk = payroll.ok && bookkeeping.ok && financeCycle.ok && closeGovernance.ok;
   const infrastructureOk = reachable.database && reachable.storage && (!readiness.real_data_mode || firestore.ready);
-  const releaseOk = !readiness.real_data_mode || (readiness.real_data_allowed_by_config && releaseEvidence.ready);
+  const releaseOk = !readiness.real_data_mode || (readiness.real_data_allowed_by_config && sourceIdentity.ready && releaseEvidence.ready);
 
   return NextResponse.json({
     version: FINCLOSE_RELEASE_VERSION,
+    release_source: sourceIdentity,
     hosting: 'vercel',
     database: 'firebase-realtime-database-control-plane',
     authoritative_ledger: 'firebase-firestore',
@@ -87,6 +96,7 @@ export async function GET(req: NextRequest) {
     pilot_certification: certification ? {
       certification_version: certification.certification_version,
       release_version: certification.release_version,
+      release_source_sha: certification.release_source_sha,
       completed_at: certification.completed_at,
       release_ready: certification.release_ready,
       activation_allowed: certification.activation_allowed,

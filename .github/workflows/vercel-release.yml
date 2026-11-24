@@ -1,0 +1,314 @@
+name: FinClose Vercel Release
+
+on:
+  workflow_run:
+    workflows: ["FinClose CI"]
+    types: [completed]
+  create:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: finclose-vercel-production-release
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      ${{
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') ||
+        (github.event_name == 'create' && github.actor == github.repository_owner && github.event.ref_type == 'branch' &&
+          (startsWith(github.event.ref, 'release/lab/') || startsWith(github.event.ref, 'release/certify/') || startsWith(github.event.ref, 'release/pilot/')))
+      }}
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_sVekjWxQpKBAOb3DWW89HdvK
+      VERCEL_PROJECT_ID: prj_fn9VRSUOqwpOHkXEuLDGHVvoMHSC
+      VERCEL_PRODUCTION_URL: https://finclose-lab-preview.vercel.app
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      GITHUB_API_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Resolve release stage and exact source SHA
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            STAGE="LAB_SAFE"
+            SOURCE_SHA='${{ github.event.workflow_run.head_sha }}'
+          else
+            [[ "$GITHUB_ACTOR" == "$GITHUB_REPOSITORY_OWNER" ]] || { echo "::error::Controlled release refs may be created only by the repository owner"; exit 1; }
+            [[ '${{ github.event.ref_type }}' == 'branch' ]] || { echo "::error::Release refs must be branches"; exit 1; }
+            SOURCE_SHA="$GITHUB_SHA"
+            RELEASE_REF='${{ github.event.ref }}'
+            case "$RELEASE_REF" in
+              release/lab/*) STAGE="LAB_SAFE" ;;
+              release/certify/*) STAGE="CERTIFY_LAB" ;;
+              release/pilot/*) STAGE="PILOT" ;;
+              *) echo "::error::Unsupported release branch: $RELEASE_REF"; exit 1 ;;
+            esac
+          fi
+
+          if [[ ! "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::Invalid source SHA: $SOURCE_SHA"
+            exit 1
+          fi
+          echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Verify source provenance and successful main CI
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_STAGE: ${{ steps.release.outputs.stage }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main || {
+            echo "::error::Release source is not contained in main"
+            exit 1
+          }
+
+          MAIN_SHA=$(git rev-parse origin/main)
+          if [[ "$RELEASE_STAGE" == "CERTIFY_LAB" || "$RELEASE_STAGE" == "PILOT" ]]; then
+            [[ "$SOURCE_SHA" == "$MAIN_SHA" ]] || {
+              echo "::error::Certification/PILOT may activate only the current main head; source=$SOURCE_SHA main=$MAIN_SHA"
+              exit 1
+            }
+          fi
+
+          RUNS=$(mktemp)
+          PRS=$(mktemp)
+          trap 'rm -f "$RUNS" "$PRS"' EXIT
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer $GITHUB_API_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+            -o "$RUNS"
+          jq -e --arg sha "$SOURCE_SHA" '
+            any(.workflow_runs[]; .head_sha == $sha and .head_branch == "main" and .conclusion == "success")
+          ' "$RUNS" >/dev/null || {
+            echo "::error::No successful main FinClose CI run found for $SOURCE_SHA"
+            exit 1
+          }
+
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer $GITHUB_API_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${SOURCE_SHA}/pulls" \
+            -o "$PRS"
+          jq -e 'any(.[]; .merged_at != null and .base.ref == "main")' "$PRS" >/dev/null || {
+            echo "::error::Release source is not associated with a merged pull request into main"
+            exit 1
+          }
+
+      - name: Independently rerun release checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm test
+          bash -n scripts/vercel-release-deploy.sh
+          bash -n scripts/vercel-release-verify.sh
+          npm run build
+
+      - name: Verify Vercel automation credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${VERCEL_TOKEN:-}" ]]; then
+            echo "::error::Release automation is BLOCKED because repository secret VERCEL_TOKEN is missing. This is a one-time bootstrap credential and must not be committed or pasted into chat."
+            exit 78
+          fi
+
+      - name: Generate ephemeral certification credential
+        if: steps.release.outputs.stage == 'CERTIFY_LAB'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(openssl rand -hex 32)
+          echo "::add-mask::$TOKEN"
+          echo "FINCLOSE_RELEASE_AUTOMATION_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Recheck current main before controlled release
+        if: steps.release.outputs.stage != 'LAB_SAFE'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          [[ "$SOURCE_SHA" == "$(git rev-parse origin/main)" ]] || {
+            echo "::error::main advanced after release validation; certification/PILOT is cancelled"
+            exit 1
+          }
+
+      - name: Preflight existing certification for direct PILOT release
+        if: steps.release.outputs.stage == 'PILOT'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          BODY=$(mktemp)
+          trap 'rm -f "$BODY"' EXIT
+          curl --silent --show-error --fail --max-time 30 \
+            "${VERCEL_PRODUCTION_URL}/api/health?deep=1" -o "$BODY"
+          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          jq -e --arg sha "$SOURCE_SHA" --arg version "$EXPECTED_VERSION" '
+            .version == $version and
+            .release_source.sha == $sha and
+            .runtime.mode == "LAB" and
+            .real_data_release_evidence.ready == true and
+            .real_data_release_evidence.code == "PILOT_CERTIFICATION_VERIFIED" and
+            .real_data_release_evidence.release_source_sha == $sha and
+            .pilot_certification.release_source_sha == $sha and
+            .pilot_certification.release_ready == true and
+            .pilot_certification.activation_allowed == true
+          ' "$BODY" >/dev/null || {
+            echo "::error::Exact-source PILOT certification is not ready on the live LAB runtime"
+            jq '{version, release_source, runtime: .runtime.mode, real_data_release_evidence, pilot_certification}' "$BODY" >&2
+            exit 1
+          }
+
+      - name: Deploy requested release stage
+        shell: bash
+        env:
+          RELEASE_STAGE: ${{ steps.release.outputs.stage }}
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/vercel-release-deploy.sh "$RELEASE_STAGE" "$SOURCE_SHA"
+
+      - name: Verify requested live release stage
+        shell: bash
+        env:
+          RELEASE_STAGE: ${{ steps.release.outputs.stage }}
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_STAGE" == "PILOT" ]]; then
+            set +e
+            bash scripts/vercel-release-verify.sh PILOT "$SOURCE_SHA"
+            STATUS=$?
+            set -e
+            if [[ "$STATUS" -ne 0 ]]; then
+              echo "::error::PILOT post-deployment verification failed; reverting the same source to LAB_SAFE"
+              bash scripts/vercel-release-deploy.sh LAB_SAFE "$SOURCE_SHA"
+              bash scripts/vercel-release-verify.sh LAB_SAFE "$SOURCE_SHA"
+              exit 1
+            fi
+          else
+            bash scripts/vercel-release-verify.sh "$RELEASE_STAGE" "$SOURCE_SHA"
+          fi
+
+      - name: Run protected exact-source pilot certification
+        if: steps.release.outputs.stage == 'CERTIFY_LAB'
+        id: certification
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ ${#FINCLOSE_RELEASE_AUTOMATION_TOKEN} -ge 32 ]] || { echo "::error::Ephemeral certification credential is unavailable"; exit 1; }
+          CERT_JSON=$(mktemp)
+          trap 'rm -f "$CERT_JSON"' EXIT
+
+          curl --silent --show-error --fail --max-time 240 \
+            -X POST \
+            -H "x-finclose-release-token: $FINCLOSE_RELEASE_AUTOMATION_TOKEN" \
+            "${VERCEL_PRODUCTION_URL}/api/pilot-certification" \
+            -o "$CERT_JSON"
+
+          jq -e --arg sha "$SOURCE_SHA" '
+            .release_source_sha == $sha and
+            .release_ready == true and
+            .activation_allowed == true and
+            (.gate_counts.FAIL // 0) == 0 and
+            (.gate_counts.BLOCKED // 0) == 0 and
+            ((.blockers // []) | length) == 0 and
+            all(.gates[]; (.mandatory != true) or .status == "PASS")
+          ' "$CERT_JSON" >/dev/null || {
+            echo "::error::Protected pilot certification did not pass"
+            jq '{release_source_sha, release_ready, activation_allowed, gate_counts, blockers}' "$CERT_JSON" >&2
+            exit 1
+          }
+
+          HEALTH=$(mktemp)
+          trap 'rm -f "$CERT_JSON" "$HEALTH"' EXIT
+          curl --silent --show-error --fail --max-time 30 \
+            "${VERCEL_PRODUCTION_URL}/api/health?deep=1" -o "$HEALTH"
+          jq -e --arg sha "$SOURCE_SHA" '
+            .release_source.sha == $sha and
+            .runtime.mode == "LAB" and
+            .real_data_release_evidence.ready == true and
+            .real_data_release_evidence.release_source_sha == $sha and
+            .pilot_certification.release_source_sha == $sha and
+            .pilot_certification.release_ready == true and
+            .pilot_certification.activation_allowed == true
+          ' "$HEALTH" >/dev/null || {
+            echo "::error::Persisted certification could not be independently revalidated from deep health"
+            exit 1
+          }
+
+          echo "run_id=$(jq -r '.run_id' "$CERT_JSON")" >> "$GITHUB_OUTPUT"
+          echo "evidence_hash=$(jq -r '.evidence_hash' "$CERT_JSON")" >> "$GITHUB_OUTPUT"
+
+      - name: Activate certified source as controlled PILOT
+        if: steps.release.outputs.stage == 'CERTIFY_LAB'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          [[ "$SOURCE_SHA" == "$(git rev-parse origin/main)" ]] || {
+            echo "::error::main advanced during certification; PILOT activation cancelled and LAB retained"
+            exit 1
+          }
+
+          bash scripts/vercel-release-deploy.sh PILOT "$SOURCE_SHA"
+          set +e
+          bash scripts/vercel-release-verify.sh PILOT "$SOURCE_SHA"
+          STATUS=$?
+          set -e
+          if [[ "$STATUS" -ne 0 ]]; then
+            echo "::error::PILOT activation verification failed; automatically reverting to LAB_SAFE"
+            bash scripts/vercel-release-deploy.sh LAB_SAFE "$SOURCE_SHA"
+            bash scripts/vercel-release-verify.sh LAB_SAFE "$SOURCE_SHA"
+            exit 1
+          fi
+
+      - name: Release summary
+        if: success()
+        shell: bash
+        env:
+          RELEASE_STAGE: ${{ steps.release.outputs.stage }}
+          SOURCE_SHA: ${{ steps.release.outputs.sha }}
+          CERT_RUN_ID: ${{ steps.certification.outputs.run_id }}
+          CERT_HASH: ${{ steps.certification.outputs.evidence_hash }}
+        run: |
+          set -euo pipefail
+          echo "### FinClose Vercel release controller" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: \`$SOURCE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Requested stage: \`$RELEASE_STAGE\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Canonical URL: $VERCEL_PRODUCTION_URL" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$RELEASE_STAGE" == "CERTIFY_LAB" ]]; then
+            echo "- Certification run: \`$CERT_RUN_ID\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Evidence hash: \`$CERT_HASH\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Final stage: \`PILOT\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
