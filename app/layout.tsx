@@ -15,6 +15,11 @@ export const metadata: Metadata = {
     template: '%s | Finbuks'
   },
   description: 'Choose the financial operations help you need: bookkeeping, account reconciliation, monthly close or year-end close.',
+  icons: {
+    icon: [{ url: '/icon.svg', type: 'image/svg+xml' }],
+    shortcut: '/icon.svg',
+    apple: '/brand/finbuks-icon.svg'
+  },
   openGraph: {
     siteName: 'Finbuks',
     type: 'website',
