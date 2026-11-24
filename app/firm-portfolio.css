@@ -58,6 +58,6 @@
 @media(min-width:981px){
   .fp-shell{padding-left:0;padding-right:0}
   .fp-nav,.fp-body,.fp-loading,.fp-note{
-    width:min(var(--fc-rail-main),calc(100% - (var(--fc-gutter) * 2)));
+    width:min(var(--fc-rail-main),calc(100% - var(--fc-inset)));
   }
 }
