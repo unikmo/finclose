@@ -18,6 +18,7 @@
 .home-cta:focus-visible{outline:2px solid var(--fc-parchment);outline-offset:4px}
 @media(min-width:981px){
 .help-hero{grid-template-columns:minmax(0,1fr) minmax(0,.9fr);gap:80px;padding:96px 0 56px;align-items:center}
+.help-grid-primary{align-self:start;margin-top:-22px}
 .help-intro{max-width:none}
 .help-intro h1{font-size:clamp(48px,5.6vw,76px);line-height:1.02;letter-spacing:-.035em}
 .help-intro h1 span{white-space:nowrap}
