@@ -109,3 +109,5 @@
 .pr-saved{color:#3ecf8e;font-size:14px}
 
 .pr-note a{color:var(--fc-brass);text-decoration:underline;text-underline-offset:3px}
+
+.pr-logo{background:transparent url('/brand/finbuks-icon.svg') center/contain no-repeat!important;color:transparent!important;border-radius:0!important;font-size:0!important}
